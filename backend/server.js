@@ -1,13 +1,58 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 const express = require('express');
 const { PuppeteerCrawler, RequestQueue } = require('crawlee');
 const puppeteer = require('puppeteer');
 const cors = require('cors');
 const { isRegExp } = require('puppeteer');
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 app.use(cors());
 
 app.use(express.json());
+
+// Helper function to get the correct Chrome executable path
+function getChromeExecutablePath() {
+    // For local development, if PUPPETEER_EXECUTABLE_PATH is empty, let Puppeteer use bundled Chrome
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+        return process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+    
+    // Return undefined to let Puppeteer auto-detect (works well locally)
+    return undefined;
+}
+
+// Common Puppeteer launch options
+const getPuppeteerOptions = () => {
+    const options = {
+        headless: 'new',
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--disable-default-apps',
+            '--disable-popup-blocking',
+            '--disable-translate',
+            '--disable-background-timer-throttling',
+            '--disable-renderer-backgrounding',
+            '--disable-backgrounding-occluded-windows'
+        ]
+    };
+    
+    // Only set executablePath if we have one
+    const executablePath = getChromeExecutablePath();
+    if (executablePath) {
+        options.executablePath = executablePath;
+    }
+    
+    return options;
+};
 
 app.post('/crawl', async (req, res) => {
     const { startUrl } = req.body;
@@ -43,19 +88,7 @@ app.post('/crawl', async (req, res) => {
 
         await crawler.run();
 
-        const browser = await puppeteer.launch({
-            headless: 'new',  // Use new headless mode
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--single-process',
-                '--disable-gpu'
-            ],
-            executablePath: process.env.CHROME_PATH ||
-                '/usr/bin/google-chrome' ||
-                await chromium.executablePath
-        });
+        const browser = await puppeteer.launch(getPuppeteerOptions());
         const results = [];
         const mySet = new Set([...sites].slice(0, 5));
         // const mySet = new Set([...sites]);
@@ -123,6 +156,7 @@ app.post('/crawl', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
 app.post('/getTestData', async (req, res) => {
     const { url } = req.body;
 
@@ -131,20 +165,7 @@ app.post('/getTestData', async (req, res) => {
     }
 
     try {
-
-        const browser = await puppeteer.launch({
-            headless: 'new',  // Use new headless mode
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--single-process',
-                '--disable-gpu'
-            ],
-            executablePath: process.env.CHROME_PATH ||
-                '/usr/bin/google-chrome' ||
-                await chromium.executablePath
-        });
+        const browser = await puppeteer.launch(getPuppeteerOptions());
         const page = await browser.newPage();
 
         console.log(`Visiting: ${url}`);
@@ -220,6 +241,7 @@ app.post('/getTestData', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
 function delay(time) {
     return new Promise(function (resolve) {
         setTimeout(resolve, time);
