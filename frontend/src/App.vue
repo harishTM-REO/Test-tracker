@@ -12,8 +12,8 @@ export default {
   methods: {
     handleClick() {
       this.disableBtn = true;
-      axios.post('http://localhost:3000/crawl', {
-        startUrl: this.websiteURL,
+      axios.post('http://localhost:3000/getTestData', {
+        url: this.websiteURL,
       })
         .then((response) => {
           console.log(response.data);

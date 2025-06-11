@@ -1,7 +1,7 @@
 const express = require('express');
 const { PuppeteerCrawler, RequestQueue } = require('crawlee');
 const puppeteer = require('puppeteer');
-const cors = require('cors'); 
+const cors = require('cors');
 const { isRegExp } = require('puppeteer');
 const app = express();
 const port = 3000;
@@ -35,7 +35,7 @@ app.post('/crawl', async (req, res) => {
                 let links = await page.evaluate(() =>
                     Array.from(document.querySelectorAll('a')).map(a => a.href)
                 );
-                links = links.filter((item)=> {return (item.includes(mainDomain) && !item.includes("#"))});
+                links = links.filter((item) => { return (item.includes(mainDomain) && !item.includes("#")) });
                 sites = new Set(links);
                 console.log(`Links found on ${request.url}:`, sites);
             },
@@ -111,7 +111,90 @@ app.post('/crawl', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+app.post('/getTestData', async (req, res) => {
+    const { url } = req.body;
 
+    if (!url) {
+        return res.status(400).json({ error: 'URL is required' });
+    }
+
+    try {
+        const browser = await puppeteer.launch({ headless: true, devtools: false, timeout: 600000 });
+        const page = await browser.newPage();
+
+        console.log(`Visiting: ${url}`);
+        await page.setViewport({ width: 1000, height: 768 });
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        await delay(4000);
+
+        // Handle cookie consent buttons if they exist
+        await page.evaluate(() => {
+            const keywords = ["agree", "got", "necessary", "accept"];
+            const buttons = [...Array.from(document.querySelectorAll("button")), ...Array.from(document.querySelectorAll("a"))];
+            buttons.forEach(button => {
+                if (keywords.some(keyword => button.textContent.toLowerCase().includes(keyword))) {
+                    button.click();
+                    window.location.reload();
+                }
+            });
+        });
+
+        await delay(2000);
+
+        // Get Optimizely experiment details
+        const experimentDetails = await page.evaluate(() => {
+            function getOptiExperimentDetails() {
+                if (!window.optimizely || typeof window.optimizely.get !== 'function') return null;
+
+                try {
+                    const data = window.optimizely.get('data');
+                    if (!data || typeof data.experiments !== 'object') return null;
+
+                    const experiments = data.experiments;
+                    const experimentArray = [];
+
+                    Object.entries(experiments).forEach(([id, exp]) => {
+                        experimentArray.push({
+                            id: id,
+                            name: exp.name,
+                            status: exp.status,
+                            variations: exp.variations,
+                            audience_ids: exp.audience_ids,
+                            metrics: exp.metrics
+                        });
+                    });
+
+                    return experimentArray;
+                } catch (e) {
+                    console.error('Error fetching Optimizely experiment details:', e);
+                    return null;
+                }
+            }
+
+            return {
+                isOptimizelyDetected: !!window.optimizely,
+                experiments: getOptiExperimentDetails(),
+                optimizelyData: window.optimizely ? window.optimizely.get('data') : null,
+                activeExperiments: window.optimizely ? window.optimizely.get('state').getActiveExperimentIds() : []
+            };
+        });
+
+        await page.close();
+        await browser.close();
+
+        res.status(200).json({
+            url,
+            optimizelyDetected: experimentDetails.isOptimizelyDetected,
+            experiments: experimentDetails.experiments,
+            optimizelyData: experimentDetails.optimizelyData,
+            activeExperiments: experimentDetails.activeExperiments
+        });
+
+    } catch (error) {
+        console.error('Error during test data retrieval:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 function delay(time) {
     return new Promise(function (resolve) {
         setTimeout(resolve, time);
