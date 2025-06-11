@@ -131,7 +131,20 @@ app.post('/getTestData', async (req, res) => {
     }
 
     try {
-        const browser = await puppeteer.launch({ headless: true, devtools: false, timeout: 600000 });
+
+        const browser = await puppeteer.launch({
+            headless: 'new',  // Use new headless mode
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--single-process',
+                '--disable-gpu'
+            ],
+            executablePath: process.env.CHROME_PATH ||
+                '/usr/bin/google-chrome' ||
+                await chromium.executablePath
+        });
         const page = await browser.newPage();
 
         console.log(`Visiting: ${url}`);
