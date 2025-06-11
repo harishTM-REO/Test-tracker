@@ -62,38 +62,6 @@ function getChromeExecutablePath() {
     return undefined;
 }
 
-// Common Puppeteer launch options
-const getPuppeteerOptions = () => {
-    const options = {
-        headless: 'new',
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--disable-web-security',
-            '--disable-features=VizDisplayCompositor',
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--disable-default-apps',
-            '--disable-popup-blocking',
-            '--disable-translate',
-            '--disable-background-timer-throttling',
-            '--disable-renderer-backgrounding',
-            '--disable-backgrounding-occluded-windows'
-        ]
-    };
-
-    // Only set executablePath if we have one
-    const executablePath = getChromeExecutablePath();
-    if (executablePath) {
-        options.executablePath = executablePath;
-    }
-
-    return options;
-};
-
-
 app.post('/getTestData', async (req, res) => {
     const { url } = req.body;
 
@@ -102,7 +70,9 @@ app.post('/getTestData', async (req, res) => {
     }
 
     try {
-        const browser = await puppeteer.launch(getPuppeteerOptions());
+        const browser = await puppeteer.launch({
+            headless: "new", // or true
+        });
         const page = await browser.newPage();
 
         console.log(`Visiting: ${url}`);
