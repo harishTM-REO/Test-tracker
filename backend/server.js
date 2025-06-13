@@ -78,7 +78,7 @@ app.post('/getTestData', async (req, res) => {
         console.log(`Visiting: ${url}`);
         await page.setViewport({ width: 1000, height: 768 });
         await page.goto(url, { waitUntil: 'domcontentloaded' });
-        await delay(4000);
+        // await delay(4000);
 
         // Handle cookie consent buttons if they exist
         await page.evaluate(() => {
@@ -92,7 +92,7 @@ app.post('/getTestData', async (req, res) => {
             });
         });
 
-        await delay(2000);
+        // await delay(2000);
 
         // Get Optimizely experiment details
         const experimentDetails = await page.evaluate(() => {
@@ -125,10 +125,7 @@ app.post('/getTestData', async (req, res) => {
             }
 
             return {
-                isOptimizelyDetected: !!window.optimizely,
                 experiments: getOptiExperimentDetails(),
-                optimizelyData: window.optimizely ? window.optimizely.get('data') : null,
-                activeExperiments: window.optimizely ? window.optimizely.get('state').getActiveExperimentIds() : []
             };
         });
 
@@ -149,11 +146,11 @@ app.post('/getTestData', async (req, res) => {
     }
 });
 
-function delay(time) {
-    return new Promise(function (resolve) {
-        setTimeout(resolve, time);
-    });
-}
+// function delay(time) {
+//     return new Promise(function (resolve) {
+//         setTimeout(resolve, time);
+//     });
+// }
 
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
