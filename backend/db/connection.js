@@ -43,8 +43,8 @@ const mongoose = require("mongoose");
 const connectDB = async () => {
   try {
     const options = {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
+      // useNewUrlParser: true,
+      // useUnifiedTopology: true,
       // Connection pool settings
       maxPoolSize: 10,
       minPoolSize: 5,

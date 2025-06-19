@@ -37,11 +37,6 @@ class ExperimentService {
 
   // Save experiment data
   static async saveExperiments(url, experimentsData) {
-    console.log('Service function called saveExperiments');
-    console.log('params->');
-    console.log('url->', url);
-    console.log(experimentsData);
-    // return false;
     const website = await this.getOrCreateWebsite(url);
     const experiments = experimentsData || [];
     const experimentsHash = this.createHash(experiments);
