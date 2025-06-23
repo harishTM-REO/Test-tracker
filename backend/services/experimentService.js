@@ -17,6 +17,79 @@ class ExperimentService {
     return crypto.createHash('md5').update(dataString).digest('hex');
   }
 
+  // Get specific website changes
+
+  static async getWebsiteChanges(identifier, options = {}) {
+    console.log('the service Function getWebsiteChanges');
+    try {
+        const {
+            limit = 50,
+            skip = 0,
+            startDate = null,
+            endDate = null,
+            changeType = null
+        } = options;
+        
+        // Build query
+        const query = {};
+        
+        // Check if identifier is ObjectId or URL
+        if (mongoose.Types.ObjectId.isValid(identifier)) {
+            query.websiteId = identifier;
+        } else {
+            query.websiteUrl = identifier;
+        }
+        
+        // Add date filters if provided
+        if (startDate || endDate) {
+            query.detectedAt = {};
+            if (startDate) query.detectedAt.$gte = new Date(startDate);
+            if (endDate) query.detectedAt.$lte = new Date(endDate);
+        }
+        
+        // Add change type filter if provided
+        if (changeType) {
+            query.changeType = changeType;
+        }
+        
+        // Execute query
+        const changes = await ExperimentChange.find(query)
+            .sort({ detectedAt: -1 })
+            .limit(limit)
+            .skip(skip)
+            .populate('websiteId', 'url name domain'); // Get website details
+        
+        // Get total count for pagination
+        const totalCount = await ExperimentChange.countDocuments(query);
+        
+        return {
+            changes,
+            pagination: {
+                total: totalCount,
+                limit,
+                skip,
+                hasMore: totalCount > (skip + changes.length)
+            }
+        };
+        
+    } catch (error) {
+        console.error('Error in getWebsiteChanges:', error);
+        throw error;
+    }
+}
+
+  // Get all websites
+
+  static async getWebsites(){
+    console.log('Service Function getWebsites->');
+    await connectDB();
+    await testConnection();
+    const allWebsites = await Website.find();
+    console.log('the list of websites->', allWebsites);
+
+
+  }
+
   // Get or create website
   static async getOrCreateWebsite(url) {
     console.log('Service Function getOrCreateWebsite->', url);

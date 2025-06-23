@@ -168,6 +168,28 @@ app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
 });
 
+app.get('/getWebsites', async(req, res)=>{
+    try{
+        console.log('The get websites');
+        const allDomains = await ExperimentService.getWebsites();
+        res.status(200).json(allDomains);
+    }
+    catch(e){
+        console.log('Error getting all websites');;
+    }
+});
+
+app.get('/getWebsiteChanges/:id', async(req, res)=>{
+    
+    const id = req.params.id; // This gets 'wsduifneiuvn2'
+    console.log('ID from URL:', id);
+    const webSiteChanges = await ExperimentService.getWebsiteChanges(id);
+    console.log('the website changes->',webSiteChanges);
+    
+    res.status(200).json(allDomains);
+
+})
+
 app.post('/getTestData', async (req, res) => {
     const { url } = req.body;
 
