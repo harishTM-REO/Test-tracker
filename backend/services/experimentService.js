@@ -1,109 +1,117 @@
-
 // services/experimentService.js
-const crypto = require('crypto');
-const Website = require('../models/Website');
-const Experiment = require('../models/Experiment');
-const ExperimentHistory = require('../models/ExperimentHistory');
-const ExperimentChange = require('../models/ExperimentChange');
-const MonitoringLog = require('../models/MonitoringLog');
+const crypto = require("crypto");
+const Website = require("../models/Website");
+const Experiment = require("../models/Experiment");
+const ExperimentHistory = require("../models/ExperimentHistory");
+const ExperimentChange = require("../models/ExperimentChange");
+const MonitoringLog = require("../models/MonitoringLog");
 // db connection
-const {connectDB, testConnection} = require('../db/connection');
+const { connectDB, testConnection } = require("../db/connection");
 
 class ExperimentService {
   // Create hash from experiments data
   static createHash(experiments) {
     if (!experiments) return null;
     const dataString = JSON.stringify(experiments);
-    return crypto.createHash('md5').update(dataString).digest('hex');
+    return crypto.createHash("md5").update(dataString).digest("hex");
   }
 
   // Get specific website changes
 
   static async getWebsiteChanges(identifier, options = {}) {
-    console.log('the service Function getWebsiteChanges');
+    console.log("the service Function getWebsiteChanges");
     try {
-        const {
-            limit = 50,
-            skip = 0,
-            startDate = null,
-            endDate = null,
-            changeType = null
-        } = options;
-        
-        // Build query
-        const query = {};
-        
-        // Check if identifier is ObjectId or URL
-        if (mongoose.Types.ObjectId.isValid(identifier)) {
-            query.websiteId = identifier;
-        } else {
-            query.websiteUrl = identifier;
-        }
-        
-        // Add date filters if provided
-        if (startDate || endDate) {
-            query.detectedAt = {};
-            if (startDate) query.detectedAt.$gte = new Date(startDate);
-            if (endDate) query.detectedAt.$lte = new Date(endDate);
-        }
-        
-        // Add change type filter if provided
-        if (changeType) {
-            query.changeType = changeType;
-        }
-        
-        // Execute query
-        const changes = await ExperimentChange.find(query)
-            .sort({ detectedAt: -1 })
-            .limit(limit)
-            .skip(skip)
-            .populate('websiteId', 'url name domain'); // Get website details
-        
-        // Get total count for pagination
-        const totalCount = await ExperimentChange.countDocuments(query);
-        
-        return {
-            changes,
-            pagination: {
-                total: totalCount,
-                limit,
-                skip,
-                hasMore: totalCount > (skip + changes.length)
-            }
-        };
-        
+      const {
+        limit = 50,
+        skip = 0,
+        startDate = null,
+        endDate = null,
+        changeType = null,
+      } = options;
+
+      // Build query
+      const query = {};
+
+      // Check if identifier is ObjectId or URL
+      if (mongoose.Types.ObjectId.isValid(identifier)) {
+        query.websiteId = identifier;
+      } else {
+        query.websiteUrl = identifier;
+      }
+
+      // Add date filters if provided
+      if (startDate || endDate) {
+        query.detectedAt = {};
+        if (startDate) query.detectedAt.$gte = new Date(startDate);
+        if (endDate) query.detectedAt.$lte = new Date(endDate);
+      }
+
+      // Add change type filter if provided
+      if (changeType) {
+        query.changeType = changeType;
+      }
+
+      // Execute query
+      const changes = await ExperimentChange.find(query)
+        .sort({ detectedAt: -1 })
+        .limit(limit)
+        .skip(skip)
+        .populate("websiteId", "url name domain"); // Get website details
+
+      // Get total count for pagination
+      const totalCount = await ExperimentChange.countDocuments(query);
+
+      return {
+        changes,
+        pagination: {
+          total: totalCount,
+          limit,
+          skip,
+          hasMore: totalCount > skip + changes.length,
+        },
+      };
     } catch (error) {
-        console.error('Error in getWebsiteChanges:', error);
-        throw error;
+      console.error("Error in getWebsiteChanges:", error);
+      throw error;
     }
-}
+  }
 
   // Get all websites
 
-  static async getWebsites(){
-    console.log('Service Function getWebsites->');
+  static async getWebsites() {
+    console.log("Service Function getWebsites->");
     await connectDB();
     await testConnection();
     const allWebsites = await Website.find();
-    console.log('the list of websites list->', allWebsites);
-    return allWebsites;
 
+    // Fix: Use allWebsites.map() instead of Website.map()
+    const experimentPromises = allWebsites.map((website) =>
+      Experiment.findOne({ websiteUrl: website.url }) // or whatever field contains the URL
+        .sort({ checkedAt: -1 })
+        .limit(1)
+    );
 
+    const experiments = await Promise.all(experimentPromises);
+    // Filter out null results if needed
+    const validExperiments = experiments.filter((exp) => exp !== null);
+    console.log(validExperiments);
+    console.log("the list of websites list->", validExperiments);
+    return validExperiments;
   }
 
   // Get or create website
   static async getOrCreateWebsite(url) {
-    console.log('Service Function getOrCreateWebsite->', url);
+    console.log("Service Function getOrCreateWebsite->", url);
     await connectDB();
     await testConnection();
     let website = await Website.findOne({ url });
-    console.log('the saved website name->', website);
+    console.log("the saved website name->", website);
     if (!website) {
       const domain = new URL(url).hostname;
       website = await Website.create({
         url,
         domain,
-        name: domain
+        name: domain,
       });
     }
     return website;
@@ -114,7 +122,7 @@ class ExperimentService {
     const website = await this.getOrCreateWebsite(url);
     const experiments = experimentsData || [];
     const experimentsHash = this.createHash(experiments);
-    
+
     // Get current experiment state
     const currentExperiment = await Experiment.findOne({ websiteUrl: url })
       .sort({ checkedAt: -1 })
@@ -127,8 +135,9 @@ class ExperimentService {
       experiments,
       experimentsHash,
       totalExperiments: experiments.length,
-      activeExperiments: experiments.filter(e => e.status === 'active').length,
-      checkedAt: new Date()
+      activeExperiments: experiments.filter((e) => e.status === "active")
+        .length,
+      checkedAt: new Date(),
     });
 
     // Update website last checked
@@ -137,7 +146,12 @@ class ExperimentService {
 
     // Check for changes
     if (currentExperiment) {
-      await this.detectChanges(url, website._id, currentExperiment, newExperiment);
+      await this.detectChanges(
+        url,
+        website._id,
+        currentExperiment,
+        newExperiment
+      );
     } else {
       // First time checking - create initial history
       await ExperimentHistory.create({
@@ -145,8 +159,8 @@ class ExperimentService {
         websiteId: website._id,
         experiments,
         experimentsHash,
-        changeType: 'initial',
-        checkedAt: new Date()
+        changeType: "initial",
+        checkedAt: new Date(),
       });
     }
 
@@ -156,7 +170,7 @@ class ExperimentService {
   // Detect changes between two experiment states
   static async detectChanges(url, websiteId, oldState, newState) {
     const hasChanged = oldState.experimentsHash !== newState.experimentsHash;
-    
+
     if (!hasChanged) {
       // No changes - create unchanged history record
       await ExperimentHistory.create({
@@ -164,17 +178,21 @@ class ExperimentService {
         websiteId,
         experiments: newState.experiments,
         experimentsHash: newState.experimentsHash,
-        changeType: 'unchanged',
+        changeType: "unchanged",
         previousHash: oldState.experimentsHash,
-        checkedAt: new Date()
+        checkedAt: new Date(),
       });
       return;
     }
 
     // Analyze changes
-    const oldExperimentMap = new Map(oldState.experiments.map(e => [e.id, e]));
-    const newExperimentMap = new Map(newState.experiments.map(e => [e.id, e]));
-    
+    const oldExperimentMap = new Map(
+      oldState.experiments.map((e) => [e.id, e])
+    );
+    const newExperimentMap = new Map(
+      newState.experiments.map((e) => [e.id, e])
+    );
+
     const added = [];
     const removed = [];
     const modified = [];
@@ -187,14 +205,14 @@ class ExperimentService {
         await ExperimentChange.create({
           websiteUrl: url,
           websiteId,
-          changeType: 'experiment_added',
+          changeType: "experiment_added",
           experimentId: id,
           experimentName: newExp.name,
           details: {
             before: null,
-            after: newExp
+            after: newExp,
           },
-          detectedAt: new Date()
+          detectedAt: new Date(),
         });
       } else {
         const oldExp = oldExperimentMap.get(id);
@@ -204,14 +222,14 @@ class ExperimentService {
           await ExperimentChange.create({
             websiteUrl: url,
             websiteId,
-            changeType: 'experiment_modified',
+            changeType: "experiment_modified",
             experimentId: id,
             experimentName: newExp.name,
             details: {
               before: oldExp,
-              after: newExp
+              after: newExp,
             },
-            detectedAt: new Date()
+            detectedAt: new Date(),
           });
         }
       }
@@ -225,14 +243,14 @@ class ExperimentService {
         await ExperimentChange.create({
           websiteUrl: url,
           websiteId,
-          changeType: 'experiment_removed',
+          changeType: "experiment_removed",
           experimentId: id,
           experimentName: oldExp.name,
           details: {
             before: oldExp,
-            after: null
+            after: null,
           },
-          detectedAt: new Date()
+          detectedAt: new Date(),
         });
       }
     }
@@ -243,19 +261,26 @@ class ExperimentService {
       websiteId,
       experiments: newState.experiments,
       experimentsHash: newState.experimentsHash,
-      changeType: 'modified',
+      changeType: "modified",
       changeDetails: {
         added,
         removed,
-        modified
+        modified,
       },
       previousHash: oldState.experimentsHash,
-      checkedAt: new Date()
+      checkedAt: new Date(),
     });
   }
 
   // Log monitoring activity
-  static async logMonitoring(url, websiteId, status, duration, experimentsFound, error = null) {
+  static async logMonitoring(
+    url,
+    websiteId,
+    status,
+    duration,
+    experimentsFound,
+    error = null
+  ) {
     await MonitoringLog.create({
       websiteUrl: url,
       websiteId,
@@ -264,10 +289,10 @@ class ExperimentService {
       experimentsFound,
       changes: {
         detected: false, // Will be updated if changes detected
-        count: 0
+        count: 0,
       },
       error,
-      checkedAt: new Date()
+      checkedAt: new Date(),
     });
   }
 }

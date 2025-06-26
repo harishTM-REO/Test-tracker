@@ -99,7 +99,7 @@ app.get("/getWebsiteChanges/:id", async (req, res) => {
   const webSiteChanges = await ExperimentService.getWebsiteChanges(id);
   console.log("the website changes->", webSiteChanges);
 
-  res.status(200).json(allDomains);
+  return res.status(200).json(allDomains);
 });
 
 app.post("/getTestData", async (req, res) => {
