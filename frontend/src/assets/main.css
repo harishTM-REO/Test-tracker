@@ -1,7 +1,7 @@
 @import './base.css';
 
-#app {
-  max-width: 1280px;
+main {
+  max-width: 1440px;
   margin: 0 auto;
   padding: 2rem;
   font-weight: normal;
@@ -19,4 +19,14 @@ a,
   a:hover {
     background-color: hsla(160, 100%, 37%, 0.2);
   }
+}
+
+.dark-text-input {
+  background: #1F202F;
+  border-radius: 5px;
+  color: white;
+}
+
+body {
+  background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 50%, #ffffff 100%);
 }

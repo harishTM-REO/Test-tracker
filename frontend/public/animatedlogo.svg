@@ -1,0 +1,34 @@
+<svg width="300" height="300" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">
+  <!-- Clean hexagon with sharp corners starting from 12 o'clock -->
+  <path id="hexagon" 
+        d="M 150 60 L 207.32 95 L 207.32 165 L 150 200 L 92.68 165 L 92.68 95 Z"
+        fill="none" 
+        stroke="#1f202f" 
+        stroke-width="3"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-dasharray="420"
+        stroke-dashoffset="420">
+    <animate attributeName="stroke-dashoffset" 
+             values="420;0" 
+             dur="1.5s" 
+             fill="freeze"/>
+  </path>
+  
+  <!-- REO Text with fade-in transition after hexagon completes -->
+  <text x="150" y="135" 
+        text-anchor="middle" 
+        dominant-baseline="middle"
+        font-family="Arial, sans-serif" 
+        font-size="32" 
+        font-weight="bold"
+        fill="#1f202f"
+        opacity="0">
+    <animate attributeName="opacity" 
+             values="0;1" 
+             dur="0.5s" 
+             begin="1.6s"
+             fill="freeze"/>
+    REO
+  </text>
+</svg>

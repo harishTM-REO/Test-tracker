@@ -1,6 +1,7 @@
 // services/experimentService.js
 const crypto = require("crypto");
 const Website = require("../models/Website");
+const mongoose = require("mongoose");
 const Experiment = require("../models/Experiment");
 const ExperimentHistory = require("../models/ExperimentHistory");
 const ExperimentChange = require("../models/ExperimentChange");
@@ -21,6 +22,8 @@ class ExperimentService {
   static async getWebsiteChanges(identifier, options = {}) {
     console.log("the service Function getWebsiteChanges");
     try {
+      await connectDB();
+      await testConnection();
       const {
         limit = 50,
         skip = 0,
@@ -34,9 +37,11 @@ class ExperimentService {
 
       // Check if identifier is ObjectId or URL
       if (mongoose.Types.ObjectId.isValid(identifier)) {
-        query.websiteId = identifier;
+        console.log('here');
+        query.websiteId = new mongoose.Types.ObjectId(identifier);
       } else {
-        query.websiteUrl = identifier;
+        console.log('there');
+        query.websiteUrl = new mongoose.Types.ObjectId(identifier);
       }
 
       // Add date filters if provided
@@ -50,7 +55,7 @@ class ExperimentService {
       if (changeType) {
         query.changeType = changeType;
       }
-
+      console.log("query better is", query)
       // Execute query
       const changes = await ExperimentChange.find(query)
         .sort({ detectedAt: -1 })

@@ -99,7 +99,7 @@ app.get("/getWebsiteChanges/:id", async (req, res) => {
   const webSiteChanges = await ExperimentService.getWebsiteChanges(id);
   console.log("the website changes->", webSiteChanges);
 
-  return res.status(200).json(allDomains);
+  return res.status(200).json(webSiteChanges);
 });
 
 app.post("/getTestData", async (req, res) => {
@@ -119,7 +119,7 @@ app.post("/getTestData", async (req, res) => {
 
     // Step 2: Launch browser and get experiments
     browser = await puppeteer.launch({
-      headless: false, // Show browser window
+      headless: true, // Show browser window
       devtools: true, // Open DevTools
       slowMo: 50,
       args: [

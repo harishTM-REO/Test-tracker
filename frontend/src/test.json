@@ -1,0 +1,1158 @@
+{
+    "changes": [
+        {
+            "details": {
+                "before": {
+                    "id": "5155342552662016",
+                    "name": "[BL-100%] [FV-144.2] [D] PUWYLO 2024 Rerun (new)",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "6076743564394496",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "5666954158014464",
+                                    "changes": [
+                                        {
+                                            "id": "3F43D726-7101-485E-BD89-E2515FC98EA0",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "5666954158014464"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "5513793610973184",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "5666954158014464",
+                                    "changes": [
+                                        {
+                                            "id": "1CB8BBC3-DF21-4FF1-9FDC-DB5010E71F22",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "5666954158014464"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                },
+                "after": null
+            },
+            "_id": "685d926880632bb456f2476f",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_removed",
+            "experimentId": "5155342552662016",
+            "experimentName": "[BL-100%] [FV-144.2] [D] PUWYLO 2024 Rerun (new)",
+            "detectedAt": "2025-06-26T18:33:12.359Z",
+            "notified": false,
+            "createdAt": "2025-06-26T18:33:12.360Z",
+            "updatedAt": "2025-06-26T18:33:12.360Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": {
+                    "id": "5525464647729152",
+                    "name": " [BL-100%] [FV-144.1] [M] PUWYLO 2024 Rerun",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "6153185929199616",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "6505946021625856",
+                                    "changes": [
+                                        {
+                                            "id": "993b169ab7f04928b249899975e0f903",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "6505946021625856"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "5802258579849216",
+                            "name": "Variation #2",
+                            "actions": [
+                                {
+                                    "viewId": "6505946021625856",
+                                    "changes": [
+                                        {
+                                            "id": "ec899e5b40a5463dadc8082ec22e1ad5",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "6505946021625856"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                },
+                "after": null
+            },
+            "_id": "685d926880632bb456f2476d",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_removed",
+            "experimentId": "5525464647729152",
+            "experimentName": " [BL-100%] [FV-144.1] [M] PUWYLO 2024 Rerun",
+            "detectedAt": "2025-06-26T18:33:12.048Z",
+            "notified": false,
+            "createdAt": "2025-06-26T18:33:12.052Z",
+            "updatedAt": "2025-06-26T18:33:12.052Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "5375684541939712",
+                    "name": "[BL-QA] [FV-298] [Basket] CTA copy change",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "6054404801953792",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "16937641414",
+                                    "changes": [
+                                        {
+                                            "id": "210E3FDD-EE78-4E1F-A657-BEA3F44813C6",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "16937641414"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "5491454848532480",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "16937641414",
+                                    "changes": [
+                                        {
+                                            "id": "FA6DA7DA-AA43-4394-B065-7535F7B025CF",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "16937641414"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8d85165da3c2073aad",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "5375684541939712",
+            "experimentName": "[BL-QA] [FV-298] [Basket] CTA copy change",
+            "detectedAt": "2025-06-26T10:10:21.391Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:21.391Z",
+            "updatedAt": "2025-06-26T10:10:21.391Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "6556193146011648",
+                    "name": "[BL-QA] [FV-300] [V2] Changing \"more colours\" to \"+X\"",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "6333333131493376",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "18096450259",
+                                    "changes": [
+                                        {
+                                            "id": "6400e07572e3410ba0a5d2717c6a869e",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "18096450259"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "5098062922645504",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "18096450259",
+                                    "changes": [
+                                        {
+                                            "id": "bbe54d9597664fa29b46707031e02873",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "18096450259"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "4987536737566720",
+                            "name": "Variation #2",
+                            "actions": [
+                                {
+                                    "viewId": "18096450259",
+                                    "changes": [
+                                        {
+                                            "id": "649422bc23e04bb8b6483a0b7dbeea5c",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "18096450259"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8d85165da3c2073aab",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "6556193146011648",
+            "experimentName": "[BL-QA] [FV-300] [V2] Changing \"more colours\" to \"+X\"",
+            "detectedAt": "2025-06-26T10:10:21.142Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:21.143Z",
+            "updatedAt": "2025-06-26T10:10:21.143Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "6507624766636032",
+                    "name": "[BL-LIVE] [FV-144.1] Data collection",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "6351194541522944",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "16933550733",
+                                    "changes": [],
+                                    "pageId": "16933550733"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "6070458903166976",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "16933550733",
+                                    "changes": [],
+                                    "pageId": "16933550733"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8c85165da3c2073aa9",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "6507624766636032",
+            "experimentName": "[BL-LIVE] [FV-144.1] Data collection",
+            "detectedAt": "2025-06-26T10:10:20.916Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:20.917Z",
+            "updatedAt": "2025-06-26T10:10:20.917Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "4659256197120000",
+                    "name": "[BL-QA] FV-284 - Order Summary in checkout- Mobile",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "4864306458656768",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "4887224404148224",
+                                    "changes": [
+                                        {
+                                            "id": "2D0C5168-6E54-43A4-956C-AE58F2228F04",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "BF4FE497-16D3-423E-BE7A-07F65648428F",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Nuno\n** Company: Biglight\n** Date: 12/2024\n** Test: FV-284\n** Variation: Variation-1\n*/\n.FV-284_var_1 div.checkout-minisummary {\n  padding-left: 6px;\n  padding-right: 6px;\n}\n\n.FV-284_var_1 div.checkout-minisummary > h2 {\n  display: none;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  -webkit-box-align: center;\n      -ms-flex-align: center;\n          align-items: center;\n  -webkit-box-pack: justify;\n      -ms-flex-pack: justify;\n          justify-content: space-between;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary h2 {\n  padding-bottom: 0;\n  margin-bottom: 0;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary div.bl-fv-284-order-value {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  gap: 24px;\n  padding-right: 6px;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary div.bl-fv-284-order-value svg {\n  -webkit-transition: -webkit-transform 0.25s ease-in-out;\n  transition: -webkit-transform 0.25s ease-in-out;\n  -o-transition: transform 0.25s ease-in-out;\n  transition: transform 0.25s ease-in-out;\n  transition: transform 0.25s ease-in-out, -webkit-transform 0.25s ease-in-out;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary div.bl-fv-284-order-value svg.bl-fv-284-rotate {\n  -webkit-transform: rotate(180deg);\n      -ms-transform: rotate(180deg);\n          transform: rotate(180deg);\n}\n\n.FV-284_var_1 div.checkout-minisummary div.checkout-mini-cart {\n  display: none;\n}\n\n.FV-284_var_1 div.checkout-minisummary div.checkout-mini-cart.bl-fv-284-active {\n  padding-top: 22px;\n  border-top: 1px solid #ccc;\n  display: block;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "4887224404148224"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "5714950501433344",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "4887224404148224",
+                                    "changes": [
+                                        {
+                                            "id": "37FDF316-9FC5-42FA-A371-664A3591B3B2",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "35FB273C-0700-47E4-8F71-C58F76AC6417",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Nuno\n** Company: Biglight\n** Date: 12/2024\n** Test: FV-284\n** Variation: Variation-1\n*/\n.FV-284_var_1 div.checkout-minisummary {\n  padding-left: 6px;\n  padding-right: 6px;\n}\n\n.FV-284_var_1 div.checkout-minisummary > h2 {\n  display: none;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  -webkit-box-align: center;\n      -ms-flex-align: center;\n          align-items: center;\n  -webkit-box-pack: justify;\n      -ms-flex-pack: justify;\n          justify-content: space-between;\n  margin-bottom: 15px;\n  border-bottom: 2px solid #eee;\n  padding-bottom: 22px;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary h2 {\n  padding-bottom: 0;\n  margin-bottom: 0;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary div.bl-fv-284-order-value {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  gap: 24px;\n  padding-right: 6px;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary div.bl-fv-284-order-value span {\n  font-size: 16px;\n  color: #404041;\n  font-weight: 500;\n  font-family: HelveticaNowTextMedium, sans-serif;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary div.bl-fv-284-order-value svg {\n  -webkit-transition: -webkit-transform 0.25s ease-in-out;\n  transition: -webkit-transform 0.25s ease-in-out;\n  -o-transition: transform 0.25s ease-in-out;\n  transition: transform 0.25s ease-in-out;\n  transition: transform 0.25s ease-in-out, -webkit-transform 0.25s ease-in-out;\n}\n\n.FV-284_var_1 div.checkout-minisummary .bl-fv-284-order-summary div.bl-fv-284-order-value svg.bl-fv-284-rotate {\n  -webkit-transform: rotate(180deg);\n      -ms-transform: rotate(180deg);\n          transform: rotate(180deg);\n}\n\n.FV-284_var_1 div.checkout-minisummary div.checkout-mini-cart {\n  max-height: 0;\n  overflow: hidden;\n  -webkit-transition: max-height 0.5s ease-in-out;\n  -o-transition: max-height 0.5s ease-in-out;\n  transition: max-height 0.5s ease-in-out;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "4887224404148224"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8c85165da3c2073aa7",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "4659256197120000",
+            "experimentName": "[BL-QA] FV-284 - Order Summary in checkout- Mobile",
+            "detectedAt": "2025-06-26T10:10:20.688Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:20.689Z",
+            "updatedAt": "2025-06-26T10:10:20.689Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "5187664496820224",
+                    "name": "[BL-LIVE-Sale] [FV-292.1] Change ATB CTA colour(rerun)",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "6528538120028160",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "16908361260",
+                                    "changes": [
+                                        {
+                                            "id": "62c793995fd946609c77952309c5af9d",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "5d3880fa54724331ad620180da21dd25",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Control\n*/\n.FV-292-1_var_0 button#add-to-cart,\n.FV-292-1_var_0 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_0 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_0 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_0 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_0 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_0 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_0 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 #primary button[type=\"submit\"].secondary-button {\n  border-color: #009de0;\n  color: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 button#add-careplus-pdp {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 a.button.primary-button.add-to-basket-btn.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 button.button-fancy-large.add-to-cart.bundle.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_0 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_0 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_0 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n/*# sourceMappingURL=control.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16908361260"
+                                },
+                                {
+                                    "viewId": "16937641414",
+                                    "changes": [
+                                        {
+                                            "id": "ea79cee100ef4e1a804d9393caa5866b",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "346385cdb58a4915848aeceef39126ba",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Control\n*/\n.FV-292-1_var_0 button#add-to-cart,\n.FV-292-1_var_0 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_0 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_0 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_0 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_0 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_0 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_0 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 #primary button[type=\"submit\"].secondary-button {\n  border-color: #009de0;\n  color: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 button#add-careplus-pdp {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 a.button.primary-button.add-to-basket-btn.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 button.button-fancy-large.add-to-cart.bundle.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_0 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_0 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_0 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n/*# sourceMappingURL=control.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16937641414"
+                                },
+                                {
+                                    "viewId": "16910043547",
+                                    "changes": [
+                                        {
+                                            "id": "0edce61299914075a9d4253f0a034766",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "7cbb2788bd6c498e9c412b7486da91cc",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Control\n*/\n.FV-292-1_var_0 button#add-to-cart,\n.FV-292-1_var_0 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_0 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_0 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_0 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_0 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_0 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_0 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 #primary button[type=\"submit\"].secondary-button {\n  border-color: #009de0;\n  color: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 button#add-careplus-pdp {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 a.button.primary-button.add-to-basket-btn.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 button.button-fancy-large.add-to-cart.bundle.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_0 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_0 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_0 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n/*# sourceMappingURL=control.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16910043547"
+                                },
+                                {
+                                    "viewId": "16915913479",
+                                    "changes": [
+                                        {
+                                            "id": "ef702091eb9941b5995722d4524ab140",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "aee5893025af447bb8f775d7ad2086df",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Control\n*/\n.FV-292-1_var_0 button#add-to-cart,\n.FV-292-1_var_0 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_0 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_0 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_0 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_0 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_0 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_0 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 #primary button[type=\"submit\"].secondary-button {\n  border-color: #009de0;\n  color: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 button#add-careplus-pdp {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 a.button.primary-button.add-to-basket-btn.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 button.button-fancy-large.add-to-cart.bundle.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_0 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_0 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_0 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n/*# sourceMappingURL=control.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16915913479"
+                                },
+                                {
+                                    "viewId": "16920221394",
+                                    "changes": [
+                                        {
+                                            "id": "90c9364262be44ceb645e0be138d2813",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "d8d0e1a409ab4529b32005c709e33dae",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Control\n*/\n.FV-292-1_var_0 button#add-to-cart,\n.FV-292-1_var_0 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_0 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_0 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_0 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_0 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_0 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_0 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 #primary button[type=\"submit\"].secondary-button {\n  border-color: #009de0;\n  color: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 button#add-careplus-pdp {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 a.button.primary-button.add-to-basket-btn.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 button.button-fancy-large.add-to-cart.bundle.black-button {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_0 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_0 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_0 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_0 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  background: #009de0;\n  border-radius: 50px;\n}\n\n/*# sourceMappingURL=control.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16920221394"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "5131268422107136",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "16908361260",
+                                    "changes": [
+                                        {
+                                            "id": "55ef9244181c486c9d91143656360cd8",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "96a993ce5d444c6e9ac8cb75302820d3",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Variation-1\n*/\n.FV-292-1_var_1 button#add-to-cart,\n.FV-292-1_var_1 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_1 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_1 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_1 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_1 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_1 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_1 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 #primary button[type=\"submit\"].secondary-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 button#add-careplus-pdp {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 a.button.primary-button.add-to-basket-btn.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 button.button-fancy-large.add-to-cart.bundle.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_1 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_1 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_1 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  border-radius: 50px;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16908361260"
+                                },
+                                {
+                                    "viewId": "16937641414",
+                                    "changes": [
+                                        {
+                                            "id": "df0c5ef4857b40f3a6dab5d2d0cba971",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "ecaa05f82b894460a4599a89decc2c27",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Variation-1\n*/\n.FV-292-1_var_1 button#add-to-cart,\n.FV-292-1_var_1 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_1 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_1 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_1 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_1 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_1 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_1 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 #primary button[type=\"submit\"].secondary-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 button#add-careplus-pdp {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 a.button.primary-button.add-to-basket-btn.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 button.button-fancy-large.add-to-cart.bundle.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_1 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_1 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_1 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  border-radius: 50px;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16937641414"
+                                },
+                                {
+                                    "viewId": "16910043547",
+                                    "changes": [
+                                        {
+                                            "id": "646877c4cfdd4632bed91c265561014f",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "d2a0ac77de1f4343bf72e4d596c85281",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Variation-1\n*/\n.FV-292-1_var_1 button#add-to-cart,\n.FV-292-1_var_1 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_1 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_1 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_1 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_1 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_1 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_1 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 #primary button[type=\"submit\"].secondary-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 button#add-careplus-pdp {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 a.button.primary-button.add-to-basket-btn.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 button.button-fancy-large.add-to-cart.bundle.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_1 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_1 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_1 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  border-radius: 50px;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16910043547"
+                                },
+                                {
+                                    "viewId": "16915913479",
+                                    "changes": [
+                                        {
+                                            "id": "622d78f5632b466a900f60575f93df86",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "44876944fe884a139e87da9707452fd8",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Variation-1\n*/\n.FV-292-1_var_1 button#add-to-cart,\n.FV-292-1_var_1 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_1 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_1 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_1 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_1 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_1 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_1 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 #primary button[type=\"submit\"].secondary-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 button#add-careplus-pdp {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 a.button.primary-button.add-to-basket-btn.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 button.button-fancy-large.add-to-cart.bundle.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_1 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_1 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_1 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  border-radius: 50px;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16915913479"
+                                },
+                                {
+                                    "viewId": "16920221394",
+                                    "changes": [
+                                        {
+                                            "id": "e2dcfb86a430453c8c0501cbaa96f571",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "b5ec93b41dcb4954aef97d6349f8faea",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Variation-1\n*/\n.FV-292-1_var_1 button#add-to-cart,\n.FV-292-1_var_1 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_1 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_1 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_1 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_1 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_1 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_1 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 #primary button[type=\"submit\"].secondary-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 button#add-careplus-pdp {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 a.button.primary-button.add-to-basket-btn.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 button.button-fancy-large.add-to-cart.bundle.black-button {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_1 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 50px;\n}\n\n.FV-292-1_var_1 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_1 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_1 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  border-radius: 50px;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16920221394"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "4906189520109568",
+                            "name": "Variation #2",
+                            "actions": [
+                                {
+                                    "viewId": "16908361260",
+                                    "changes": [
+                                        {
+                                            "id": "054a2539aadd476da23d479c7bec6e54",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "7696d3505b904e839226eda6200070b6",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Variation-2\n*/\n.FV-292-1_var_2 button#add-to-cart,\n.FV-292-1_var_2 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_2 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_2 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_2 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_2 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_2 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_2 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 #primary button[type=\"submit\"].secondary-button {\n  border-color: #009de0;\n  color: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 button#add-careplus-pdp {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 a.button.primary-button.add-to-basket-btn.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 button.button-fancy-large.add-to-cart.bundle.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_2 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_2 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_2 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n/*# sourceMappingURL=variation-2.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16908361260"
+                                },
+                                {
+                                    "viewId": "16937641414",
+                                    "changes": [
+                                        {
+                                            "id": "3dc07ec346664490a0590fb4102a3380",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "351b6c6828874e0cbddb7f4fe98a8514",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Variation-2\n*/\n.FV-292-1_var_2 button#add-to-cart,\n.FV-292-1_var_2 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_2 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_2 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_2 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_2 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_2 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_2 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 #primary button[type=\"submit\"].secondary-button {\n  border-color: #009de0;\n  color: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 button#add-careplus-pdp {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 a.button.primary-button.add-to-basket-btn.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 button.button-fancy-large.add-to-cart.bundle.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_2 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_2 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_2 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n/*# sourceMappingURL=variation-2.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16937641414"
+                                },
+                                {
+                                    "viewId": "16910043547",
+                                    "changes": [
+                                        {
+                                            "id": "03cb15bfb0da4902ba22031190425e28",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "1ec1d6abc8764227948f029b47f744fc",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Variation-2\n*/\n.FV-292-1_var_2 button#add-to-cart,\n.FV-292-1_var_2 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_2 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_2 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_2 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_2 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_2 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_2 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 #primary button[type=\"submit\"].secondary-button {\n  border-color: #009de0;\n  color: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 button#add-careplus-pdp {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 a.button.primary-button.add-to-basket-btn.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 button.button-fancy-large.add-to-cart.bundle.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_2 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_2 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_2 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n/*# sourceMappingURL=variation-2.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16910043547"
+                                },
+                                {
+                                    "viewId": "16915913479",
+                                    "changes": [
+                                        {
+                                            "id": "b99ebbba28a746e6a4678dec2bd952ac",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "4095bf05ce804f529787a44db511951a",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Variation-2\n*/\n.FV-292-1_var_2 button#add-to-cart,\n.FV-292-1_var_2 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_2 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_2 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_2 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_2 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_2 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_2 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 #primary button[type=\"submit\"].secondary-button {\n  border-color: #009de0;\n  color: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 button#add-careplus-pdp {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 a.button.primary-button.add-to-basket-btn.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 button.button-fancy-large.add-to-cart.bundle.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_2 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_2 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_2 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n/*# sourceMappingURL=variation-2.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16915913479"
+                                },
+                                {
+                                    "viewId": "16920221394",
+                                    "changes": [
+                                        {
+                                            "id": "9d680009e0794f2c9cedbfb7e4dc37fb",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "072033cea58c47cb9ffaef9294960b71",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Daniel\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-292.1\n** Variation: Variation-2\n*/\n.FV-292-1_var_2 button#add-to-cart,\n.FV-292-1_var_2 .bl-fv-231-floating-bar button.black-button,\n.FV-292-1_var_2 .add-care-plus-pdp-wrapper button.black-button,\n.FV-292-1_var_2 .pdp-persistent-bar .persistent-bar-bottom button.black-button,\n.FV-292-1_var_2 #cart-checkout-sticky .basket-actions a.button.black-button,\n.FV-292-1_var_2 #cart-checkout-sticky button.black-button,\n.FV-292-1_var_2 #primary button[type=\"submit\"].black-button:not(#add-coupon),\n.FV-292-1_var_2 .carousel.product-carousel .product-tile .show-in-dialog-content a.show-in-dialog.button.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 #primary button[type=\"submit\"].secondary-button {\n  border-color: #009de0;\n  color: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 button#add-careplus-pdp {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 div.bl-fv-226-floating-bar button.button-fancy-large.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 a.button.primary-button.add-to-basket-btn.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 button.button-fancy-large.add-to-cart.bundle.black-button {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 #bonus-product-list .bonus-product-item button.select-bonus-item,\n.FV-292-1_var_2 #bonus-product-list button.add-to-cart-bonus {\n  border-radius: 5px;\n}\n\n.FV-292-1_var_2 .bonus-discount-container button.select-bonus,\n.FV-292-1_var_2 #bonus-product-list .bonus-product-item button.bonus-remove-link,\n.FV-292-1_var_2 #bonus-product-list button.add-to-cart-bonus:not(:disabled) {\n  background: #009de0;\n  border-radius: 5px;\n}\n\n/*# sourceMappingURL=variation-2.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16920221394"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8c85165da3c2073aa5",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "5187664496820224",
+            "experimentName": "[BL-LIVE-Sale] [FV-292.1] Change ATB CTA colour(rerun)",
+            "detectedAt": "2025-06-26T10:10:20.354Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:20.355Z",
+            "updatedAt": "2025-06-26T10:10:20.355Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "5155342552662016",
+                    "name": "[BL-100%] [FV-144.2] [D] PUWYLO 2024 Rerun (new)",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "6076743564394496",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "5666954158014464",
+                                    "changes": [
+                                        {
+                                            "id": "3F43D726-7101-485E-BD89-E2515FC98EA0",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "5666954158014464"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "5513793610973184",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "5666954158014464",
+                                    "changes": [
+                                        {
+                                            "id": "1CB8BBC3-DF21-4FF1-9FDC-DB5010E71F22",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "5666954158014464"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8c85165da3c2073aa3",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "5155342552662016",
+            "experimentName": "[BL-100%] [FV-144.2] [D] PUWYLO 2024 Rerun (new)",
+            "detectedAt": "2025-06-26T10:10:20.061Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:20.061Z",
+            "updatedAt": "2025-06-26T10:10:20.061Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "5762255875211264",
+                    "name": "[BL-QA] FV-280 - Reposition Order Summary and CTA",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "5066840540446720",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "16937641414",
+                                    "changes": [
+                                        {
+                                            "id": "B74769DA-562E-4ABA-A876-3DCC76235676",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "16937641414"
+                                },
+                                {
+                                    "viewId": "6297853178413056",
+                                    "changes": [
+                                        {
+                                            "id": "0C3A0ECD-D976-46F8-8EEF-21431EECCBA7",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "6297853178413056"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "6459067544109056",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "16937641414",
+                                    "changes": [
+                                        {
+                                            "id": "D8A36609-675E-4AB5-B64E-3FD3DBDA7B12",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "FFD3AF12-EE27-4E2A-919A-ACC2DE2101BA",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Nuno\n** Company: Biglight\n** Date: 12/2024\n** Test: FV-280\n** Variation: Variation-1\n*/\n.FV-280_var_1 div.cart-wrapper {\n  max-height: none;\n  display: none;\n}\n\n.FV-280_var_1 div.cart-wrapper.bl-fv-280-ready {\n  display: block;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  max-height: none;\n  position: relative;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-items {\n  width: 65%;\n  padding-right: 50px;\n  overflow-y: visible;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-items div.item-last-col div.item-total {\n  max-width: 48%;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-items div.item-last-col div.first-md {\n  max-width: 52%;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-items div.item-last-col div.first-md div.item-quantity {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items .bl-fv-280-sticky-wrapper {\n  width: 35%;\n  position: relative;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row {\n  width: 100%;\n  padding: 30px 30px 50px 30px;\n  overflow-y: visible;\n  position: sticky;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row > div.wrapper > div.row {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  -webkit-box-orient: vertical;\n  -webkit-box-direction: normal;\n      -ms-flex-direction: column;\n          flex-direction: column;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row > div.wrapper > div.row > div {\n  max-width: none;\n  padding: 0;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row > div.wrapper > div.row > div:first-of-type {\n  -webkit-box-ordinal-group: 2;\n      -ms-flex-order: 1;\n          order: 1;\n  padding-top: 50px;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row .shipping-method-selector {\n  border-bottom: none;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row .shipping-method-selector .shipping-method-option {\n  border-right: none;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row .shipping-method-selector div.search-location-content div.search-input {\n  max-width: 65%;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row .shipping-method-selector div.search-location-content div.search-btn {\n  max-width: none;\n}\n\n.FV-280_var_1 .cart-finance-info {\n  margin-top: 80px;\n}\n\n.FV-280_var_1 div#cart-checkout-sticky {\n  display: none;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16937641414"
+                                },
+                                {
+                                    "viewId": "6297853178413056",
+                                    "changes": [
+                                        {
+                                            "id": "8B148C13-D0BA-4A7B-81DC-DD453B4E5CD4",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "C3454ED3-5977-42B1-960E-8E66DC61B8B1",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Nuno\n** Company: Biglight\n** Date: 12/2024\n** Test: FV-280\n** Variation: Variation-1\n*/\n.FV-280_var_1 div.cart-wrapper {\n  max-height: none;\n  display: none;\n}\n\n.FV-280_var_1 div.cart-wrapper.bl-fv-280-ready {\n  display: block;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  max-height: none;\n  position: relative;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-items {\n  width: 65%;\n  padding-right: 50px;\n  overflow-y: visible;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-items div.item-last-col div.item-total {\n  max-width: 48%;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-items div.item-last-col div.first-md {\n  max-width: 52%;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-items div.item-last-col div.first-md div.item-quantity {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items .bl-fv-280-sticky-wrapper {\n  width: 35%;\n  position: relative;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row {\n  width: 100%;\n  padding: 30px 30px 50px 30px;\n  overflow-y: visible;\n  position: sticky;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row > div.wrapper > div.row {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  -webkit-box-orient: vertical;\n  -webkit-box-direction: normal;\n      -ms-flex-direction: column;\n          flex-direction: column;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row > div.wrapper > div.row > div {\n  max-width: none;\n  padding: 0;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row > div.wrapper > div.row > div:first-of-type {\n  -webkit-box-ordinal-group: 2;\n      -ms-flex-order: 1;\n          order: 1;\n  padding-top: 50px;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row .shipping-method-selector {\n  border-bottom: none;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row .shipping-method-selector .shipping-method-option {\n  border-right: none;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row .shipping-method-selector div.search-location-content div.search-input {\n  max-width: 65%;\n}\n\n.FV-280_var_1 div.cart-wrapper div.bl-fv-280-cart-items div.cart-bottom-row .shipping-method-selector div.search-location-content div.search-btn {\n  max-width: none;\n}\n\n.FV-280_var_1 .cart-finance-info {\n  margin-top: 80px;\n}\n\n.FV-280_var_1 div#cart-checkout-sticky {\n  display: none;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "6297853178413056"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8b85165da3c2073aa1",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "5762255875211264",
+            "experimentName": "[BL-QA] FV-280 - Reposition Order Summary and CTA",
+            "detectedAt": "2025-06-26T10:10:19.803Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:19.804Z",
+            "updatedAt": "2025-06-26T10:10:19.804Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "4504489114206208",
+                    "name": "[BL-QA] [FV-252.1] Active state Amendments",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "6755355510702080",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "16923074217",
+                                    "changes": [
+                                        {
+                                            "id": "160E43DA-6FD6-4AD9-B29C-B8D7C4924288",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "16923074217"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "6001171400228864",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "16923074217",
+                                    "changes": [
+                                        {
+                                            "id": "F25EA848-9226-47EE-85D4-2121CD1AA135",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "A27A90CC-FB17-4DB4-AFDD-A6DECC62B425",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Nuno\n** Company: Biglight\n** Date: 4/2025\n** Test: FV-252.1\n** Variation: Variation-1\n*/\n@media only screen and (max-width: 755px) {\n  .FV-252-1_var_1 body.bl-fv-252-1-scroll-lock {\n    overflow: hidden !important;\n    position: fixed;\n    width: 100%;\n    height: 100%;\n    top: 0;\n    left: 0;\n  }\n}\n\n.FV-252-1_var_1 #simpleSearch .bl-fv-252-1-cancel-icon-events button.search_black,\n.FV-252-1_var_1 #simpleSearch .bl-fv-252-1-cancel-icon-events a.clear-search-btn {\n  pointer-events: none;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-overlay {\n  background-color: rgba(0, 0, 0, 0.35);\n  position: fixed;\n  top: 0;\n  left: 0;\n  width: 100%;\n  height: 100%;\n  z-index: 2147483640;\n  display: none;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont {\n  position: fixed;\n  overflow-y: auto;\n  left: 0;\n  right: 0;\n  margin: 0;\n  max-width: 100dvw;\n  max-height: 100dvh;\n  width: 100%;\n  z-index: 2147483641;\n  background: #ffffff;\n  padding: 0 0 18px 0;\n  -webkit-transform: none;\n      -ms-transform: none;\n          transform: none;\n  top: 0;\n  display: none;\n  /* Adjust positioning to align with original search bar */\n}\n\n@media only screen and (min-width: 756px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont {\n    border-radius: 16px;\n    top: 74px;\n    -webkit-box-shadow: 16px 20px 28px rgba(0, 0, 0, 0.25);\n            box-shadow: 16px 20px 28px rgba(0, 0, 0, 0.25);\n    width: 68dvw;\n    max-width: 720px;\n  }\n}\n\n@media only screen and (min-width: 1440px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont {\n    max-width: 735px;\n  }\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont #simpleSearch {\n  top: 0;\n  background: none;\n  height: auto;\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  gap: 10px;\n  -webkit-box-align: center;\n      -ms-flex-align: center;\n          align-items: center;\n  padding: 18px 18px 8px 18px;\n  position: sticky;\n  z-index: 1101;\n  background: white;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont #simpleSearch fieldset {\n  margin: 0;\n  width: 100%;\n  margin-bottom: 2px;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont #simpleSearch input#q {\n  border: 1px solid #848484;\n  border-radius: 10px;\n  padding: 0 14px 0 31px;\n  font-size: 15px;\n}\n\n@media only screen and (max-width: 755px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont #simpleSearch input#q {\n    font-size: 16px;\n  }\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont #simpleSearch .search-icon {\n  display: none;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont #simpleSearch button.search_black {\n  left: 0;\n  right: auto;\n  background-size: 15px 15px;\n  background-position: 9px 9px;\n}\n\n@media only screen and (min-width: 756px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont {\n    left: 150px;\n  }\n}\n\n@media only screen and (min-width: 756px) and (min-width: 1440px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont {\n    left: 204px;\n  }\n}\n\n@media only screen and (min-width: 756px) and (min-width: 1556px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont {\n    left: calc(((100dvw - 1536px) / 2) + 148px);\n  }\n}\n\n@media only screen and (max-width: 755px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont {\n    bottom: 0;\n    left: 0;\n    right: 0;\n    -webkit-transform: none;\n        -ms-transform: none;\n            transform: none;\n    background-color: #fff;\n    margin-left: auto;\n    margin-right: auto;\n  }\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont form .clear-search-btn .icon {\n  width: 11px;\n  height: 12px;\n  background-image: url(https://www.furniturevillage.co.uk/on/demandware.static/Sites-fv-Site/-/en_GB/v1745991203969/images/svg/min/x_black_bold.svg);\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont #search-suggestions {\n  background-color: #fff;\n  -webkit-box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);\n          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);\n  position: relative;\n  top: auto;\n  left: auto;\n  -webkit-transform: none;\n      -ms-transform: none;\n          transform: none;\n  -webkit-box-shadow: none;\n          box-shadow: none;\n  width: 100%;\n  bottom: auto;\n  padding: 0 6px 0 6px;\n}\n\n@media only screen and (min-width: 756px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont #search-suggestions {\n    max-height: 65dvh;\n    overflow-y: auto;\n  }\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont #search-suggestions:not(.active) {\n  max-height: 0;\n  overflow: hidden;\n}\n\n@media only screen and (min-width: 756px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont #search-suggestions {\n    /* width */\n    /* Track */\n    /* Handle */\n    /* Handle on hover */\n  }\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont #search-suggestions::-webkit-scrollbar {\n    width: 8px;\n  }\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont #search-suggestions::-webkit-scrollbar-track {\n    background: transparent;\n  }\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont #search-suggestions::-webkit-scrollbar-thumb {\n    background-color: rgba(0, 0, 0, 0.4);\n    border-radius: 4px;\n  }\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont #search-suggestions::-webkit-scrollbar-thumb:hover {\n    background-color: rgba(0, 0, 0, 0.2);\n    border-radius: 4px;\n  }\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont #search-suggestions .search-suggestion-wrapper {\n  border: 0;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper {\n  padding: 0 18px 18px 18px;\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  -webkit-box-orient: vertical;\n  -webkit-box-direction: normal;\n      -ms-flex-direction: column;\n          flex-direction: column;\n  gap: 26px;\n  background-color: #fff;\n  margin: 0;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper:after {\n  display: none;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper .bl-fv-252-1-section.bl-fv-252-1-popular h4.bl-fv-252-1-header, .FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper .bl-fv-252-1-section.bl-fv-252-1-recent h4.bl-fv-252-1-header {\n  font-size: 14px;\n  font-weight: bold;\n  margin: 0 0 3.5px 0;\n}\n\n@media only screen and (max-width: 755px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper .bl-fv-252-1-section.bl-fv-252-1-popular h4.bl-fv-252-1-header, .FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper .bl-fv-252-1-section.bl-fv-252-1-recent h4.bl-fv-252-1-header {\n    font-size: 14px;\n    margin: 0 0 8px 0;\n  }\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper .bl-fv-252-1-section.bl-fv-252-1-popular .bl-fv-252-1-item, .FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper .bl-fv-252-1-section.bl-fv-252-1-recent .bl-fv-252-1-item {\n  padding: 3.5px 0;\n  display: block;\n  color: #666;\n  text-decoration: none;\n  margin: 0;\n  font-size: 14px;\n  color: #8f8f8f;\n}\n\n@media only screen and (max-width: 755px) {\n  .FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper .bl-fv-252-1-section.bl-fv-252-1-popular .bl-fv-252-1-item, .FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper .bl-fv-252-1-section.bl-fv-252-1-recent .bl-fv-252-1-item {\n    font-size: 14px;\n    padding: 8px 0;\n  }\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper .bl-fv-252-1-section.bl-fv-252-1-popular .bl-fv-252-1-item:hover, .FV-252-1_var_1 .bl-fv-252-1-search-cont .bl-fv-252-1-suggestion-wrapper .bl-fv-252-1-section.bl-fv-252-1-recent .bl-fv-252-1-item:hover {\n  text-decoration: underline;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont #search-suggestions.active:has(.search-suggestion-wrapper) + .bl-fv-252-1-suggestion-wrapper {\n  display: none;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-cancel-search-btn {\n  position: relative;\n  font-style: normal;\n  font-weight: 400;\n  font-size: 15px;\n  line-height: 22px;\n  color: #8f8f8f;\n  margin-bottom: 2px;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont-original {\n  cursor: pointer;\n}\n\n.FV-252-1_var_1 .bl-fv-252-1-search-cont-original input {\n  cursor: pointer;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "16923074217"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8b85165da3c2073a9f",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "4504489114206208",
+            "experimentName": "[BL-QA] [FV-252.1] Active state Amendments",
+            "detectedAt": "2025-06-26T10:10:19.574Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:19.575Z",
+            "updatedAt": "2025-06-26T10:10:19.575Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "5525464647729152",
+                    "name": " [BL-100%] [FV-144.1] [M] PUWYLO 2024 Rerun",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "6153185929199616",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "6505946021625856",
+                                    "changes": [
+                                        {
+                                            "id": "993b169ab7f04928b249899975e0f903",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "6505946021625856"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "5802258579849216",
+                            "name": "Variation #2",
+                            "actions": [
+                                {
+                                    "viewId": "6505946021625856",
+                                    "changes": [
+                                        {
+                                            "id": "ec899e5b40a5463dadc8082ec22e1ad5",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "6505946021625856"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8b85165da3c2073a9d",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "5525464647729152",
+            "experimentName": " [BL-100%] [FV-144.1] [M] PUWYLO 2024 Rerun",
+            "detectedAt": "2025-06-26T10:10:19.349Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:19.350Z",
+            "updatedAt": "2025-06-26T10:10:19.350Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "4576934508625920",
+                    "name": "[BL-LIVE] [FV-301] PLP Quick Links",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "5132995871375360",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "4686813428711424",
+                                    "changes": [
+                                        {
+                                            "id": "86362976b0e04304813ba47e8f268929",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        }
+                                    ],
+                                    "pageId": "4686813428711424"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "6663122849628160",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "4686813428711424",
+                                    "changes": [
+                                        {
+                                            "id": "9a5effe750fb44c58960ab84dc522867",
+                                            "dependencies": [],
+                                            "type": "custom_code"
+                                        },
+                                        {
+                                            "id": "c20d6663e297477292a6a15314a60f81",
+                                            "dependencies": [],
+                                            "type": "append",
+                                            "value": "<style>/*\n** Author: Nuno\n** Company: Biglight\n** Date: 5/2025\n** Test: FV-301\n** Variation: Variation-1\n*/\n.FV-301_var_1 .categories-carousel {\n  max-width: 1536px;\n  margin-bottom: 20px;\n}\n\n.FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section {\n  display: -webkit-box;\n  display: -ms-flexbox;\n  display: flex;\n  -ms-flex-wrap: nowrap;\n      flex-wrap: nowrap;\n  gap: 8px;\n  -webkit-box-pack: start;\n      -ms-flex-pack: start;\n          justify-content: flex-start;\n  margin: 0;\n  padding: 0 20px;\n  overflow-x: auto;\n}\n\n@media screen and (min-width: 756px) {\n  .FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section {\n    -webkit-box-pack: center;\n        -ms-flex-pack: center;\n            justify-content: center;\n    -ms-flex-wrap: wrap;\n        flex-wrap: wrap;\n    scrollbar-width: thin;\n    scrollbar-color: #ccc transparent;\n    margin: 0 auto;\n  }\n  .FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section::-webkit-scrollbar {\n    height: 4px;\n  }\n  .FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section::-webkit-scrollbar-track {\n    background: #f1f1f1;\n  }\n  .FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section::-webkit-scrollbar-thumb {\n    background: #ccc;\n  }\n}\n\n@media screen and (max-width: 755px) {\n  .FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section {\n    padding-bottom: 10px;\n    scrollbar-width: thin;\n    scrollbar-color: #ccc transparent;\n  }\n  .FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section::-webkit-scrollbar {\n    height: 4px;\n  }\n  .FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section::-webkit-scrollbar-track {\n    background: #f1f1f1;\n  }\n  .FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section::-webkit-scrollbar-thumb {\n    background: #ccc;\n  }\n}\n\n.FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section .item {\n  display: -webkit-inline-box;\n  display: -ms-inline-flexbox;\n  display: inline-flex;\n  padding: 0;\n  -webkit-box-pack: center;\n      -ms-flex-pack: center;\n          justify-content: center;\n  -webkit-box-align: center;\n      -ms-flex-align: center;\n          align-items: center;\n  gap: 10px;\n  border-radius: 52px;\n  border: 1px solid #ededed;\n  background: #fff;\n  min-width: auto;\n  max-width: -webkit-fit-content;\n  max-width: -moz-fit-content;\n  max-width: fit-content;\n  white-space: nowrap;\n  font-size: 14px;\n  cursor: pointer;\n  -ms-flex-negative: 0;\n      flex-shrink: 0;\n}\n\n.FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section .item:hover {\n  border: 1px solid #000;\n  background: #fff;\n  font-weight: 500;\n}\n\n.FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section .item:hover p {\n  font-weight: 500;\n  color: #000;\n}\n\n.FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section .item p {\n  color: #616162;\n  font-size: 14px;\n}\n\n.FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section .item img {\n  display: none;\n}\n\n.FV-301_var_1 .categories-carousel .simplebar-wrapper .sub-categories-section .item a {\n  padding: 12px 15px;\n}\n\n/*# sourceMappingURL=variation-1.css.map */</style>",
+                                            "selector": "head"
+                                        }
+                                    ],
+                                    "pageId": "4686813428711424"
+                                }
+                            ]
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8b85165da3c2073a9b",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "4576934508625920",
+            "experimentName": "[BL-LIVE] [FV-301] PLP Quick Links",
+            "detectedAt": "2025-06-26T10:10:19.038Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:19.039Z",
+            "updatedAt": "2025-06-26T10:10:19.039Z",
+            "__v": 0
+        },
+        {
+            "details": {
+                "before": null,
+                "after": {
+                    "id": "28727590687",
+                    "name": "[BL-QA] GA4 Audiences Test",
+                    "status": "unknown",
+                    "variations": [
+                        {
+                            "id": "28685840708",
+                            "name": "Original",
+                            "actions": [
+                                {
+                                    "viewId": "16933550733",
+                                    "changes": [],
+                                    "pageId": "16933550733"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "28773330269",
+                            "name": "Variation #1",
+                            "actions": [
+                                {
+                                    "viewId": "16933550733",
+                                    "changes": [],
+                                    "pageId": "16933550733"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "28679640724",
+                            "name": "Variation #2",
+                            "actions": []
+                        }
+                    ],
+                    "audience_ids": [],
+                    "metrics": []
+                }
+            },
+            "_id": "685d1c8a85165da3c2073a99",
+            "websiteUrl": "https://www.furniturevillage.co.uk/",
+            "websiteId": {
+                "_id": "685cef76613f09032a19f2d1",
+                "url": "https://www.furniturevillage.co.uk/",
+                "domain": "www.furniturevillage.co.uk",
+                "name": "www.furniturevillage.co.uk"
+            },
+            "changeType": "experiment_added",
+            "experimentId": "28727590687",
+            "experimentName": "[BL-QA] GA4 Audiences Test",
+            "detectedAt": "2025-06-26T10:10:18.784Z",
+            "notified": false,
+            "createdAt": "2025-06-26T10:10:18.787Z",
+            "updatedAt": "2025-06-26T10:10:18.787Z",
+            "__v": 0
+        }
+    ],
+    "pagination": {
+        "total": 13,
+        "limit": 50,
+        "skip": 0,
+        "hasMore": false
+    }
+}

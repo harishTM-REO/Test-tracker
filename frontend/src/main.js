@@ -1,5 +1,7 @@
 import './assets/main.css'
 import { createApp } from 'vue'
+import router from './router'
+
 // Vuetify
 import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
@@ -19,8 +21,8 @@ const vuetify = createVuetify({
     },
   },
   theme: {
-    defaultTheme: 'dark'
+    defaultTheme: 'light'
   },
 })
 
-createApp(App).use(vuetify).mount('#app')
+createApp(App).use(vuetify).use(router).mount('#app')
