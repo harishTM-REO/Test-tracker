@@ -85,7 +85,8 @@ class ExperimentService {
     await connectDB();
     await testConnection();
     const allWebsites = await Website.find();
-    console.log('the list of websites->', allWebsites);
+    console.log('the list of websites list->', allWebsites);
+    return allWebsites;
 
 
   }

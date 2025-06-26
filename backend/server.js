@@ -172,7 +172,7 @@ app.get('/getWebsites', async(req, res)=>{
     try{
         console.log('The get websites');
         const allDomains = await ExperimentService.getWebsites();
-        res.status(200).json(allDomains);
+        return res.status(200).json(allDomains);
     }
     catch(e){
         console.log('Error getting all websites');;
@@ -190,7 +190,7 @@ app.get('/getWebsiteChanges/:id', async(req, res)=>{
 
 })
 
-app.post('/getTestData', async (req, res) => {
+app.post('/getTestData', async (req, res ) => {
     const { url } = req.body;
 
     if (!url) {
