@@ -345,3 +345,13 @@ app.post("/getTestData", async (req, res) => {
     }
   }
 });
+
+app.get("/getExperiments/:id", async(req, res)=>{
+    
+  const id = req.params.id; // This gets 'wsduifneiuvn2'
+  console.log("ID from URL:", id);
+  const websiteExperiments = await ExperimentService.getExperiments(id);
+  
+  return res.status(200).json(websiteExperiments);
+
+})

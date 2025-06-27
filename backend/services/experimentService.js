@@ -291,6 +291,16 @@ class ExperimentService {
       checkedAt: new Date(),
     });
   }
+
+  static async getExperiments(websiteID){
+    
+      await connectDB();
+      await testConnection();
+    const experiment = await Experiment.findOne({
+      websiteId: websiteID
+    });
+    return (experiment);
+  }
 }
 
 module.exports = ExperimentService;
