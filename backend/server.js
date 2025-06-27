@@ -190,7 +190,9 @@ app.post("/getTestData", async (req, res) => {
           try {
             const optimizelyData = window.optimizely.get("data");
             const optimizelyState = window.optimizely.get("state");
-
+            const activeExperiments = optimizelyState.getActiveExperimentIds();
+            console.log('activeExperiments->');
+            console.log(activeExperiments);
             if (!optimizelyData || !optimizelyData.experiments) {
               resolve({
                 hasOptimizely: true,
@@ -205,6 +207,7 @@ app.post("/getTestData", async (req, res) => {
             console.log("experimentIds:", experimentIds);
 
             experimentIds.forEach((id) => {
+              console.log('each experiments ID->', id);
               const exp = optimizelyData.experiments[id];
               experiments.push({
                 id: id,
@@ -213,7 +216,7 @@ app.post("/getTestData", async (req, res) => {
                 variations: exp.variations || [],
                 audience_ids: exp.audience_ids || [],
                 metrics: exp.metrics || [],
-                isActive: optimizelyState?.isActive?.[id] || false,
+                isActive: activeExperiments.includes(id) || false,
                 variationMap: optimizelyState?.variationMap?.[id] || null,
               });
             });

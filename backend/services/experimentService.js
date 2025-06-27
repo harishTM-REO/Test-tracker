@@ -131,7 +131,7 @@ class ExperimentService {
       experiments,
       experimentsHash,
       totalExperiments: experiments.length,
-      activeExperiments: experiments.filter((e) => e.status === "active")
+      activeExperiments: experiments.filter((e) => e.isActive === true)
         .length,
       checkedAt: new Date(),
     });
@@ -298,7 +298,7 @@ class ExperimentService {
       await testConnection();
     const experiment = await Experiment.findOne({
       websiteId: websiteID
-    });
+    }).sort({ checkedAt: -1 }).limit(1);
     return (experiment);
   }
 }
