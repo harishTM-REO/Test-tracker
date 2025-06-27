@@ -32,7 +32,8 @@ export default {
         console.log(this.responseData);
     },
     data() {
-
+    return {
+    }
     },
     methods: {
         goToMonitoredWebsites() {
@@ -82,7 +83,7 @@ export default {
     cursor: pointer;
     transition: transform 0.3s ease, box-shadow 0.3s ease;
     backdrop-filter: blur(16px) saturate(180%);
-    background-color: rgb(212 0 0 / 30%);
+    background-color: rgb(0 16 212 / 9%);
 }
 
 .website-container:hover {

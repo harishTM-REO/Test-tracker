@@ -5,6 +5,7 @@
 </template>
 
 <script>
+import axios from 'axios';
 export default {
     name: 'WebsiteBreakdown',
     props: {
@@ -15,10 +16,30 @@ export default {
     },
     mounted() {
         console.log('yoyoyo', this.$route.query.id);
+        this.fetchData();
     },
     data() {
+        return {
+            websiteData:[],
+        }
     },
     methods: {
+        extractDate(isoString) {
+           return isoString.split('T')[0];
+        },
+        fetchData(){
+            
+      axios.get('http://localhost:3000/getWebsiteChanges/'+this.$route.query.id)
+        .then((response) => {
+          this.websiteData = response.data;
+        })
+        .catch(function (error) {
+        })
+        .finally(() => {
+        //   this.disableBtn = false;
+        //   this.websiteURL = "";
+        })
+        },
     }
 }
 </script>

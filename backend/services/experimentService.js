@@ -20,7 +20,6 @@ class ExperimentService {
   // Get specific website changes
 
   static async getWebsiteChanges(identifier, options = {}) {
-    console.log("the service Function getWebsiteChanges");
     try {
       await connectDB();
       await testConnection();
@@ -37,10 +36,8 @@ class ExperimentService {
 
       // Check if identifier is ObjectId or URL
       if (mongoose.Types.ObjectId.isValid(identifier)) {
-        console.log('here');
         query.websiteId = new mongoose.Types.ObjectId(identifier);
       } else {
-        console.log('there');
         query.websiteUrl = new mongoose.Types.ObjectId(identifier);
       }
 
@@ -55,7 +52,6 @@ class ExperimentService {
       if (changeType) {
         query.changeType = changeType;
       }
-      console.log("query better is", query)
       // Execute query
       const changes = await ExperimentChange.find(query)
         .sort({ detectedAt: -1 })
@@ -84,7 +80,6 @@ class ExperimentService {
   // Get all websites
 
   static async getWebsites() {
-    console.log("Service Function getWebsites->");
     await connectDB();
     await testConnection();
     const allWebsites = await Website.find();
@@ -99,18 +94,14 @@ class ExperimentService {
     const experiments = await Promise.all(experimentPromises);
     // Filter out null results if needed
     const validExperiments = experiments.filter((exp) => exp !== null);
-    console.log(validExperiments);
-    console.log("the list of websites list->", validExperiments);
     return validExperiments;
   }
 
   // Get or create website
   static async getOrCreateWebsite(url) {
-    console.log("Service Function getOrCreateWebsite->", url);
     await connectDB();
     await testConnection();
     let website = await Website.findOne({ url });
-    console.log("the saved website name->", website);
     if (!website) {
       const domain = new URL(url).hostname;
       website = await Website.create({

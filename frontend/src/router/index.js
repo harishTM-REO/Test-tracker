@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Home from '@/views/Home.vue'
 import MonitoredWebsites from '@/views/MonitoredWebsites.vue'
 import WebsiteBreakdown from '@/views/WebsiteBreakdown.vue'
-// import AddWebsite from '@/views/AddWebsite.vue'
+import AddWebsite from '@/views/AddWebsite.vue'
 
 const routes = [
   {
@@ -20,11 +20,11 @@ const routes = [
     name: 'WebsiteBreakdown',
     component: WebsiteBreakdown
   },
-//   {
-//     path: '/add-website',
-//     name: 'AddWebsite',
-//     component: AddWebsite
-//   }
+  {
+    path: '/add-website',
+    name: 'AddWebsite',
+    component: AddWebsite
+  }
 ]
 
 const router = createRouter({
