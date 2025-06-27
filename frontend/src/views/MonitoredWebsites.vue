@@ -14,55 +14,25 @@
                 Monitor and analyze {{ responseData.length }} websites with advanced experiment tracking
               </p>
             </div>
-            <div>
-              <v-btn
-                color="primary"
-                size="large"
-                elevation="2"
-                class="text-none px-8"
-                @click="goToAddWebsite"
-              >
-                <v-icon left>mdi-plus-circle</v-icon>
-                Add Website
-              </v-btn>
-            </div>
           </div>
           
           <!-- Stats Overview -->
           <v-row class="mt-6">
-            <v-col cols="12" sm="6" md="3">
+            <v-col cols="12" sm="6" md="6">
               <v-card class="stats-card" color="gradient-primary" dark elevation="4">
                 <v-card-text class="text-center py-6">
-                  <v-icon size="48" class="mb-3">mdi-domain</v-icon>
+                  <v-icon size="36" class="mb-3">mdi-domain</v-icon>
                   <div class="text-h3 font-weight-bold">{{ responseData.length }}</div>
                   <div class="text-subtitle-1">Total Websites</div>
                 </v-card-text>
               </v-card>
             </v-col>
-            <v-col cols="12" sm="6" md="3">
+            <v-col cols="12" sm="6" md="6">
               <v-card class="stats-card" color="gradient-success" dark elevation="4">
                 <v-card-text class="text-center py-6">
-                  <v-icon size="48" class="mb-3">mdi-flask</v-icon>
+                  <v-icon size="36" class="mb-3">mdi-flask</v-icon>
                   <div class="text-h3 font-weight-bold">{{ totalExperiments }}</div>
                   <div class="text-subtitle-1">Total Experiments</div>
-                </v-card-text>
-              </v-card>
-            </v-col>
-            <v-col cols="12" sm="6" md="3">
-              <v-card class="stats-card" color="gradient-warning" dark elevation="4">
-                <v-card-text class="text-center py-6">
-                  <v-icon size="48" class="mb-3">mdi-chart-line</v-icon>
-                  <div class="text-h3 font-weight-bold">{{ averageExperiments }}</div>
-                  <div class="text-subtitle-1">Avg per Site</div>
-                </v-card-text>
-              </v-card>
-            </v-col>
-            <v-col cols="12" sm="6" md="3">
-              <v-card class="stats-card" color="gradient-info" dark elevation="4">
-                <v-card-text class="text-center py-6">
-                  <v-icon size="48" class="mb-3">mdi-trending-up</v-icon>
-                  <div class="text-h3 font-weight-bold">{{ activeWebsites }}</div>
-                  <div class="text-subtitle-1">Active Sites</div>
                 </v-card-text>
               </v-card>
             </v-col>
@@ -86,7 +56,6 @@
             <v-card
               class="website-card elevation-8"
               :class="{ 'high-activity': item.totalExperiments > 10 }"
-              @click="goToWebsiteBreakdown(item.websiteId)"
             >
               <!-- Card Header -->
               <div class="card-header">
@@ -176,59 +145,16 @@
                   View Analytics
                 </v-btn>
                 <v-spacer></v-spacer>
-                <v-menu offset-y>
-                  <template v-slot:activator="{ on, attrs }">
-                    <v-btn
-                      icon
-                      v-bind="attrs"
-                      v-on="on"
-                      @click.stop
-                    >
-                      <v-icon>mdi-dots-vertical</v-icon>
-                    </v-btn>
-                  </template>
-                  <v-list dense>
-                    <v-list-item @click="editWebsite(item)">
-                      <v-list-item-icon>
-                        <v-icon small>mdi-pencil</v-icon>
-                      </v-list-item-icon>
-                      <v-list-item-content>
-                        <v-list-item-title>Edit</v-list-item-title>
-                      </v-list-item-content>
-                    </v-list-item>
-                    <v-list-item @click="refreshData(item)">
-                      <v-list-item-icon>
-                        <v-icon small>mdi-refresh</v-icon>
-                      </v-list-item-icon>
-                      <v-list-item-content>
-                        <v-list-item-title>Refresh</v-list-item-title>
-                      </v-list-item-content>
-                    </v-list-item>
-                    <v-divider></v-divider>
-                    <v-list-item @click="removeWebsite(item)" class="error--text">
-                      <v-list-item-icon>
-                        <v-icon small color="error">mdi-delete</v-icon>
-                      </v-list-item-icon>
-                      <v-list-item-content>
-                        <v-list-item-title>Remove</v-list-item-title>
-                      </v-list-item-content>
-                    </v-list-item>
-                  </v-list>
-                </v-menu>
-              </v-card-actions>
-
-              <!-- Hover Overlay -->
-              <div class="hover-overlay">
                 <v-btn
-                  large
-                  color="white"
-                  class="text--primary font-weight-bold"
-                  elevation="2"
+                  text
+                  color="primary"
+                  class="text-none font-weight-medium"
+                  @click.stop="goToListExperience(item.websiteId)"
                 >
-                  <v-icon left>mdi-analytics</v-icon>
-                  Analyze Experiments
+                  <v-icon left small>mdi-chart-bar</v-icon>
+                  List All Experiences
                 </v-btn>
-              </div>
+              </v-card-actions>
             </v-card>
           </v-col>
         </v-fade-transition>
@@ -297,6 +223,12 @@ export default {
         query: { id }
       })
     },
+    goToListExperience(id) {
+      this.$router.push({
+        path: '/list-experiences',
+        query: { id }
+      })
+    },
     getDomain(url) {
       try {
         return new URL(url).hostname.replace('www.', '')
@@ -354,7 +286,7 @@ export default {
 
 <style scoped>
 .tracked-websites-container {
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  /* background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); */
   min-height: 100vh;
   padding: 2rem;
 }

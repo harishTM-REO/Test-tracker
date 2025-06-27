@@ -3,6 +3,7 @@ import Home from '@/views/Home.vue'
 import MonitoredWebsites from '@/views/MonitoredWebsites.vue'
 import WebsiteBreakdown from '@/views/WebsiteBreakdown.vue'
 import AddWebsite from '@/views/AddWebsite.vue'
+import ListExperience from '@/views/ListExperience.vue'
 
 const routes = [
   {
@@ -24,6 +25,11 @@ const routes = [
     path: '/add-website',
     name: 'AddWebsite',
     component: AddWebsite
+  },
+  {
+    path: '/list-experiences',
+    name: 'ListExperience',
+    component: ListExperience
   }
 ]
 
