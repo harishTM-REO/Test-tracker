@@ -1,8 +1,8 @@
 <template>
     <div>
         <section class="hero-section">
-            <h2 class="hero-header">Monitor websites and bag our next client !</h2>
-            <h3 class="hero-subtitle">Spy on websites like James bond. Convert each villain one test at a time ~!</h3>
+            <h2 class="hero-header">Monitor websites and unravel new business opportunities!</h2>
+            <h3 class="hero-subtitle">Digital Performance Tracking & Conversion Optimization Insights ~!</h3>
             <div class="main-button-container">
                 <v-btn class="text-subtitle-1 mt-6 primary-btn" dark @click="goToMonitoredWebsites"
                     :disabled="disableBtn">
