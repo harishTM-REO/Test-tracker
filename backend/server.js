@@ -20,17 +20,31 @@ app.post('/getTestData', async (req, res) => {
     try {
         const browser = await puppeteer.launch({
             headless: true,
-            defaultViewport: null, // This allows you to set custom viewport
+            // defaultViewport: null, // No longer needed as we set a specific viewport
             args: [
-                '--start-maximized',
-                '--window-size=1920,1080',
-                '--window-position=0,0'
+                '--no-sandbox', // Essential for some environments like Render free tier
+                '--disable-setuid-sandbox',
+                '--disable-gpu', // Recommended for headless environments
+                '--disable-dev-shm-usage', // Recommended for Docker/containerized environments
+                '--window-size=800,600' // Set a smaller initial window size
             ]
         });
 
         const page = await browser.newPage();
-        // Set the page viewport to match window size
-        await page.setViewport({ width: 1920, height: 1080 });
+        // Set a smaller page viewport to match your needs
+        await page.setViewport({ width: 800, height: 600 });
+
+        // --- OPTIMIZATION START ---
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (req.resourceType() === 'image' || req.resourceType() === 'stylesheet' || req.resourceType() === 'font') {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
+        // --- OPTIMIZATION END ---
+
         await page.goto(url, { waitUntil: 'domcontentloaded' });
 
         // Handle cookie consent buttons if they exist
@@ -80,6 +94,7 @@ app.post('/getTestData', async (req, res) => {
                 }, 100);
             });
         });
+
         // Get Optimizely experiment details
         const experimentDetails = await page.evaluate(() => {
             function getOptiExperimentDetails() {
@@ -132,7 +147,6 @@ app.post('/getTestData', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
-
 
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
