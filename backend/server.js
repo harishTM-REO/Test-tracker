@@ -11,86 +11,79 @@ app.use(cors());
 
 app.use(express.json());
 
-// Helper function to get the correct Chrome executable path
-function getChromeExecutablePath() {
-    // If explicitly set, use it
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-        return process.env.PUPPETEER_EXECUTABLE_PATH;
-    }
-
-    // Try to find Chrome in Puppeteer's cache directory
-    const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
-
-    try {
-        // Look for Chrome in the cache directory
-        const chromeDir = path.join(cacheDir, 'chrome');
-        if (fs.existsSync(chromeDir)) {
-            const versions = fs.readdirSync(chromeDir);
-            if (versions.length > 0) {
-                // Use the first (hopefully only) version found
-                const chromePath = path.join(chromeDir, versions[0], 'chrome-linux64', 'chrome');
-                if (fs.existsSync(chromePath)) {
-                    console.log(`Found Chrome at: ${chromePath}`);
-                    return chromePath;
-                }
-            }
-        }
-    } catch (error) {
-        console.log('Could not find Chrome in cache:', error.message);
-    }
-
-    // Try common system paths
-    const systemPaths = [
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium'
-    ];
-
-    for (const chromePath of systemPaths) {
-        try {
-            if (fs.existsSync(chromePath)) {
-                console.log(`Found system Chrome at: ${chromePath}`);
-                return chromePath;
-            }
-        } catch (error) {
-            // Continue to next path
-        }
-    }
-
-    console.log('No Chrome executable found, letting Puppeteer auto-detect');
-    return undefined;
-}
-
 app.post('/getTestData', async (req, res) => {
     const { url } = req.body;
-
     if (!url) {
         return res.status(400).json({ error: 'URL is required' });
     }
 
     try {
         const browser = await puppeteer.launch({
-            headless: "new", // or true
+            headless: true,
+            defaultViewport: null, // This allows you to set custom viewport
+            args: [
+                '--start-maximized',
+                '--window-size=1920,1080',
+                '--window-position=0,0'
+            ]
         });
-        const page = await browser.newPage();
 
-        console.log(`Visiting: ${url}`);
-        await page.setViewport({ width: 1000, height: 768 });
+        const page = await browser.newPage();
+        // Set the page viewport to match window size
+        await page.setViewport({ width: 1920, height: 1080 });
         await page.goto(url, { waitUntil: 'domcontentloaded' });
-        // await delay(4000);
 
         // Handle cookie consent buttons if they exist
-        await page.evaluate(() => {
-            const keywords = ["agree", "got", "necessary", "accept"];
-            const buttons = [...Array.from(document.querySelectorAll("button")), ...Array.from(document.querySelectorAll("a"))];
-            buttons.forEach(button => {
-                if (keywords.some(keyword => button.textContent.toLowerCase().includes(keyword))) {
-                    button.click();
-                    window.location.reload();
+        const cookieType = await page.evaluate(() => {
+            return new Promise((resolve) => {
+                let cookieType = 'custom';
+
+                async function acceptCookie(btn, interval) {
+                    if (interval) {
+                        clearInterval(interval);
+                    }
+                    btn.click();
+                    resolve(cookieType);
                 }
+
+                const cookieProviderAcceptSelector = [
+                    {
+                        cookieType: 'onetrust',
+                        cookieSelector: '#onetrust-accept-btn-handler',
+                    },
+                    {
+                        cookieType: 'Cookie Bot',
+                        cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+                    }
+                ];
+
+                let attempts = 0;
+                const maxAttempts = 50;
+
+                let interval = setInterval(async () => {
+                    attempts++;
+
+                    if (attempts > maxAttempts) {
+                        clearInterval(interval);
+                        resolve('not_found');
+                        return;
+                    }
+
+                    for (const cookie of cookieProviderAcceptSelector) {
+                        console.log('searching selector:::::', cookie.cookieType);
+                        const element = document.querySelector(cookie.cookieSelector);
+                        if (element) {
+                            console.log('matching selector:::::', cookie.cookieType);
+                            cookieType = cookie.cookieType;
+                            await acceptCookie(element, interval);
+                            return;
+                        }
+                    }
+                }, 100);
             });
         });
+
+        console.log('Cookie type:', cookieType);
 
         // await delay(2000);
 
@@ -113,7 +106,7 @@ app.post('/getTestData', async (req, res) => {
                             status: exp.status,
                             variations: exp.variations,
                             audience_ids: exp.audience_ids,
-                            metrics: exp.metrics
+                            metrics: exp.metrics,
                         });
                     });
 
@@ -134,6 +127,7 @@ app.post('/getTestData', async (req, res) => {
 
         res.status(200).json({
             url,
+            cookieType,
             optimizelyDetected: experimentDetails.isOptimizelyDetected,
             experiments: experimentDetails.experiments,
             optimizelyData: experimentDetails.optimizelyData,
@@ -146,11 +140,6 @@ app.post('/getTestData', async (req, res) => {
     }
 });
 
-// function delay(time) {
-//     return new Promise(function (resolve) {
-//         setTimeout(resolve, time);
-//     });
-// }
 
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
