@@ -4,6 +4,7 @@ import MonitoredWebsites from '@/views/MonitoredWebsites.vue'
 import WebsiteBreakdown from '@/views/WebsiteBreakdown.vue'
 import AddWebsite from '@/views/AddWebsite.vue'
 import ListExperience from '@/views/ListExperience.vue'
+import Ingestion from '@/views/Ingestion.vue'
 
 const routes = [
   {
@@ -30,7 +31,13 @@ const routes = [
     path: '/list-experiences',
     name: 'ListExperience',
     component: ListExperience
-  }
+  },
+  {
+    path: '/address-ingestion',
+    name: 'Ingestion',
+    component: Ingestion
+  },
+  
 ]
 
 const router = createRouter({

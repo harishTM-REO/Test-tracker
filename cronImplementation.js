@@ -12,6 +12,7 @@ const Website = require('./models/Website');
 const Experiment = require('./models/Experiment');
 const ExperimentChange = require('./models/ExperimentChange');
 const MonitoringLog = require('./models/MonitoringLog');
+const ExperimentWatcher = require('./controller/crawler');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -22,152 +23,7 @@ app.use(express.json());
 // Connect to MongoDB
 connectDB();
 
-// Helper function to get Chrome executable path
-function getChromeExecutablePath() {
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-        return process.env.PUPPETEER_EXECUTABLE_PATH;
-    }
-
-    const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
-
-    try {
-        const chromeDir = path.join(cacheDir, 'chrome');
-        if (fs.existsSync(chromeDir)) {
-            const versions = fs.readdirSync(chromeDir);
-            if (versions.length > 0) {
-                const chromePath = path.join(chromeDir, versions[0], 'chrome-linux64', 'chrome');
-                if (fs.existsSync(chromePath)) {
-                    console.log(`Found Chrome at: ${chromePath}`);
-                    return chromePath;
-                }
-            }
-        }
-    } catch (error) {
-        console.log('Could not find Chrome in cache:', error.message);
-    }
-
-    const systemPaths = [
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium'
-    ];
-
-    for (const chromePath of systemPaths) {
-        try {
-            if (fs.existsSync(chromePath)) {
-                console.log(`Found system Chrome at: ${chromePath}`);
-                return chromePath;
-            }
-        } catch (error) {
-            // Continue to next path
-        }
-    }
-
-    console.log('No Chrome executable found, letting Puppeteer auto-detect');
-    return undefined;
-}
-
-// Function to check experiments for a URL
-async function checkExperimentsForUrl(url) {
-    const startTime = Date.now();
-    let browser;
-    let status = 'success';
-    let error = null;
-    let experimentDetails = null;
-
-    try {
-        browser = await puppeteer.launch({
-            headless: "new",
-            executablePath: getChromeExecutablePath(),
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-
-        const page = await browser.newPage();
-        console.log(`Checking experiments for: ${url}`);
-
-        await page.setViewport({ width: 1000, height: 768 });
-        await page.goto(url, { waitUntil: 'domcontentloaded' });
-
-        // Handle cookie consent buttons
-        await page.evaluate(() => {
-            const keywords = ["agree", "got", "necessary", "accept"];
-            const buttons = [...Array.from(document.querySelectorAll("button")), ...Array.from(document.querySelectorAll("a"))];
-            buttons.forEach(button => {
-                if (keywords.some(keyword => button.textContent.toLowerCase().includes(keyword))) {
-                    button.click();
-                    window.location.reload();
-                }
-            });
-        });
-
-        // Get Optimizely experiment details
-        experimentDetails = await page.evaluate(() => {
-            function getOptiExperimentDetails() {
-                if (!window.optimizely || typeof window.optimizely.get !== 'function') return null;
-
-                try {
-                    const data = window.optimizely.get('data');
-                    if (!data || typeof data.experiments !== 'object') return null;
-
-                    const experiments = data.experiments;
-                    const experimentArray = [];
-
-                    Object.entries(experiments).forEach(([id, exp]) => {
-                        experimentArray.push({
-                            id: id,
-                            name: exp.name,
-                            status: exp.status,
-                            variations: exp.variations,
-                            audience_ids: exp.audience_ids,
-                            metrics: exp.metrics
-                        });
-                    });
-
-                    return experimentArray;
-                } catch (e) {
-                    console.error('Error fetching Optimizely experiment details:', e);
-                    return null;
-                }
-            }
-
-            return {
-                experiments: getOptiExperimentDetails(),
-            };
-        });
-
-        await page.close();
-
-    } catch (err) {
-        console.error(`Error checking ${url}:`, err);
-        status = 'error';
-        error = err.message;
-    } finally {
-        if (browser) {
-            await browser.close();
-        }
-    }
-
-    const duration = Date.now() - startTime;
-    const experiments = experimentDetails?.experiments || [];
-    
-    // Get website from database
-    const website = await ExperimentService.getOrCreateWebsite(url);
-    
-    // Log monitoring activity
-    await ExperimentService.logMonitoring(
-        url,
-        website._id,
-        status,
-        duration,
-        experiments.length,
-        error
-    );
-
-    return { experiments, status, error };
-}
-
-// Main cron job function
+// Main cron job function the cron rotation
 async function runExperimentCheck() {
     console.log('Starting scheduled experiment check at:', new Date().toISOString());
     
@@ -175,38 +31,10 @@ async function runExperimentCheck() {
         // Get all active websites to monitor
         const websites = await Website.find({ status: 'active' });
         
-        console.log(`Found ${websites.length} active websites to monitor`);
+        console.log(`the websites length is: ${websites.length}`);
 
         for (const website of websites) {
-            try {
-                console.log(`Checking ${website.url}...`);
-                
-                // Check experiments
-                const { experiments, status, error } = await checkExperimentsForUrl(website.url);
-                
-                if (status === 'success') {
-                    // Save experiment data and detect changes
-                    await ExperimentService.saveExperiments(website.url, experiments);
-                    console.log(`Successfully checked ${website.url}: ${experiments.length} experiments found`);
-                } else {
-                    console.error(`Failed to check ${website.url}: ${error}`);
-                    // Update website status if multiple failures
-                    const recentErrors = await MonitoringLog.countDocuments({
-                        websiteUrl: website.url,
-                        status: 'error',
-                        checkedAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) } // Last hour
-                    });
-                    
-                    if (recentErrors >= 3) {
-                        website.status = 'error';
-                        await website.save();
-                        console.log(`Website ${website.url} marked as error after multiple failures`);
-                    }
-                }
-                
-            } catch (error) {
-                console.error(`Error processing ${website.url}:`, error);
-            }
+            console.log('the website is: ', website.url);
         }
         
     } catch (error) {
@@ -215,6 +43,11 @@ async function runExperimentCheck() {
     
     console.log('Experiment check completed at:', new Date().toISOString());
 }
+
+app.get('/getCronDetails', (req, res) => {
+    console.log('the cron job setup is running');
+    runExperimentCheck()
+});
 
 // API Endpoints
 
@@ -332,7 +165,7 @@ app.post('/getTestData', async (req, res) => {
     }
 
     try {
-        const { experiments, status, error } = await checkExperimentsForUrl(url);
+        const { experiments, status, error } = await ExperimentWatcher.checkExperimentsForUrl(url);
         
         if (status === 'success') {
             // Save to database
@@ -418,13 +251,13 @@ app.patch('/websites/:id/status', async (req, res) => {
 });
 
 // Schedule cron job
-// Default: Every 30 minutes
-const cronSchedule = process.env.CRON_SCHEDULE || '*/30 * * * *';
+// Default: Every 30 minutes #TODO
+// const cronSchedule = process.env.CRON_SCHEDULE || '*/30 * * * *';
 
-cron.schedule(cronSchedule, async () => {
-    console.log('Cron job triggered at:', new Date().toISOString());
-    await runExperimentCheck();
-});
+// cron.schedule(cronSchedule, async () => {
+//     console.log('Cron job triggered at:', new Date().toISOString());
+//     await runExperimentCheck();
+// });
 
 console.log(`Cron job scheduled with pattern: ${cronSchedule}`);
 
@@ -448,10 +281,10 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
-// Run initial check on startup (optional)
-if (process.env.RUN_ON_STARTUP === 'true') {
-    setTimeout(async () => {
-        console.log('Running initial experiment check...');
-        await runExperimentCheck();
-    }, 5000); // Wait 5 seconds after startup
-}
+// Run initial check on startup (optional) #TODO
+// if (process.env.RUN_ON_STARTUP === 'true') {
+//     setTimeout(async () => {
+//         console.log('Running initial experiment check...');
+//         await runExperimentCheck();
+//     }, 5000); // Wait 5 seconds after startup
+// }
