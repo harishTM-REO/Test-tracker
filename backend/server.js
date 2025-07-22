@@ -70,10 +70,8 @@ app.post('/getTestData', async (req, res) => {
                     }
 
                     for (const cookie of cookieProviderAcceptSelector) {
-                        console.log('searching selector:::::', cookie.cookieType);
                         const element = document.querySelector(cookie.cookieSelector);
                         if (element) {
-                            console.log('matching selector:::::', cookie.cookieType);
                             cookieType = cookie.cookieType;
                             await acceptCookie(element, interval);
                             return;
@@ -82,11 +80,6 @@ app.post('/getTestData', async (req, res) => {
                 }, 100);
             });
         });
-
-        console.log('Cookie type:', cookieType);
-
-        // await delay(2000);
-
         // Get Optimizely experiment details
         const experimentDetails = await page.evaluate(() => {
             function getOptiExperimentDetails() {
