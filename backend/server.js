@@ -3,6 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const puppeteer = require("puppeteer");
 const cors = require("cors");
+const { connectDB } = require("./db/connection");
 // const path = require("path");
 // const fs = require("fs");
 const app = express();
@@ -83,8 +84,9 @@ app.get('/api/health', (req, res) => {
 });
 
 
-app.listen(port, () => {
+app.listen(port, async () => {
   console.log(`Server running on http://localhost:${port}`);
+  await connectDB();
 });
 
 app.get("/getWebsites", async (req, res) => {
@@ -323,7 +325,7 @@ app.post("/getTestData", async (req, res) => {
     }
 
     return res.status(500).json({
-      error: "Internal server error",
+      error: "Internal server error server",
       message: error.message,
       url,
     });

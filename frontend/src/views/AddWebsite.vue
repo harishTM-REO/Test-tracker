@@ -20,7 +20,7 @@
           @click="handleClick(event)"
           :disabled="disableBtn"
         >
-          Check</v-btn
+          Check Experiments</v-btn
         >
       </v-col>
     </v-row>
@@ -229,12 +229,14 @@ export default {
   },
   methods: {
     handleClick() {
-      this.disableBtn = true;      
+      this.disableBtn = true;
+      console.log('websiteURL', this.websiteURL);
       axios
-        .get(`http://localhost:3000/api/optimizely/scrape?url=${encodeURIComponent(this.websiteURL)}`)
+        // .get(`http://localhost:3000/api/optimizely/scrape?url=${encodeURIComponent(this.websiteURL)}`)
+        .get(`http://localhost:3000/api/optimizely/scrape?url=${this.websiteURL}`)
         .then((response) => {
           console.log(response.data);
-          this.responseData = response.data.data; // Note: .data.data
+          // this.responseData = response.data.data; 
         })
         .catch((error) => {
           console.log(error);

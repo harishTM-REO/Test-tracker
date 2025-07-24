@@ -1,30 +1,47 @@
-// services/optimizelyScraperService.js
+// services/optimizelyScraperService.js - Enhanced with your working code
 const puppeteer = require('puppeteer');
-const ExperimentService = require('./experimentService');
+const ExperimentService = require('./experimentService'); // Comment out if not available
+const OptimizelyResult = require('../models/OptimizelyResult');
 
 class OptimizelyScraperService {
 
   /**
    * Main function to scrape Optimizely experiments from a URL
    * @param {string} url - The website URL to scrape
-   * @param {Object} res - Express response object
+   * @param {Object} res - Express response object (optional)
    * @returns {Object} Scraping results
    */
-  async scrapeOptimizelyExperiments(url, res) {
+  async scrapeOptimizelyExperiments(url, res = null) {
     const startTime = Date.now();
-    let browser = null;
 
     try {
       console.log(`Starting Optimizely scrape for: ${url}`);
 
-      // Step 1: Get or create website record
-      const website = await this.getOrCreateWebsite(url);
-      console.log(`Processing request for: ${website.name} (${url})`);
+      // Step 1: Get or create website record (optional if ExperimentService not available)
+      let website = null;
+      try {
+        // website = await this.getOrCreateWebsite(url);
+        // console.log(`Processing request for: ${website.name} (${url})`);
+        
+        // Create a mock website object if service not available
+        website = {
+          _id: 'mock-id',
+          name: this.extractDomainName(url),
+          domain: this.extractDomain(url)
+        };
+      } catch (error) {
+        console.warn('Website service not available, proceeding without database integration');
+        website = {
+          _id: 'mock-id',
+          name: this.extractDomainName(url),
+          domain: this.extractDomain(url)
+        };
+      }
 
       // Step 2: Launch browser and scrape experiments
       const experimentData = await this.scrapeExperimentsFromPage(url);
 
-      // Step 3: Save results to database
+      // Step 3: Save results to database (optional)
       const savedData = await this.saveExperimentResults(url, website, experimentData, startTime);
 
       // Step 4: Return formatted response
@@ -32,48 +49,28 @@ class OptimizelyScraperService {
 
     } catch (error) {
       console.error('Error in scrapeOptimizelyExperiments:', error);
-      
-      // Clean up browser if it exists
-      if (browser) {
-        await this.closeBrowser(browser);
-      }
-
       throw error;
     }
   }
 
   /**
-   * Get or create website record
-   * @param {string} url - Website URL
-   * @returns {Object} Website record
-   */
-  async getOrCreateWebsite(url) {
-    try {
-      return await ExperimentService.getOrCreateWebsite(url);
-    } catch (error) {
-      console.error('Error getting/creating website:', error);
-      throw new Error(`Failed to process website: ${error.message}`);
-    }
-  }
-
-  /**
-   * Launch browser with optimized settings
+   * Launch browser with your optimized settings
    * @returns {Object} Puppeteer browser instance
    */
   async launchBrowser() {
     try {
       const browser = await puppeteer.launch({
         headless: true,
-        devtools: false, // Disable devtools for production
-        slowMo: 50,
+        // headless: false,
         args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-gpu',
+          '--disable-dev-shm-usage',
+          '--window-size=800,600',
           "--disable-accelerated-2d-canvas",
           "--no-first-run",
           "--no-zygote",
-          "--disable-gpu",
           "--disable-background-timer-throttling",
           "--disable-backgrounding-occluded-windows",
           "--disable-renderer-backgrounding"
@@ -89,7 +86,7 @@ class OptimizelyScraperService {
   }
 
   /**
-   * Create and configure a new page
+   * Create and configure a new page with your optimizations
    * @param {Object} browser - Puppeteer browser instance
    * @returns {Object} Configured page instance
    */
@@ -97,15 +94,14 @@ class OptimizelyScraperService {
     try {
       const page = await browser.newPage();
       
-      // Configure page settings
-      await page.setViewport({ width: 1000, height: 768 });
-      page.setDefaultTimeout(30000);
+      // Set smaller viewport as in your working code
+      await page.setViewport({ width: 800, height: 600 });
       
-      // Block unnecessary resources for faster loading
+      // Your optimized request interception
       await page.setRequestInterception(true);
       page.on('request', (req) => {
         const resourceType = req.resourceType();
-        if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+        if (['image', 'stylesheet', 'font'].includes(resourceType)) {
           req.abort();
         } else {
           req.continue();
@@ -129,9 +125,9 @@ class OptimizelyScraperService {
     try {
       console.log(`Navigating to: ${url}`);
       
-      await page.goto(url, {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
+      await page.goto(url, { 
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
       });
 
       console.log("Page loaded successfully");
@@ -142,125 +138,179 @@ class OptimizelyScraperService {
   }
 
   /**
-   * Handle cookie consent on the page
+   * Enhanced cookie consent handling using your working approach
    * @param {Object} page - Puppeteer page instance
+   * @returns {string} Cookie type detected
    */
   async handleCookieConsent(page) {
     try {
-      console.log("Handling cookie consent...");
+      console.log("Handling cookie consent with enhanced detection...");
       
-      await page.evaluate(() => {
-        const handleCookieConsent = () => {
-          const keywords = [
-            "agree", "got", "necessary", "accept", "allow", "continue",
-            "ok", "yes", "proceed", "confirm"
+      const cookieType = await page.evaluate(() => {
+        return new Promise((resolve) => {
+          let cookieType = 'custom';
+
+          async function acceptCookie(btn, interval) {
+            if (interval) {
+              clearInterval(interval);
+            }
+            btn.click();
+            console.log(`Clicked cookie consent button: ${btn.textContent}`);
+            resolve(cookieType);
+          }
+
+          // Your proven cookie provider selectors
+          const cookieProviderAcceptSelector = [
+            {
+              cookieType: 'onetrust',
+              cookieSelector: '#onetrust-accept-btn-handler',
+            },
+            {
+              cookieType: 'Cookie Bot',
+              cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+            },
+            // Additional common cookie consent selectors
+            {
+              cookieType: 'cookielaw',
+              cookieSelector: '.cc-dismiss',
+            },
+            {
+              cookieType: 'gdpr',
+              cookieSelector: '.gdpr-accept',
+            },
+            {
+              cookieType: 'consent-manager',
+              cookieSelector: '[data-testid="consent-accept-all"]',
+            }
           ];
-          const selectors = ["button", "a", 'div[role="button"]', 'span[role="button"]'];
 
-          selectors.forEach((selector) => {
-            const elements = document.querySelectorAll(selector);
-            elements.forEach((element) => {
-              const text = element.textContent?.toLowerCase() || '';
-              const ariaLabel = element.getAttribute('aria-label')?.toLowerCase() || '';
-              const title = element.getAttribute('title')?.toLowerCase() || '';
-              
-              const combinedText = `${text} ${ariaLabel} ${title}`;
-              
-              if (keywords.some((keyword) => combinedText.includes(keyword))) {
-                try {
-                  element.click();
-                  console.log(`Clicked consent button: ${text}`);
-                } catch (e) {
-                  console.log('Could not click element:', e.message);
-                }
+          let attempts = 0;
+          const maxAttempts = 50; // Your proven max attempts
+
+          let interval = setInterval(async () => {
+            attempts++;
+
+            if (attempts > maxAttempts) {
+              clearInterval(interval);
+              // Fallback to generic cookie consent handling
+              const fallbackKeywords = [
+                "agree", "accept", "allow", "continue", "ok", "yes", "got it"
+              ];
+              const fallbackSelectors = ["button", "a", 'div[role="button"]'];
+
+              let found = false;
+              fallbackSelectors.forEach((selector) => {
+                if (found) return;
+                const elements = document.querySelectorAll(selector);
+                elements.forEach((element) => {
+                  if (found) return;
+                  const text = element.textContent?.toLowerCase() || '';
+                  if (fallbackKeywords.some((keyword) => text.includes(keyword))) {
+                    cookieType = 'generic';
+                    found = true;
+                    element.click();
+                    console.log(`Clicked generic consent: ${text}`);
+                  }
+                });
+              });
+
+              resolve(found ? cookieType : 'not_found');
+              return;
+            }
+
+            // Check for specific cookie providers first
+            for (const cookie of cookieProviderAcceptSelector) {
+              const element = document.querySelector(cookie.cookieSelector);
+              if (element) {
+                cookieType = cookie.cookieType;
+                await acceptCookie(element, interval);
+                return;
               }
-            });
-          });
-        };
-
-        // Run immediately and after a delay
-        handleCookieConsent();
-        setTimeout(handleCookieConsent, 2000);
+            }
+          }, 100); // Your proven interval timing
+        });
       });
 
-      console.log('Cookie consent handling completed');
+      console.log(`Cookie consent handling completed. Type detected: ${cookieType}`);
+      return cookieType;
     } catch (error) {
       console.warn('Error handling cookie consent:', error.message);
-      // Don't throw error as this is not critical
+      return 'error';
     }
   }
 
   /**
-   * Extract Optimizely experiment data from the page
+   * Enhanced Optimizely data extraction using your working approach
    * @param {Object} page - Puppeteer page instance
    * @returns {Object} Experiment data
    */
   async extractOptimizelyData(page) {
     try {
-      console.log("Extracting Optimizely data...");
+      console.log("Extracting Optimizely data with enhanced detection...");
       
       const experimentData = await page.evaluate(() => {
-        return new Promise((resolve) => {
-          // Wait for Optimizely to load and collect data
-          setTimeout(() => {
-            if (!window.optimizely) {
-              resolve({
-                hasOptimizely: false,
-                experiments: null,
-                error: "Optimizely not found on page",
-              });
-              return;
+        // Your proven Optimizely extraction function
+        function getOptiExperimentDetails() {
+          if (!window.optimizely || typeof window.optimizely.get !== 'function') {
+            return null;
+          }
+
+          try {
+            const data = window.optimizely.get('data');
+            if (!data || typeof data.experiments !== 'object') {
+              return null;
             }
 
-            try {
-              const optimizelyData = window.optimizely.get("data");
-              const optimizelyState = window.optimizely.get("state");
-              
-              if (!optimizelyData || !optimizelyData.experiments) {
-                resolve({
-                  hasOptimizely: true,
-                  experiments: [],
-                  error: "No experiments found",
-                });
-                return;
-              }
+            const experiments = data.experiments;
+            const experimentArray = [];
 
-              const activeExperiments = optimizelyState ? optimizelyState.getActiveExperimentIds() : [];
-              console.log('Active experiments found:', activeExperiments);
-
-              const experiments = [];
-              const experimentIds = Object.keys(optimizelyData.experiments);
-              console.log("Total experiment IDs:", experimentIds.length);
-
-              experimentIds.forEach((id) => {
-                const exp = optimizelyData.experiments[id];
-                experiments.push({
-                  id: id,
-                  name: exp.name || "Unnamed Experiment",
-                  status: exp.isActive || false,
-                  variations: exp.variations || [],
-                  audience_ids: exp.audience_ids || [],
-                  metrics: exp.metrics || [],
-                  isActive: activeExperiments.includes(id) || false,
-                  variationMap: optimizelyState?.variationMap?.[id] || null,
-                });
+            Object.entries(experiments).forEach(([id, exp]) => {
+              experimentArray.push({
+                id: id,
+                name: exp.name || "Unnamed Experiment",
+                status: exp.status || 'unknown',
+                variations: exp.variations || [],
+                audience_ids: exp.audience_ids || [],
+                metrics: exp.metrics || [],
+                isActive: exp.status === 'Running' || false,
               });
+            });
 
-              resolve({
-                hasOptimizely: true,
-                experiments: experiments,
-                experimentCount: experiments.length,
-                activeCount: experiments.filter((e) => e.isActive).length,
-              });
-            } catch (error) {
-              resolve({
-                hasOptimizely: true,
-                experiments: [],
-                error: error.message,
-              });
-            }
-          }, 15000); // Wait 15 seconds for Optimizely to fully load
-        });
+            return experimentArray;
+          } catch (e) {
+            console.error('Error fetching Optimizely experiment details:', e);
+            return null;
+          }
+        }
+
+        // Enhanced detection with additional checks
+        const experiments = getOptiExperimentDetails();
+        
+        if (experiments && experiments.length > 0) {
+          return {
+            hasOptimizely: true,
+            experiments: experiments,
+            experimentCount: experiments.length,
+            activeCount: experiments.filter(e => e.isActive).length,
+            error: null
+          };
+        } else if (window.optimizely) {
+          return {
+            hasOptimizely: true,
+            experiments: [],
+            experimentCount: 0,
+            activeCount: 0,
+            error: "Optimizely found but no experiments detected"
+          };
+        } else {
+          return {
+            hasOptimizely: false,
+            experiments: null,
+            experimentCount: 0,
+            activeCount: 0,
+            error: "Optimizely not found on page"
+          };
+        }
       });
 
       console.log(`Optimizely data extracted: ${experimentData.experiments?.length || 0} experiments found`);
@@ -270,6 +320,8 @@ class OptimizelyScraperService {
       return {
         hasOptimizely: false,
         experiments: null,
+        experimentCount: 0,
+        activeCount: 0,
         error: `Failed to extract data: ${error.message}`,
       };
     }
@@ -278,7 +330,7 @@ class OptimizelyScraperService {
   /**
    * Main function to scrape experiments from a page
    * @param {string} url - URL to scrape
-   * @returns {Object} Experiment data
+   * @returns {Object} Experiment data including cookie info
    */
   async scrapeExperimentsFromPage(url) {
     let browser = null;
@@ -294,14 +346,17 @@ class OptimizelyScraperService {
       // Navigate to URL
       await this.navigateToPage(page, url);
       
-      // Handle cookie consent
-      await this.handleCookieConsent(page);
+      // Handle cookie consent with detection
+      const cookieType = await this.handleCookieConsent(page);
       
-      // Wait a bit for page to settle
-      await page.waitForTimeout(3000);
+      // Wait a bit more for Optimizely to load after cookie acceptance
+      await new Promise(resolve => setTimeout(resolve, 2000));
       
       // Extract Optimizely data
       const experimentData = await this.extractOptimizelyData(page);
+      
+      // Add cookie type to response
+      experimentData.cookieType = cookieType;
       
       return experimentData;
 
@@ -310,14 +365,23 @@ class OptimizelyScraperService {
       throw error;
     } finally {
       // Clean up
+      if (page) {
+        try {
+        // TODO
+          await page.close();
+        } catch (e) {
+          console.warn('Error closing page:', e.message);
+        }
+      }
       if (browser) {
+        // TODO
         await this.closeBrowser(browser);
       }
     }
   }
 
   /**
-   * Save experiment results to database
+   * Save experiment results to database (optional)
    * @param {string} url - Website URL
    * @param {Object} website - Website record
    * @param {Object} experimentData - Experiment data
@@ -330,73 +394,46 @@ class OptimizelyScraperService {
 
     try {
       if (experimentData.hasOptimizely && experimentData.experiments && experimentData.experiments.length > 0) {
-        // Save experiments to database
-        savedData = await ExperimentService.saveExperiments(url, experimentData.experiments);
+        // Uncomment if ExperimentService is available
+        // savedData = await ExperimentService.saveExperiments(url, experimentData.experiments);
+        
+        console.log(`✅ Would save ${experimentData.experiments.length} experiments for ${url}`);
 
-        // Log successful monitoring
-        await this.logMonitoringActivity(
+        try {
+        savedData = await ExperimentService.saveExperiments(
           url,
-          website._id,
-          "success",
-          duration,
-          experimentData.experiments.length,
-          null
+          experimentData.experiments
         );
 
-        console.log(`✅ Successfully saved ${experimentData.experiments.length} experiments for ${url}`);
-      } else {
-        // Log that no Optimizely was found
-        await this.logMonitoringActivity(
+        console.log(
+          `✅ Successfully saved ${experimentData.experiments.length} experiments for ${url}`
+        );
+      } catch (saveError) {
+        console.error("Error saving experiments:", saveError);
+
+        // Log the error
+        await ExperimentService.logMonitoring(
           url,
           website._id,
-          "success",
+          "error",
           duration,
-          0,
-          experimentData.error || "No Optimizely found"
+          experimentData.experiments ? experimentData.experiments.length : 0,
+          saveError.message
         );
+      }
+        // control code
+        // // Mock saved data for now
+        // savedData = {
+        //   _id: 'mock-saved-id',
+        //   url: url,
+        //   experimentCount: experimentData.experiments.length
+        // };
       }
 
       return savedData;
     } catch (saveError) {
       console.error("Error saving experiments:", saveError);
-
-      // Log the error
-      await this.logMonitoringActivity(
-        url,
-        website._id,
-        "error",
-        duration,
-        experimentData.experiments ? experimentData.experiments.length : 0,
-        saveError.message
-      );
-
-      // Don't throw error, just return null
       return null;
-    }
-  }
-
-  /**
-   * Log monitoring activity
-   * @param {string} url - Website URL
-   * @param {string} websiteId - Website ID
-   * @param {string} status - Status (success/error)
-   * @param {number} duration - Duration in ms
-   * @param {number} experimentCount - Number of experiments found
-   * @param {string} errorMessage - Error message if any
-   */
-  async logMonitoringActivity(url, websiteId, status, duration, experimentCount, errorMessage) {
-    try {
-      await ExperimentService.logMonitoring(
-        url,
-        websiteId,
-        status,
-        duration,
-        experimentCount,
-        errorMessage
-      );
-    } catch (error) {
-      console.error('Error logging monitoring activity:', error);
-      // Don't throw error for logging failures
     }
   }
 
@@ -425,6 +462,7 @@ class OptimizelyScraperService {
         experimentCount: experimentData.experimentCount || 0,
         activeCount: experimentData.activeCount || 0,
         error: experimentData.error,
+        cookieType: experimentData.cookieType || 'unknown', // Added cookie type
       },
       saved: !!savedData,
       savedId: savedData?._id,
@@ -449,43 +487,364 @@ class OptimizelyScraperService {
     }
   }
 
+  // Helper methods
+  extractDomainName(url) {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace('www.', '');
+    } catch (error) {
+      return 'unknown-domain';
+    }
+  }
+
+  extractDomain(url) {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname;
+    } catch (error) {
+      return 'unknown-domain';
+    }
+  }
+
   /**
-   * Batch scrape multiple URLs
+   * Batch scrape multiple URLs with optimized resource management
    * @param {Array} urls - Array of URLs to scrape
    * @param {Object} options - Scraping options
    * @returns {Array} Array of results
    */
   async batchScrapeUrls(urls, options = {}) {
-    const { concurrent = 3, delay = 2000 } = options;
-    const results = [];
+    const { 
+      concurrent = 3, 
+      delay = 2000, 
+      batchSize = 7,
+      maxTabs = 7 
+    } = options;
     
-    console.log(`Starting batch scrape of ${urls.length} URLs with ${concurrent} concurrent workers`);
+    const results = [];
+    console.log(`Starting optimized batch scrape of ${urls.length} URLs`);
+    console.log(`Config: ${concurrent} concurrent, ${batchSize} batch size, ${maxTabs} max tabs per browser`);
 
-    // Process URLs in batches
-    for (let i = 0; i < urls.length; i += concurrent) {
-      const batch = urls.slice(i, i + concurrent);
+    // Process URLs in chunks
+    for (let i = 0; i < urls.length; i += batchSize) {
+      const chunk = urls.slice(i, i + batchSize);
+      console.log(`Processing chunk ${Math.floor(i / batchSize) + 1}: URLs ${i + 1}-${Math.min(i + batchSize, urls.length)}`);
       
-      const batchPromises = batch.map(async (url) => {
-        try {
-          const result = await this.scrapeExperimentsFromPage(url);
-          return { url, success: true, data: result };
-        } catch (error) {
-          console.error(`Error scraping ${url}:`, error);
-          return { url, success: false, error: error.message };
-        }
-      });
+      const chunkResults = await this.processUrlChunk(chunk, { concurrent, maxTabs });
+      results.push(...chunkResults);
 
-      const batchResults = await Promise.allSettled(batchPromises);
-      results.push(...batchResults.map(r => r.value || r.reason));
-
-      // Add delay between batches to avoid overwhelming the target sites
-      if (i + concurrent < urls.length && delay > 0) {
+      // Add delay between chunks
+      if (i + batchSize < urls.length && delay > 0) {
+        console.log(`Waiting ${delay}ms before next chunk...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
 
-    console.log(`Batch scrape completed. ${results.filter(r => r.success).length}/${urls.length} successful`);
+    const successful = results.filter(r => r.success).length;
+    console.log(`Batch scrape completed: ${successful}/${urls.length} successful`);
     return results;
+  }
+
+  /**
+   * Process a chunk of URLs with shared browser instances
+   * @param {Array} urls - URLs to process
+   * @param {Object} options - Processing options
+   * @returns {Array} Results for this chunk
+   */
+  async processUrlChunk(urls, options = {}) {
+    const { concurrent = 3, maxTabs = 7 } = options;
+    const results = [];
+    const browsers = [];
+
+    try {
+      // Launch browsers for this chunk
+      const browserCount = Math.min(Math.ceil(urls.length / maxTabs), concurrent);
+      console.log(`Launching ${browserCount} browsers for ${urls.length} URLs`);
+      
+      for (let i = 0; i < browserCount; i++) {
+        const browser = await this.launchBrowser();
+        browsers.push(browser);
+      }
+
+      // Distribute URLs across browsers
+      const urlBatches = this.distributeUrlsAcrossBrowsers(urls, browsers.length, maxTabs);
+      
+      // Process each browser's batch
+      const batchPromises = urlBatches.map(async (urlBatch, browserIndex) => {
+        const browser = browsers[browserIndex];
+        return await this.processBrowserBatch(browser, urlBatch);
+      });
+
+      const batchResults = await Promise.allSettled(batchPromises);
+      
+      // Flatten results
+      batchResults.forEach(result => {
+        if (result.status === 'fulfilled' && result.value) {
+          results.push(...result.value);
+        }
+      });
+
+    } catch (error) {
+      console.error('Error in processUrlChunk:', error);
+    } finally {
+      // Clean up all browsers
+      await Promise.all(browsers.map(browser => this.closeBrowser(browser)));
+    }
+
+    return results;
+  }
+
+  /**
+   * Distribute URLs across browsers to optimize resource usage
+   * @param {Array} urls - URLs to distribute
+   * @param {number} browserCount - Number of browsers
+   * @param {number} maxTabs - Maximum tabs per browser
+   * @returns {Array} Array of URL batches for each browser
+   */
+  distributeUrlsAcrossBrowsers(urls, browserCount, maxTabs) {
+    const batches = Array.from({ length: browserCount }, () => []);
+    
+    urls.forEach((url, index) => {
+      const browserIndex = index % browserCount;
+      if (batches[browserIndex].length < maxTabs) {
+        batches[browserIndex].push(url);
+      }
+    });
+
+    return batches.filter(batch => batch.length > 0);
+  }
+
+  /**
+   * Process a batch of URLs using a single browser with multiple tabs
+   * @param {Object} browser - Browser instance
+   * @param {Array} urls - URLs to process
+   * @returns {Array} Results for this browser batch
+   */
+  async processBrowserBatch(browser, urls) {
+    const results = [];
+    const pages = [];
+
+    try {
+      console.log(`Processing ${urls.length} URLs in browser batch`);
+
+      // Create pages for concurrent processing
+      const pagePromises = urls.map(async (url) => {
+        let page = null;
+        try {
+          page = await this.createPage(browser);
+          pages.push(page);
+          
+          // Navigate and scrape
+          await this.navigateToPage(page, url);
+          const cookieType = await this.handleCookieConsent(page);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const experimentData = await this.extractOptimizelyData(page);
+          
+          experimentData.cookieType = cookieType;
+          
+          return { url, success: true, data: experimentData };
+        } catch (error) {
+          console.error(`Error processing ${url}:`, error);
+          return { url, success: false, error: error.message };
+        } finally {
+          if (page) {
+            try {
+              await page.close();
+            } catch (e) {
+              console.warn('Error closing page:', e.message);
+            }
+          }
+        }
+      });
+
+      const pageResults = await Promise.allSettled(pagePromises);
+      pageResults.forEach(result => {
+        if (result.status === 'fulfilled' && result.value) {
+          results.push(result.value);
+        } else if (result.status === 'rejected') {
+          console.error('Page processing rejected:', result.reason);
+        }
+      });
+
+    } catch (error) {
+      console.error('Error in processBrowserBatch:', error);
+    }
+
+    return results;
+  }
+
+  /**
+   * Save batch scraping results to database
+   * @param {string} datasetId - Dataset ID
+   * @param {string} datasetName - Dataset name
+   * @param {Array} results - Scraping results
+   * @param {Date} startTime - Scraping start time
+   * @returns {Object} Saved OptimizelyResult document
+   */
+  async saveBatchResults(datasetId, datasetName, results, startTime) {
+    try {
+      const endTime = new Date();
+      const duration = `${endTime - startTime}ms`;
+      
+      // Process results
+      const websiteResults = [];
+      const websitesWithoutOptimizely = [];
+      const failedWebsites = [];
+      let successfulScrapes = 0;
+      let optimizelyDetectedCount = 0;
+      let totalExperiments = 0;
+
+      results.forEach(result => {
+        if (result.success && result.data) {
+          successfulScrapes++;
+          const domain = this.extractDomain(result.url);
+          
+          if (result.data.hasOptimizely) {
+            // Website has Optimizely - add to websiteResults
+            const websiteResult = {
+              url: result.url,
+              domain: domain,
+              success: true,
+              optimizelyDetected: true,
+              experiments: result.data.experiments || [],
+              experimentCount: result.data.experimentCount || 0,
+              activeCount: result.data.activeCount || 0,
+              cookieType: result.data.cookieType || 'unknown',
+              error: result.data.error,
+              scrapedAt: new Date()
+            };
+
+            optimizelyDetectedCount++;
+            totalExperiments += websiteResult.experimentCount;
+            websiteResults.push(websiteResult);
+          } else {
+            // Website does not have Optimizely - add to separate field
+            const websiteWithoutOptimizely = {
+              url: result.url,
+              domain: domain,
+              cookieType: result.data.cookieType || 'unknown',
+              scrapedAt: new Date()
+            };
+
+            websitesWithoutOptimizely.push(websiteWithoutOptimizely);
+          }
+        } else {
+          const domain = this.extractDomain(result.url);
+          failedWebsites.push({
+            url: result.url,
+            domain: domain,
+            error: result.error || 'Unknown error',
+            failedAt: new Date()
+          });
+        }
+      });
+
+      const failedScrapes = results.length - successfulScrapes;
+      const successRate = `${((successfulScrapes / results.length) * 100).toFixed(1)}%`;
+      const optimizelyRate = `${((optimizelyDetectedCount / results.length) * 100).toFixed(1)}%`;
+
+      // Create or update OptimizelyResult document
+      const optimizelyResult = await OptimizelyResult.findOneAndUpdate(
+        { datasetId: datasetId },
+        {
+          datasetId: datasetId,
+          datasetName: datasetName,
+          totalUrls: results.length,
+          successfulScrapes: successfulScrapes,
+          failedScrapes: failedScrapes,
+          optimizelyDetectedCount: optimizelyDetectedCount,
+          totalExperiments: totalExperiments,
+          websiteResults: websiteResults,
+          websitesWithoutOptimizely: websitesWithoutOptimizely,
+          failedWebsites: failedWebsites,
+          scrapingStats: {
+            startedAt: startTime,
+            completedAt: endTime,
+            duration: duration,
+            optimizelyRate: optimizelyRate,
+            successRate: successRate
+          }
+        },
+        { 
+          upsert: true, 
+          new: true,
+          setDefaultsOnInsert: true
+        }
+      );
+
+      console.log(`✅ Saved batch results to database for dataset ${datasetId}`);
+      console.log(`📊 Summary: ${successfulScrapes}/${results.length} successful, ${optimizelyDetectedCount} with Optimizely, ${websitesWithoutOptimizely.length} without Optimizely, ${totalExperiments} total experiments`);
+      
+      return optimizelyResult;
+    } catch (error) {
+      console.error('Error saving batch results:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get scraping results for a dataset
+   * @param {string} datasetId - Dataset ID
+   * @returns {Object} OptimizelyResult document
+   */
+  async getDatasetResults(datasetId) {
+    try {
+      const results = await OptimizelyResult.findOne({ datasetId: datasetId });
+      return results;
+    } catch (error) {
+      console.error('Error getting dataset results:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all websites with Optimizely experiments for a dataset
+   * @param {string} datasetId - Dataset ID
+   * @returns {Array} Websites with experiments
+   */
+  async getWebsitesWithOptimizely(datasetId) {
+    try {
+      const results = await OptimizelyResult.findOne({ datasetId: datasetId });
+      if (!results) return [];
+      
+      return results.websiteResults.filter(site => site.optimizelyDetected && site.experiments.length > 0);
+    } catch (error) {
+      console.error('Error getting websites with Optimizely:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all websites without Optimizely for a dataset
+   * @param {string} datasetId - Dataset ID
+   * @returns {Array} Websites without Optimizely
+   */
+  async getWebsitesWithoutOptimizely(datasetId) {
+    try {
+      const results = await OptimizelyResult.findOne({ datasetId: datasetId });
+      if (!results) return [];
+      
+      return results.websitesWithoutOptimizely;
+    } catch (error) {
+      console.error('Error getting websites without Optimizely:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all failed websites for a dataset
+   * @param {string} datasetId - Dataset ID
+   * @returns {Array} Failed websites
+   */
+  async getFailedWebsites(datasetId) {
+    try {
+      const results = await OptimizelyResult.findOne({ datasetId: datasetId });
+      if (!results) return [];
+      
+      return results.failedWebsites;
+    } catch (error) {
+      console.error('Error getting failed websites:', error);
+      throw error;
+    }
   }
 }
 
