@@ -1,4 +1,4 @@
-// controllers/datasetController.js
+// controller/datasetController.js
 const Dataset = require('../models/Dataset');
 const multer = require('multer');
 const path = require('path');
@@ -153,7 +153,7 @@ const datasetController = {
         .sort(sort)
         .limit(limit * 1)
         .skip((page - 1) * limit)
-        .select('-sheets.rows') // Exclude large row data for list view
+        .select('-sheets.rows') 
         .lean();
 
       const total = await Dataset.countDocuments(query);

@@ -421,18 +421,18 @@
                           Download File
                         </v-list-item-title>
                       </v-list-item>
-                      <v-list-item @click="duplicateDataset(dataset)">
+                      <!-- <v-list-item @click="duplicateDataset(dataset)">
                         <v-list-item-title>
                           <v-icon start>mdi-content-copy</v-icon>
                           Duplicate
                         </v-list-item-title>
-                      </v-list-item>
-                      <v-list-item @click="viewVersions(dataset)">
+                      </v-list-item> -->
+                      <!-- <v-list-item @click="viewVersions(dataset)">
                         <v-list-item-title>
                           <v-icon start>mdi-history</v-icon>
                           View Versions
                         </v-list-item-title>
-                      </v-list-item>
+                      </v-list-item> -->
                       <v-divider></v-divider>
                       <v-list-item @click="deleteDataset(dataset._id)" class="text-error">
                         <v-list-item-title>

@@ -229,22 +229,20 @@ export default {
   },
   methods: {
     handleClick() {
-      this.disableBtn = true
+      this.disableBtn = true;      
       axios
-        .post('http://localhost:3000/getTestData', {
-          url: this.websiteURL,
-        })
+        .get(`http://localhost:3000/api/optimizely/scrape?url=${encodeURIComponent(this.websiteURL)}`)
         .then((response) => {
-          console.log(response.data)
-          this.responseData = response.data
+          console.log(response.data);
+          this.responseData = response.data.data; // Note: .data.data
         })
-        .catch(function (error) {
-          console.log(error)
+        .catch((error) => {
+          console.log(error);
         })
         .finally(() => {
-          this.disableBtn = false
-          this.websiteURL = ''
-        })
+          this.disableBtn = false;
+          this.websiteURL = '';
+        });
     },
     handleSubmit() {
       this.handleClick()

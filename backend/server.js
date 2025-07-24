@@ -3,10 +3,10 @@ require("dotenv").config();
 const express = require("express");
 const puppeteer = require("puppeteer");
 const cors = require("cors");
-const path = require("path");
-const fs = require("fs");
+// const path = require("path");
+// const fs = require("fs");
 const app = express();
-const cron = require("node-cron");
+// const cron = require("node-cron");
 const port = process.env.PORT || 3000;
 const ExperimentService = require("./services/experimentService");
 const Website = require("./models/Website");
@@ -16,6 +16,7 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const datasetRoutes = require('./routes/datasetRoutes');
+const optimizelyRoutes = require('./routes/optimizelyRoutes');
 const { errorHandler, requestLogger } = require('./middleware/errorHandler');
 
 app.use(cors());
@@ -64,7 +65,12 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(requestLogger);
 
 // Routes
+
+// Dataset Routes
 app.use('/api/datasets', datasetRoutes);
+
+// Optimizely Routes[batch scrape, etc.]
+app.use('/api/optimizely', optimizelyRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -111,7 +117,6 @@ app.post("/getTestData", async (req, res) => {
   const startTime = Date.now();
 
   try {
-    // Step 1: Get or create website in database
     const website = await ExperimentService.getOrCreateWebsite(url);
     console.log(`Processing request for: ${website.name} (${url})`);
 
