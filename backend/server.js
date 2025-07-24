@@ -111,135 +111,120 @@ app.post("/getTestData", async (req, res) => {
   const startTime = Date.now();
 
   try {
-    // Step 1: Get or create website in database
-    const website = await ExperimentService.getOrCreateWebsite(url);
-    console.log(`Processing request for: ${website.name} (${url})`);
-
-    // Step 2: Launch browser and get experiments
-    browser = await puppeteer.launch({
-      headless: true, // Show browser window
-      devtools: true, // Open DevTools
-      slowMo: 50,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-      ],
+    const browser = await puppeteer.launch({
+        headless: true,
+        // defaultViewport: null, // No longer needed as we set a specific viewport
+        args: [
+            '--no-sandbox', // Essential for some environments like Render free tier
+            '--disable-setuid-sandbox',
+            '--disable-gpu', // Recommended for headless environments
+            '--disable-dev-shm-usage', // Recommended for Docker/containerized environments
+            '--window-size=800,600' // Set a smaller initial window size
+        ]
     });
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 1000, height: 768 });
-    page.setDefaultTimeout(30000);
+    // Set a smaller page viewport to match your needs
+    await page.setViewport({ width: 800, height: 600 });
 
-    console.log(`Navigating to: ${url}`);
-    await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
+    // --- OPTIMIZATION START ---
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+        if (req.resourceType() === 'image' || req.resourceType() === 'stylesheet' || req.resourceType() === 'font') {
+            req.abort();
+        } else {
+            req.continue();
+        }
+    });
+    // --- OPTIMIZATION END ---
+
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+    // Handle cookie consent buttons if they exist
+    const cookieType = await page.evaluate(() => {
+        return new Promise((resolve) => {
+            let cookieType = 'custom';
+
+            async function acceptCookie(btn, interval) {
+                if (interval) {
+                    clearInterval(interval);
+                }
+                btn.click();
+                resolve(cookieType);
+            }
+
+            const cookieProviderAcceptSelector = [
+                {
+                    cookieType: 'onetrust',
+                    cookieSelector: '#onetrust-accept-btn-handler',
+                },
+                {
+                    cookieType: 'Cookie Bot',
+                    cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+                }
+            ];
+
+            let attempts = 0;
+            const maxAttempts = 50;
+
+            let interval = setInterval(async () => {
+                attempts++;
+
+                if (attempts > maxAttempts) {
+                    clearInterval(interval);
+                    resolve('not_found');
+                    return;
+                }
+
+                for (const cookie of cookieProviderAcceptSelector) {
+                    const element = document.querySelector(cookie.cookieSelector);
+                    if (element) {
+                        cookieType = cookie.cookieType;
+                        await acceptCookie(element, interval);
+                        return;
+                    }
+                }
+            }, 100);
+        });
     });
 
-    console.log("Page loaded, handling cookie consent and checking Optimizely...");
-
-    // Handle cookie consent and get experiment data
+    // Get Optimizely experiment details
     const experimentData = await page.evaluate(() => {
-      return new Promise((resolve) => {
-        // Handle cookie consent first
-
-        // Wait for Optimizely and collect data
-        setTimeout(() => {
-
-          const handleCookieConsent = () => {
-            const keywords = [
-              "agree", "got", "necessary", "accept", "allow", "continue"
-            ];
-            const selectors = ["button", "a", 'div[role="button"]'];
-
-            selectors.forEach((selector) => {
-              const elements = document.querySelectorAll(selector);
-              elements.forEach((element) => {
-                const text = element.textContent?.toLowerCase() || '';
-                if (keywords.some((keyword) => text.includes(keyword))) {
-                  console.log(element)
-                  element.click();
-                  console.log(`Clicked consent button: ${text}`);
-                }
-              });
-            });
-          };
-
-
-          // Handle consent immediately
-          handleCookieConsent();
-          console.log('cookie added')
-          setTimeout(function () {
-
-            if (!window.optimizely) {
-              resolve({
-                hasOptimizely: false,
-                experiments: null,
-                error: "Optimizely not found on page",
-              });
-              return;
-            }
+        function getOptiExperimentDetails() {
+            if (!window.optimizely || typeof window.optimizely.get !== 'function') return null;
 
             try {
-              const optimizelyData = window.optimizely.get("data");
-              const optimizelyState = window.optimizely.get("state");
-              const activeExperiments = optimizelyState.getActiveExperimentIds();
-              console.log('activeExperiments->');
-              console.log(activeExperiments);
-              if (!optimizelyData || !optimizelyData.experiments) {
-                resolve({
-                  hasOptimizely: true,
-                  experiments: [],
-                  error: "No experiments found",
+                const data = window.optimizely.get('data');
+                if (!data || typeof data.experiments !== 'object') return null;
+
+                const experiments = data.experiments;
+                const experimentArray = [];
+
+                Object.entries(experiments).forEach(([id, exp]) => {
+                    experimentArray.push({
+                        id: id,
+                        name: exp.name,
+                        status: exp.status,
+                        variations: exp.variations,
+                        audience_ids: exp.audience_ids,
+                        metrics: exp.metrics,
+                    });
                 });
-                return;
-              }
 
-              const experiments = [];
-              const experimentIds = Object.keys(optimizelyData.experiments);
-              console.log("experimentIds:", experimentIds);
-
-              experimentIds.forEach((id) => {
-                console.log('each experiments ID->', id);
-                const exp = optimizelyData.experiments[id];
-                experiments.push({
-                  id: id,
-                  name: exp.name || "Unnamed Experiment",
-                  status: exp.isActive || false,
-                  variations: exp.variations || [],
-                  audience_ids: exp.audience_ids || [],
-                  metrics: exp.metrics || [],
-                  isActive: activeExperiments.includes(id) || false,
-                  variationMap: optimizelyState?.variationMap?.[id] || null,
-                });
-              });
-
-              resolve({
-                hasOptimizely: true,
-                experiments: experiments,
-                experimentCount: experiments.length,
-                activeCount: experiments.filter((e) => e.isActive).length,
-              });
-            } catch (error) {
-              resolve({
-                hasOptimizely: true,
-                experiments: [],
-                error: error.message,
-              });
+                return experimentArray;
+            } catch (e) {
+                console.error('Error fetching Optimizely experiment details:', e);
+                return null;
             }
-          }, 2000)
+        }
 
-        }, 12000); // Wait 12 seconds for Optimizely to load
-      });
+        return {
+            experiments: getOptiExperimentDetails(),
+        };
     });
 
-    // Close browser
-    // await browser.close();
+    await page.close();
+    await browser.close();
     browser = null;
 
     const duration = Date.now() - startTime;
@@ -305,6 +290,7 @@ app.post("/getTestData", async (req, res) => {
         experimentCount: experimentData.experimentCount || 0,
         activeCount: experimentData.activeCount || 0,
         error: experimentData.error,
+        cookieType,
       },
       saved: !!savedData,
       savedId: savedData?._id,
