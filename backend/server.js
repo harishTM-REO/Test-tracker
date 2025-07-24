@@ -49,6 +49,7 @@ app.post('/getTestData', async (req, res) => {
         const page = await browser.newPage();
         await page.setViewport({ width: 800, height: 600 });
 
+        // --- OPTIMIZATION START ---
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             if (req.resourceType() === 'image' || req.resourceType() === 'stylesheet' || req.resourceType() === 'font') {
@@ -57,57 +58,79 @@ app.post('/getTestData', async (req, res) => {
                 req.continue();
             }
         });
+        // --- OPTIMIZATION END ---
 
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-        // Cookie consent logic
-        let cookieType = 'not_found';
-        try {
-            cookieType = await page.evaluate(async () => {
+        // Handle cookie consent buttons if they exist
+        const cookieType = await page.evaluate(() => {
+            return new Promise((resolve) => {
+                let cookieType = 'custom';
+
+                async function acceptCookie(btn, interval) {
+                    if (interval) {
+                        clearInterval(interval);
+                    }
+                    btn.click();
+                    resolve(cookieType);
+                }
+
                 const cookieProviderAcceptSelector = [
-                    { cookieType: 'onetrust', cookieSelector: '#onetrust-accept-btn-handler' },
-                    { cookieType: 'Cookie Bot', cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll' }
+                    {
+                        cookieType: 'onetrust',
+                        cookieSelector: '#onetrust-accept-btn-handler',
+                    },
+                    {
+                        cookieType: 'Cookie Bot',
+                        cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+                    }
                 ];
 
-                for (const cookie of cookieProviderAcceptSelector) {
-                    const element = document.querySelector(cookie.cookieSelector);
-                    if (element) {
-                        element.click();
-                        return cookie.cookieType;
+                let attempts = 0;
+                const maxAttempts = 50;
+
+                let interval = setInterval(async () => {
+                    attempts++;
+
+                    if (attempts > maxAttempts) {
+                        clearInterval(interval);
+                        resolve('not_found');
+                        return;
                     }
-                }
-                return 'not_found';
+
+                    for (const cookie of cookieProviderAcceptSelector) {
+                        const element = document.querySelector(cookie.cookieSelector);
+                        if (element) {
+                            cookieType = cookie.cookieType;
+                            await acceptCookie(element, interval);
+                            return;
+                        }
+                    }
+                }, 100);
             });
+        });
 
-            await Promise.all([
-                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => null),
-                // page.waitForTimeout(1000)
-            ]);
-        } catch (error) {
-            console.error('Error handling cookie consent:', error.message);
-            cookieType = 'error';
-        }
+        // Get Optimizely experiment details
+        const experimentDetails = await page.evaluate(() => {
+            return new Promise((resolve) => {
+                console.log('Waiting for Optimizely to load...');
 
-        // Optimizely logic
-        let experimentDetails = {
-            experiments: null,
-            isOptimizelyDetected: false,
-            optimizelyData: null,
-            activeExperiments: []
-        };
-        try {
-            await page.waitForFunction('window.optimizely && typeof window.optimizely.get === "function"', {
-                timeout: 10000
-            }).catch(() => console.log('Optimizely not detected or timed out'));
-
-            experimentDetails = await page.evaluate(() => {
                 function getOptiExperimentDetails() {
-                    if (!window.optimizely || typeof window.optimizely.get !== 'function') return null;
+                    if (!window.optimizely || typeof window.optimizely.get !== 'function') {
+                        return null;
+                    }
+
                     try {
                         const data = window.optimizely.get('data');
-                        if (!data || typeof data.experiments !== 'object') return null;
+                        console.log('Optimizely data found:', !!data);
+
+                        if (!data || typeof data.experiments !== 'object') {
+                            return null;
+                        }
+
                         const experiments = data.experiments;
                         const experimentArray = [];
+
                         Object.entries(experiments).forEach(([id, exp]) => {
                             experimentArray.push({
                                 id: id,
@@ -118,34 +141,73 @@ app.post('/getTestData', async (req, res) => {
                                 metrics: exp.metrics,
                             });
                         });
-                        return experimentArray;
+
+                        return {
+                            experiments: experimentArray,
+                            isOptimizelyDetected: true,
+                            optimizelyData: data
+                        };
                     } catch (e) {
                         console.error('Error fetching Optimizely experiment details:', e);
                         return null;
                     }
                 }
-                return {
-                    experiments: getOptiExperimentDetails(),
-                    isOptimizelyDetected: !!window.optimizely,
-                    optimizelyData: window.optimizely ? window.optimizely.get('data') : null,
-                    activeExperiments: window.optimizely ? window.optimizely.get('state').getActiveExperimentIds() : []
-                };
+
+                let attempts = 0;
+                const maxAttempts = 100;
+                const checkInterval = 200;
+
+                function checkOptimizely() {
+                    attempts++;
+                    console.log(`Optimizely check attempt ${attempts}/${maxAttempts}`);
+
+                    const result = getOptiExperimentDetails();
+
+                    if (result && result.experiments && result.experiments.length > 0) {
+                        console.log('Optimizely experiments found:', result.experiments.length);
+                        resolve(result);
+                        return;
+                    }
+
+                    if (window.optimizely && typeof window.optimizely.get === 'function') {
+                        console.log('Optimizely object found, but no experiment data yet...');
+                    }
+
+                    if (attempts >= maxAttempts) {
+                        console.log('Max attempts reached, returning what we have');
+                        resolve({
+                            experiments: [],
+                            isOptimizelyDetected: !!(window.optimizely && typeof window.optimizely.get === 'function'),
+                            optimizelyData: null
+                        });
+                        return;
+                    }
+
+                    setTimeout(checkOptimizely, checkInterval);
+                }
+
+                checkOptimizely();
             });
-        } catch (error) {
-            console.error('Error fetching Optimizely details:', error.message);
-        }
+        });
+
+        // Additional wait to ensure all async operations complete
 
         await page.close();
+        await browser.close();
+
+        console.log('Final experiment details:', {
+            detected: experimentDetails.isOptimizelyDetected,
+            experimentCount: experimentDetails.experiments ? experimentDetails.experiments.length : 0
+        });
 
         res.status(200).json({
             url,
             cookieType,
             optimizelyDetected: experimentDetails.isOptimizelyDetected,
-            experiments: experimentDetails.experiments,
-            optimizelyData: experimentDetails.optimizelyData,
-            activeExperiments: experimentDetails.activeExperiments
+            experiments: experimentDetails.experiments || [],
+            optimizelyData: experimentDetails.optimizelyData || null,
+            activeExperiments: experimentDetails.activeExperiments || []
         });
-
     } catch (error) {
         console.error('Error during test data retrieval:', error.message);
         if (error.message.includes('403')) {
