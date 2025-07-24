@@ -19,19 +19,17 @@ app.post('/getTestData', async (req, res) => {
 
     try {
         const browser = await puppeteer.launch({
-            headless: true,
-            // defaultViewport: null, // No longer needed as we set a specific viewport
+            headless: false,
             args: [
-                '--no-sandbox', // Essential for some environments like Render free tier
+                '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-gpu', // Recommended for headless environments
-                '--disable-dev-shm-usage', // Recommended for Docker/containerized environments
-                '--window-size=800,600' // Set a smaller initial window size
+                '--disable-gpu',
+                '--disable-dev-shm-usage',
+                '--window-size=800,600'
             ]
         });
 
         const page = await browser.newPage();
-        // Set a smaller page viewport to match your needs
         await page.setViewport({ width: 800, height: 600 });
 
         // --- OPTIMIZATION START ---
@@ -97,49 +95,101 @@ app.post('/getTestData', async (req, res) => {
 
         // Get Optimizely experiment details
         const experimentDetails = await page.evaluate(() => {
-            function getOptiExperimentDetails() {
-                if (!window.optimizely || typeof window.optimizely.get !== 'function') return null;
+            return new Promise((resolve) => {
+                console.log('Waiting for Optimizely to load...');
+                
+                function getOptiExperimentDetails() {
+                    if (!window.optimizely || typeof window.optimizely.get !== 'function') {
+                        return null;
+                    }
 
-                try {
-                    const data = window.optimizely.get('data');
-                    if (!data || typeof data.experiments !== 'object') return null;
+                    try {
+                        const data = window.optimizely.get('data');
+                        console.log('Optimizely data found:', !!data);
+                        
+                        if (!data || typeof data.experiments !== 'object') {
+                            return null;
+                        }
+                        
+                        const experiments = data.experiments;
+                        const experimentArray = [];
 
-                    const experiments = data.experiments;
-                    const experimentArray = [];
-
-                    Object.entries(experiments).forEach(([id, exp]) => {
-                        experimentArray.push({
-                            id: id,
-                            name: exp.name,
-                            status: exp.status,
-                            variations: exp.variations,
-                            audience_ids: exp.audience_ids,
-                            metrics: exp.metrics,
+                        Object.entries(experiments).forEach(([id, exp]) => {
+                            experimentArray.push({
+                                id: id,
+                                name: exp.name,
+                                status: exp.status,
+                                variations: exp.variations,
+                                audience_ids: exp.audience_ids,
+                                metrics: exp.metrics,
+                            });
                         });
-                    });
 
-                    return experimentArray;
-                } catch (e) {
-                    console.error('Error fetching Optimizely experiment details:', e);
-                    return null;
+                        return {
+                            experiments: experimentArray,
+                            isOptimizelyDetected: true,
+                            optimizelyData: data
+                        };
+                    } catch (e) {
+                        console.error('Error fetching Optimizely experiment details:', e);
+                        return null;
+                    }
                 }
-            }
 
-            return {
-                experiments: getOptiExperimentDetails(),
-            };
+                let attempts = 0;
+                const maxAttempts = 100; 
+                const checkInterval = 200;
+
+                function checkOptimizely() {
+                    attempts++;
+                    console.log(`Optimizely check attempt ${attempts}/${maxAttempts}`);
+                    
+                    const result = getOptiExperimentDetails();
+                    
+                    if (result && result.experiments && result.experiments.length > 0) {
+                        console.log('Optimizely experiments found:', result.experiments.length);
+                        resolve(result);
+                        return;
+                    }
+                    
+                    if (window.optimizely && typeof window.optimizely.get === 'function') {
+                        console.log('Optimizely object found, but no experiment data yet...');
+                    }
+                    
+                    if (attempts >= maxAttempts) {
+                        console.log('Max attempts reached, returning what we have');
+                        resolve({
+                            experiments: [],
+                            isOptimizelyDetected: !!(window.optimizely && typeof window.optimizely.get === 'function'),
+                            optimizelyData: null
+                        });
+                        return;
+                    }
+                    
+                    setTimeout(checkOptimizely, checkInterval);
+                }
+
+                checkOptimizely();
+            });
         });
+
+        // Additional wait to ensure all async operations complete
 
         await page.close();
         await browser.close();
+
+        console.log('Final experiment details:', {
+            detected: experimentDetails.isOptimizelyDetected,
+            experimentCount: experimentDetails.experiments ? experimentDetails.experiments.length : 0
+        });
 
         res.status(200).json({
             url,
             cookieType,
             optimizelyDetected: experimentDetails.isOptimizelyDetected,
-            experiments: experimentDetails.experiments,
-            optimizelyData: experimentDetails.optimizelyData,
-            activeExperiments: experimentDetails.activeExperiments
+            experiments: experimentDetails.experiments || [],
+            optimizelyData: experimentDetails.optimizelyData || null,
+            activeExperiments: experimentDetails.activeExperiments || []
         });
 
     } catch (error) {
