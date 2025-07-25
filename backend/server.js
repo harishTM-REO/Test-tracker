@@ -21,7 +21,7 @@ const connectWithRetry = async (retries = 3, delay = 2000) => {
         try {
             console.log(`Attempting connection ${i + 1}/${retries}...`);
             return await puppeteer.connect({
-                browserWSEndpoint: `wss://production-sfo.browserless.io?token=2SjBLyg7WyPbQLTab3c5738c070c6bdc8c45c1dd2351b500d`,
+                browserWSEndpoint: `wss://production-sfo.browserless.io?token=${BROWSERLESS_API_TOKEN}`,
                 defaultViewport: null,
                 ignoreHTTPSErrors: true
             });
@@ -43,10 +43,21 @@ app.post('/getTestData', async (req, res) => {
     }
 
     let browser;
+    let page;
+    
     try {
         browser = await connectWithRetry();
+        page = await browser.newPage();
+        
+        // Set up error handlers for the page
+        page.on('error', (error) => {
+            console.error('Page error:', error);
+        });
+        
+        page.on('pageerror', (error) => {
+            console.error('Page script error:', error);
+        });
 
-        const page = await browser.newPage();
         await page.setViewport({ width: 800, height: 600 });
 
         // --- OPTIMIZATION START ---
@@ -60,140 +71,164 @@ app.post('/getTestData', async (req, res) => {
         });
         // --- OPTIMIZATION END ---
 
-        await page.goto(url, { waitUntil: 'domcontentloaded' });
-
-        // Handle cookie consent buttons if they exist
-        const cookieType = await page.evaluate(() => {
-            return new Promise((resolve) => {
-                let cookieType = 'custom';
-
-                async function acceptCookie(btn, interval) {
-                    if (interval) {
-                        clearInterval(interval);
-                    }
-                    btn.click();
-                    resolve(cookieType);
-                }
-
-                const cookieProviderAcceptSelector = [
-                    {
-                        cookieType: 'onetrust',
-                        cookieSelector: '#onetrust-accept-btn-handler',
-                    },
-                    {
-                        cookieType: 'Cookie Bot',
-                        cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
-                    }
-                ];
-
-                let attempts = 0;
-                const maxAttempts = 50;
-
-                let interval = setInterval(async () => {
-                    attempts++;
-
-                    if (attempts > maxAttempts) {
-                        clearInterval(interval);
-                        resolve('not_found');
-                        return;
-                    }
-
-                    for (const cookie of cookieProviderAcceptSelector) {
-                        const element = document.querySelector(cookie.cookieSelector);
-                        if (element) {
-                            cookieType = cookie.cookieType;
-                            await acceptCookie(element, interval);
-                            return;
-                        }
-                    }
-                }, 100);
-            });
+        await page.goto(url, { 
+            waitUntil: 'domcontentloaded',
+            timeout: 30000 
         });
 
-        // Get Optimizely experiment details
-        const experimentDetails = await page.evaluate(() => {
-            return new Promise((resolve) => {
-                console.log('Waiting for Optimizely to load...');
+        // Handle cookie consent buttons if they exist
+        const cookieType = await Promise.race([
+            page.evaluate(() => {
+                return new Promise((resolve) => {
+                    let cookieType = 'custom';
 
-                function getOptiExperimentDetails() {
-                    if (!window.optimizely || typeof window.optimizely.get !== 'function') {
-                        return null;
+                    async function acceptCookie(btn, interval) {
+                        if (interval) {
+                            clearInterval(interval);
+                        }
+                        btn.click();
+                        resolve(cookieType);
                     }
 
-                    try {
-                        const data = window.optimizely.get('data');
-                        console.log('Optimizely data found:', !!data);
+                    const cookieProviderAcceptSelector = [
+                        {
+                            cookieType: 'onetrust',
+                            cookieSelector: '#onetrust-accept-btn-handler',
+                        },
+                        {
+                            cookieType: 'Cookie Bot',
+                            cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+                        }
+                    ];
 
-                        if (!data || typeof data.experiments !== 'object') {
+                    let attempts = 0;
+                    const maxAttempts = 50;
+
+                    let interval = setInterval(async () => {
+                        attempts++;
+
+                        if (attempts > maxAttempts) {
+                            clearInterval(interval);
+                            resolve('not_found');
+                            return;
+                        }
+
+                        for (const cookie of cookieProviderAcceptSelector) {
+                            const element = document.querySelector(cookie.cookieSelector);
+                            if (element) {
+                                cookieType = cookie.cookieType;
+                                await acceptCookie(element, interval);
+                                return;
+                            }
+                        }
+                    }, 100);
+                });
+            }),
+            new Promise(resolve => setTimeout(() => resolve('timeout'), 10000))
+        ]).catch(error => {
+            console.error('Cookie handling error:', error);
+            return 'error';
+        });
+
+        // Get Optimizely experiment details with timeout protection
+        const experimentDetails = await Promise.race([
+            page.evaluate(() => {
+                return new Promise((resolve) => {
+                    console.log('Waiting for Optimizely to load...');
+
+                    function getOptiExperimentDetails() {
+                        if (!window.optimizely || typeof window.optimizely.get !== 'function') {
                             return null;
                         }
 
-                        const experiments = data.experiments;
-                        const experimentArray = [];
+                        try {
+                            const data = window.optimizely.get('data');
+                            console.log('Optimizely data found:', !!data);
 
-                        Object.entries(experiments).forEach(([id, exp]) => {
-                            experimentArray.push({
-                                id: id,
-                                name: exp.name,
-                                status: exp.status,
-                                variations: exp.variations,
-                                audience_ids: exp.audience_ids,
-                                metrics: exp.metrics,
+                            if (!data || typeof data.experiments !== 'object') {
+                                return null;
+                            }
+
+                            const experiments = data.experiments;
+                            const experimentArray = [];
+
+                            Object.entries(experiments).forEach(([id, exp]) => {
+                                experimentArray.push({
+                                    id: id,
+                                    name: exp.name,
+                                    status: exp.status,
+                                    variations: exp.variations,
+                                    audience_ids: exp.audience_ids,
+                                    metrics: exp.metrics,
+                                });
                             });
-                        });
 
-                        return {
-                            experiments: experimentArray,
-                            isOptimizelyDetected: true,
-                            optimizelyData: data
-                        };
-                    } catch (e) {
-                        console.error('Error fetching Optimizely experiment details:', e);
-                        return null;
-                    }
-                }
-
-                let attempts = 0;
-                const maxAttempts = 100;
-                const checkInterval = 200;
-
-                function checkOptimizely() {
-                    attempts++;
-                    console.log(`Optimizely check attempt ${attempts}/${maxAttempts}`);
-
-                    const result = getOptiExperimentDetails();
-
-                    if (result && result.experiments && result.experiments.length > 0) {
-                        console.log('Optimizely experiments found:', result.experiments.length);
-                        resolve(result);
-                        return;
+                            return {
+                                experiments: experimentArray,
+                                isOptimizelyDetected: true,
+                                optimizelyData: data
+                            };
+                        } catch (e) {
+                            console.error('Error fetching Optimizely experiment details:', e);
+                            return null;
+                        }
                     }
 
-                    if (window.optimizely && typeof window.optimizely.get === 'function') {
-                        console.log('Optimizely object found, but no experiment data yet...');
+                    let attempts = 0;
+                    const maxAttempts = 50; // Reduced from 100
+                    const checkInterval = 200;
+
+                    function checkOptimizely() {
+                        attempts++;
+                        console.log(`Optimizely check attempt ${attempts}/${maxAttempts}`);
+
+                        const result = getOptiExperimentDetails();
+
+                        if (result && result.experiments && result.experiments.length > 0) {
+                            console.log('Optimizely experiments found:', result.experiments.length);
+                            resolve(result);
+                            return;
+                        }
+
+                        if (window.optimizely && typeof window.optimizely.get === 'function') {
+                            console.log('Optimizely object found, but no experiment data yet...');
+                        }
+
+                        if (attempts >= maxAttempts) {
+                            console.log('Max attempts reached, returning what we have');
+                            resolve({
+                                experiments: [],
+                                isOptimizelyDetected: !!(window.optimizely && typeof window.optimizely.get === 'function'),
+                                optimizelyData: null
+                            });
+                            return;
+                        }
+
+                        setTimeout(checkOptimizely, checkInterval);
                     }
 
-                    if (attempts >= maxAttempts) {
-                        console.log('Max attempts reached, returning what we have');
-                        resolve({
-                            experiments: [],
-                            isOptimizelyDetected: !!(window.optimizely && typeof window.optimizely.get === 'function'),
-                            optimizelyData: null
-                        });
-                        return;
-                    }
-
-                    setTimeout(checkOptimizely, checkInterval);
-                }
-
-                checkOptimizely();
-            });
+                    checkOptimizely();
+                });
+            }),
+            new Promise(resolve => {
+                setTimeout(() => {
+                    console.log('Optimizely detection timed out');
+                    resolve({
+                        experiments: [],
+                        isOptimizelyDetected: false,
+                        optimizelyData: null
+                    });
+                }, 15000); // 15 second timeout
+            })
+        ]).catch(error => {
+            console.error('Optimizely detection error:', error);
+            return {
+                experiments: [],
+                isOptimizelyDetected: false,
+                optimizelyData: null,
+                error: error.message
+            };
         });
-
-        // Additional wait to ensure all async operations complete
-
-        await page.close();
-        await browser.close();
 
         console.log('Final experiment details:', {
             detected: experimentDetails.isOptimizelyDetected,
@@ -208,6 +243,7 @@ app.post('/getTestData', async (req, res) => {
             optimizelyData: experimentDetails.optimizelyData || null,
             activeExperiments: experimentDetails.activeExperiments || []
         });
+
     } catch (error) {
         console.error('Error during test data retrieval:', error.message);
         if (error.message.includes('403')) {
@@ -215,8 +251,21 @@ app.post('/getTestData', async (req, res) => {
         }
         res.status(500).json({ error: 'Internal server error', details: error.message });
     } finally {
-        if (browser) {
-            await browser.disconnect();
+        // Proper cleanup with error handling
+        try {
+            if (page && !page.isClosed()) {
+                await page.close();
+            }
+        } catch (error) {
+            console.error('Error closing page:', error);
+        }
+        
+        try {
+            if (browser && browser.isConnected()) {
+                await browser.disconnect();
+            }
+        } catch (error) {
+            console.error('Error disconnecting browser:', error);
         }
     }
 });
