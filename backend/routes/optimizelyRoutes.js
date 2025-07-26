@@ -9,7 +9,8 @@ const {
   getDatasetResults,
   getWebsitesWithOptimizely,
   getWebsitesWithoutOptimizely,
-  getFailedWebsites
+  getFailedWebsites,
+  scrapeFromDatasetBrowserLess
 } = require('../controller/optimizelyController');
 
 /**
@@ -43,6 +44,17 @@ router.post('/batch-scrape', batchScrapeExperiments);
  * @features Dataset integration with enhanced analytics and reporting
  */
 router.post('/scrape-from-dataset', scrapeFromDataset);
+
+/**
+ * @route   POST /api/optimizely/scrape-from-dataset-browser-less
+ * @desc    Scrape URLs from a saved dataset using browser less (Enhanced)
+ * @access  Public
+ * @body    { datasetId: string, options?: { concurrent?: number, delay?: number } }
+ * @example POST /api/optimizely/scrape-from-dataset/browser-less
+ *          Body: { "datasetId": "64abc123def456789", "options": { "concurrent": 2 } }
+ * @features Dataset integration with enhanced analytics and reporting
+ */
+router.post('/scrape-from-dataset-browser-less', scrapeFromDatasetBrowserLess);
 
 /**
  * @route   GET /api/optimizely/health

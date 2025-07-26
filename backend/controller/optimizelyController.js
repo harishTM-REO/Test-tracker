@@ -1,6 +1,7 @@
 // controllers/optimizelyController.js - Enhanced with your working approach
 const OptimizelyScraperService = require('../services/optimizelyScraperService');
 const mongoose = require('mongoose');
+const axios = require('axios');
 
 
 /**
@@ -495,6 +496,230 @@ async function getFailedWebsites(req, res) {
   }
 }
 
+/**
+ * Helper function to scrape URLs using external API batch-wise
+ * @param {Array} urls - Array of URLs to scrape
+ * @param {Object} options - Scraping options
+ * @returns {Array} Array of API responses
+ */
+async function scrapeUrlsUsingExternalAPI(urls, options = {}) {
+  const { batchSize = 10, delay = 1000 } = options;
+  const allResults = [];
+  
+  console.log(`Processing ${urls.length} URLs in batches of ${batchSize}`);
+  
+  for (let i = 0; i < urls.length; i += batchSize) {
+    const batch = urls.slice(i, i + batchSize);
+    console.log(`Processing batch ${Math.floor(i / batchSize) + 1}: URLs ${i + 1}-${Math.min(i + batchSize, urls.length)}`);
+    
+    // Process batch concurrently
+    const batchPromises = batch.map(async (url) => {
+      try {
+        console.log(`Calling external API for: ${url}`);
+        const response = await axios.post(
+          'https://test-tracker-backend-ww88.onrender.com/getTestData',
+          { url: url },
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            timeout: 30000 // 30 second timeout
+          }
+        );
+        
+        return {
+          url: url,
+          success: true,
+          data: response.data
+        };
+      } catch (error) {
+        console.error(`Error calling external API for ${url}:`, error.message);
+        return {
+          url: url,
+          success: false,
+          error: error.message,
+          data: null
+        };
+      }
+    });
+    
+    const batchResults = await Promise.allSettled(batchPromises);
+    
+    // Process settled promises
+    batchResults.forEach(result => {
+      if (result.status === 'fulfilled') {
+        allResults.push(result.value);
+      } else {
+        allResults.push({
+          url: 'unknown',
+          success: false,
+          error: result.reason?.message || 'Promise rejected',
+          data: null
+        });
+      }
+    });
+    
+    // Add delay between batches
+    if (i + batchSize < urls.length && delay > 0) {
+      console.log(`Waiting ${delay}ms before next batch...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  return allResults;
+}
+
+/**
+ * Helper function to process external API results into our standard format
+ * @param {Array} results - Raw API results
+ * @returns {Array} Processed results
+ */
+function processExternalAPIResults(results) {
+  return results.map(result => {
+    if (!result.success || !result.data) {
+      return {
+        url: result.url,
+        success: false,
+        error: result.error || 'No data received',
+        data: null
+      };
+    }
+    
+    // Transform external API response to our internal format
+    const externalData = result.data;
+    
+    return {
+      url: result.url,
+      success: true,
+      data: {
+        hasOptimizely: externalData.optimizelyDetected || false,
+        experiments: externalData.experiments || [],
+        experimentCount: externalData.experiments ? externalData.experiments.length : 0,
+        activeCount: externalData.experiments ? externalData.experiments.filter(exp => exp.status === 'Running').length : 0,
+        cookieType: externalData.cookieType || 'unknown',
+        error: null,
+        optimizelyData: externalData.optimizelyData || null
+      }
+    };
+  });
+}
+
+async function scrapeFromDatasetBrowserLess(req, res){
+  try {
+    const { datasetId, options = {} } = req.body;
+    console.log(`Received browserless scrape from dataset request for ID: ${datasetId}`);
+
+    if (!datasetId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Dataset ID is required'
+      });
+    }
+
+     if (!mongoose.Types.ObjectId.isValid(datasetId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid dataset ID format'
+      });
+    }
+
+    // Get dataset from database
+    const Dataset = require('../models/Dataset');
+    const dataset = await Dataset.findOne({ 
+      _id: new mongoose.Types.ObjectId(datasetId), 
+      isDeleted: false 
+    })
+    .lean();
+    
+    if (!dataset) {
+      return res.status(404).json({
+        success: false,
+        message: 'Dataset not found'
+      });
+    }
+
+    // Extract URLs from companies data
+    const urls = [];
+    if (dataset.companies && Array.isArray(dataset.companies)) {
+      dataset.companies.forEach(company => {
+        if (company.companyURL && isValidUrl(company.companyURL)) {
+          urls.push(company.companyURL);
+        }
+      });
+    }
+    console.log(`Found ${urls.length} URLs to process`);
+
+    if (urls.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid URLs found in dataset',
+        datasetName: dataset.name
+      });
+    }
+
+    console.log(`🔍 Starting browserless scrape for dataset "${dataset.name}" with ${urls.length} URLs`);
+
+    const startTime = new Date();
+    
+    // Perform batch processing using external API
+    const results = await scrapeUrlsUsingExternalAPI(urls, options);
+
+    // Process and concatenate results
+    const processedResults = processExternalAPIResults(results);
+
+    // Save to database if needed
+    const savedResults = await OptimizelyScraperService.saveBatchResults(
+      datasetId, 
+      dataset.name, 
+      processedResults, 
+      startTime
+    );
+
+    // Calculate summary statistics
+    const successful = processedResults.filter(r => r.success);
+    const withOptimizely = successful.filter(r => r.data?.hasOptimizely);
+    const withExperiments = successful.filter(r => r.data?.experiments?.length > 0);
+
+    res.status(200).json({
+      success: true,
+      message: 'Browserless dataset scraping completed',
+      data: {
+        dataset: {
+          id: dataset._id,
+          name: dataset.name,
+          totalCompanies: dataset.companies?.length || 0
+        },
+        summary: {
+          totalUrls: urls.length,
+          successful: successful.length,
+          failed: processedResults.length - successful.length,
+          withOptimizely: withOptimizely.length,
+          withExperiments: withExperiments.length,
+          optimizelyRate: `${((withOptimizely.length / urls.length) * 100).toFixed(1)}%`,
+          experimentRate: `${((withExperiments.length / urls.length) * 100).toFixed(1)}%`
+        },
+        savedResults: {
+          id: savedResults._id,
+          totalExperiments: savedResults.totalExperiments,
+          optimizelyDetectedCount: savedResults.optimizelyDetectedCount
+        },
+        results: processedResults,
+        completedAt: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in scrapeFromDatasetBrowserLess controller:', error);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to scrape from dataset using browserless',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+
 module.exports = {
   scrapeExperiments,
   batchScrapeExperiments,
@@ -504,5 +729,6 @@ module.exports = {
   getWebsitesWithOptimizely,
   getWebsitesWithoutOptimizely,
   getFailedWebsites,
-  isValidUrl
+  isValidUrl,
+  scrapeFromDatasetBrowserLess
 };

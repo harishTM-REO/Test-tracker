@@ -150,7 +150,7 @@ class OptimizelyScraperService {
         return new Promise((resolve) => {
           let cookieType = 'custom';
 
-          async function acceptCookie(btn, interval) {
+          function acceptCookie(btn, interval) {
             if (interval) {
               clearInterval(interval);
             }
@@ -159,7 +159,23 @@ class OptimizelyScraperService {
             resolve(cookieType);
           }
 
-          // Your proven cookie provider selectors
+          function isCookieConsentElement(element) {
+            if (!element || !element.offsetParent) return false;
+            
+            const parent = element.closest('[class*="cookie"], [class*="consent"], [class*="gdpr"], [id*="cookie"], [id*="consent"], [id*="gdpr"]');
+            if (!parent) return false;
+            
+            const rect = element.getBoundingClientRect();
+            const isVisible = rect.width > 0 && rect.height > 0 && rect.top >= 0;
+            if (!isVisible) return false;
+            
+            const text = element.textContent?.toLowerCase() || '';
+            const hasNavigationKeywords = ['login', 'signup', 'register', 'menu', 'search', 'close', 'back', 'next', 'submit'].some(keyword => text.includes(keyword));
+            if (hasNavigationKeywords) return false;
+            
+            return true;
+          }
+
           const cookieProviderAcceptSelector = [
             {
               cookieType: 'onetrust',
@@ -169,7 +185,6 @@ class OptimizelyScraperService {
               cookieType: 'Cookie Bot',
               cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
             },
-            // Additional common cookie consent selectors
             {
               cookieType: 'cookielaw',
               cookieSelector: '.cc-dismiss',
@@ -181,53 +196,166 @@ class OptimizelyScraperService {
             {
               cookieType: 'consent-manager',
               cookieSelector: '[data-testid="consent-accept-all"]',
+            },
+            {
+              cookieType: 'evidon',
+              cookieSelector: '[id="_evidon-accept-button"]',
+            },
+            {
+              cookieType: 'quantcast',
+              cookieSelector: '.qc-cmp2-summary-buttons > button[mode="primary"]',
+            },
+            {
+              cookieType: 'trustarc',
+              cookieSelector: '.piano-bbc-close-button',
+            },
+            {
+              cookieType: 'bbc',
+              cookieSelector: '.piano-bbc-close-button',
             }
           ];
 
           let attempts = 0;
-          const maxAttempts = 50; // Your proven max attempts
+          const maxAttempts = 50;
 
-          let interval = setInterval(async () => {
+          let interval = setInterval(() => {
             attempts++;
 
             if (attempts > maxAttempts) {
               clearInterval(interval);
-              // Fallback to generic cookie consent handling
-              const fallbackKeywords = [
-                "agree", "accept", "allow", "continue", "ok", "yes", "got it"
-              ];
-              const fallbackSelectors = ["button", "a", 'div[role="button"]'];
-
+              
+              // Multi-layer cookie consent detection algorithm
               let found = false;
-              fallbackSelectors.forEach((selector) => {
-                if (found) return;
+              
+              // Layer 1: Specific cookie container selectors
+              const specificCookieSelectors = [
+                '[class*="cookie"] button[class*="accept"]',
+                '[class*="consent"] button[class*="accept"]',
+                '[class*="cookie"] button[class*="allow"]',
+                '[class*="consent"] button[class*="allow"]',
+                '[id*="cookie"] button',
+                '[class*="banner"] button[class*="accept"]',
+                '[class*="privacy"] button[class*="accept"]',
+                '[data-testid*="cookie"] button',
+                '[data-testid*="consent"] button',
+                '[class="piano-bbc-close-button"]'
+              ];
+
+              for (const selector of specificCookieSelectors) {
+                if (found) break;
                 const elements = document.querySelectorAll(selector);
-                elements.forEach((element) => {
-                  if (found) return;
-                  const text = element.textContent?.toLowerCase() || '';
-                  if (fallbackKeywords.some((keyword) => text.includes(keyword))) {
-                    cookieType = 'generic';
-                    found = true;
-                    element.click();
-                    console.log(`Clicked generic consent: ${text}`);
+                for (const element of elements) {
+                  if (isCookieConsentElement(element)) {
+                    const text = element.textContent?.toLowerCase() || '';
+                    if (['accept', 'allow', 'agree', 'ok'].some(keyword => text.includes(keyword))) {
+                      cookieType = 'generic';
+                      found = true;
+                      element.click();
+                      console.log(`Layer 1 - Clicked validated consent: ${text}`);
+                      break;
+                    }
                   }
-                });
-              });
+                }
+              }
+
+              // Layer 2: Look for common button patterns in potential cookie areas
+              if (!found) {
+                const potentialCookieAreas = document.querySelectorAll([
+                  '[class*="cookie"]', '[class*="consent"]', '[class*="privacy"]', 
+                  '[class*="banner"]', '[class*="notice"]', '[class*="popup"]',
+                  '[id*="cookie"]', '[id*="consent"]', '[id*="privacy"]'
+                ].join(','));
+
+                for (const area of potentialCookieAreas) {
+                  if (found) break;
+                  const buttons = area.querySelectorAll('button, a[role="button"], div[role="button"]');
+                  for (const button of buttons) {
+                    if (button.offsetParent && button.getBoundingClientRect().width > 0) {
+                      const text = button.textContent?.toLowerCase() || '';
+                      const acceptTerms = ['accept all', 'accept cookies', 'allow all', 'agree', 'accept', 'allow', 'ok', 'got it', 'understood'];
+                      const rejectTerms = ['reject', 'decline', 'deny', 'close', 'dismiss'];
+                      
+                      if (acceptTerms.some(term => text.includes(term)) && !rejectTerms.some(term => text.includes(term))) {
+                        cookieType = 'pattern-matched';
+                        found = true;
+                        button.click();
+                        console.log(`Layer 2 - Clicked pattern matched: ${text}`);
+                        break;
+                      }
+                    }
+                  }
+                }
+              }
+
+              // Layer 3: Heuristic approach - look for buttons in fixed/absolute positioned elements
+              if (!found) {
+                const allButtons = document.querySelectorAll('button, a[role="button"], div[role="button"]');
+                for (const button of allButtons) {
+                  if (found) break;
+                  const computedStyle = window.getComputedStyle(button);
+                  const isFixedOrAbsolute = ['fixed', 'absolute'].includes(computedStyle.position);
+                  
+                  if (isFixedOrAbsolute && button.offsetParent) {
+                    const rect = button.getBoundingClientRect();
+                    const isBottomOrTop = rect.bottom > window.innerHeight * 0.8 || rect.top < window.innerHeight * 0.2;
+                    
+                    if (isBottomOrTop) {
+                      const text = button.textContent?.toLowerCase() || '';
+                      const navigationTerms = ['login', 'signup', 'register', 'menu', 'search', 'back', 'next', 'submit', 'buy', 'cart', 'checkout'];
+                      const hasNavTerms = navigationTerms.some(term => text.includes(term));
+                      
+                      if (!hasNavTerms && ['accept', 'allow', 'agree', 'ok', 'continue', 'got it'].some(term => text.includes(term))) {
+                        cookieType = 'heuristic';
+                        found = true;
+                        button.click();
+                        console.log(`Layer 3 - Clicked heuristic match: ${text}`);
+                        break;
+                      }
+                    }
+                  }
+                }
+              }
+
+              // Layer 4: Last resort - look for any "accept" button that's prominently positioned
+              if (!found) {
+                const acceptButtons = Array.from(document.querySelectorAll('button, a[role="button"], div[role="button"]'))
+                  .filter(btn => {
+                    const text = btn.textContent?.toLowerCase() || '';
+                    return text.includes('accept') && btn.offsetParent && btn.getBoundingClientRect().width > 50;
+                  })
+                  .sort((a, b) => {
+                    const aRect = a.getBoundingClientRect();
+                    const bRect = b.getBoundingClientRect();
+                    return (bRect.width * bRect.height) - (aRect.width * aRect.height);
+                  });
+
+                if (acceptButtons[0]) {
+                  const button = acceptButtons[0];
+                  const text = button.textContent?.toLowerCase() || '';
+                  const badTerms = ['newsletter', 'subscription', 'login', 'signup', 'register'];
+                  
+                  if (!badTerms.some(term => text.includes(term))) {
+                    cookieType = 'last-resort';
+                    found = true;
+                    button.click();
+                    console.log(`Layer 4 - Clicked last resort: ${text}`);
+                  }
+                }
+              }
 
               resolve(found ? cookieType : 'not_found');
               return;
             }
 
-            // Check for specific cookie providers first
             for (const cookie of cookieProviderAcceptSelector) {
               const element = document.querySelector(cookie.cookieSelector);
-              if (element) {
+              if (element && element.offsetParent) {
                 cookieType = cookie.cookieType;
-                await acceptCookie(element, interval);
+                acceptCookie(element, interval);
                 return;
               }
             }
-          }, 100); // Your proven interval timing
+          }, 100);
         });
       });
 
@@ -249,71 +377,119 @@ class OptimizelyScraperService {
       console.log("Extracting Optimizely data with enhanced detection...");
       
       const experimentData = await page.evaluate(() => {
-        // Your proven Optimizely extraction function
-        function getOptiExperimentDetails() {
-          if (!window.optimizely || typeof window.optimizely.get !== 'function') {
-            return null;
-          }
-
-          try {
-            const data = window.optimizely.get('data');
-            if (!data || typeof data.experiments !== 'object') {
+        return new Promise((resolve) => {
+          console.log('Waiting for Optimizely to load...');
+          
+          function getOptiExperimentDetails() {
+            console.log(!window.optimizely || typeof window.optimizely.get !== 'function');
+            if (!window.optimizely || typeof window.optimizely.get !== 'function') {
               return null;
             }
 
-            const experiments = data.experiments;
-            const experimentArray = [];
+            try {
+              const data = window.optimizely.get('data');
+              if (!data || typeof data.experiments !== 'object') {
+                return null;
+              }
 
-            Object.entries(experiments).forEach(([id, exp]) => {
-              experimentArray.push({
-                id: id,
-                name: exp.name || "Unnamed Experiment",
-                status: exp.status || 'unknown',
-                variations: exp.variations || [],
-                audience_ids: exp.audience_ids || [],
-                metrics: exp.metrics || [],
-                isActive: exp.status === 'Running' || false,
+              console.log('Optimizely data found:', data);
+
+              const experiments = data.experiments;
+              const experimentArray = [];
+
+              Object.entries(experiments).forEach(([id, exp]) => {
+                experimentArray.push({
+                  id: id,
+                  name: exp.name || "Unnamed Experiment",
+                  status: exp.status || 'unknown',
+                  variations: exp.variations || [],
+                  audience_ids: exp.audience_ids || [],
+                  metrics: exp.metrics || [],
+                  isActive: exp.status === 'Running' || false,
+                });
               });
-            });
 
-            return experimentArray;
-          } catch (e) {
-            console.error('Error fetching Optimizely experiment details:', e);
-            return null;
+              return {
+                experiments: experimentArray,
+                hasOptimizely: true,
+                optimizelyData: data
+              };
+            } catch (e) {
+              console.error('Error fetching Optimizely experiment details:', e);
+              return null;
+            }
           }
-        }
 
-        // Enhanced detection with additional checks
-        const experiments = getOptiExperimentDetails();
-        
-        if (experiments && experiments.length > 0) {
-          return {
-            hasOptimizely: true,
-            experiments: experiments,
-            experimentCount: experiments.length,
-            activeCount: experiments.filter(e => e.isActive).length,
-            error: null
-          };
-        } else if (window.optimizely) {
-          return {
-            hasOptimizely: true,
-            experiments: [],
-            experimentCount: 0,
-            activeCount: 0,
-            error: "Optimizely found but no experiments detected"
-          };
-        } else {
-          return {
-            hasOptimizely: false,
-            experiments: null,
-            experimentCount: 0,
-            activeCount: 0,
-            error: "Optimizely not found on page"
-          };
-        }
+          let attempts = 0;
+          const maxAttempts = 40; // Reduced from 100 for faster response
+          const baseInterval = 100; // Start with faster checks
+          const maxInterval = 400; // Cap the interval growth
+
+          function checkOptimizely() {
+            attempts++;
+            console.log(`Optimizely check attempt ${attempts}/${maxAttempts}`);
+
+            const result = getOptiExperimentDetails();
+
+            // Early success - found experiments
+            if (result && result.experiments && result.experiments.length > 0) {
+              console.log('Optimizely experiments found:', result.experiments.length);
+              resolve({
+                hasOptimizely: true,
+                experiments: result.experiments,
+                experimentCount: result.experiments.length,
+                activeCount: result.experiments.filter(e => e.isActive).length,
+                error: null,
+                optimizelyData: result.optimizelyData
+              });
+              return;
+            }
+
+            // Check if Optimizely object exists
+            if (window.optimizely && typeof window.optimizely.get === 'function') {
+              console.log('Optimizely object found, checking for experiment data...');
+              
+              // If we found Optimizely but no experiments after 15 attempts (1.5-2 seconds), likely no experiments exist
+              if (attempts >= 15) {
+                console.log('Optimizely found but no experiments after 15 attempts, likely no experiments');
+                resolve({
+                  hasOptimizely: true,
+                  experiments: [],
+                  experimentCount: 0,
+                  activeCount: 0,
+                  error: "Optimizely found but no experiments detected",
+                  optimizelyData: null
+                });
+                return;
+              }
+            }
+
+            // Max attempts reached
+            if (attempts >= maxAttempts) {
+              console.log('Max attempts reached, no Optimizely found');
+              resolve({
+                hasOptimizely: false,
+                experiments: [],
+                experimentCount: 0,
+                activeCount: 0,
+                error: "Optimizely not found on page",
+                optimizelyData: null
+              });
+              return;
+            }
+
+            // Progressive interval - start fast, slow down gradually
+            const interval = Math.min(baseInterval + (attempts * 15), maxInterval);
+            setTimeout(checkOptimizely, interval);
+          }
+          
+          checkOptimizely();
+
+        });
       });
 
-      console.log(`Optimizely data extracted: ${experimentData.experiments?.length || 0} experiments found`);
+      const currentUrl = await page.url();
+      console.log(`Optimizely data extracted from ${currentUrl}: ${experimentData.experiments?.length || 0} experiments found`);
       return experimentData;
     } catch (error) {
       console.error('Error extracting Optimizely data:', error);
@@ -348,11 +524,15 @@ class OptimizelyScraperService {
       
       // Handle cookie consent with detection
       const cookieType = await this.handleCookieConsent(page);
+
+      // Reload page after handling cookies to ensure Optimizely loads properly
+      console.log('Reloading page after cookie consent...');
+      await page.reload({ waitUntil: 'domcontentloaded' });
       
-      // Wait a bit more for Optimizely to load after cookie acceptance
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait a moment for scripts to initialize after reload
+      // await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Extract Optimizely data
+      // Extract Optimizely data with intelligent waiting
       const experimentData = await this.extractOptimizelyData(page);
       
       // Add cookie type to response
@@ -421,13 +601,6 @@ class OptimizelyScraperService {
           saveError.message
         );
       }
-        // control code
-        // // Mock saved data for now
-        // savedData = {
-        //   _id: 'mock-saved-id',
-        //   url: url,
-        //   experimentCount: experimentData.experiments.length
-        // };
       }
 
       return savedData;
@@ -571,6 +744,7 @@ class OptimizelyScraperService {
       // Process each browser's batch
       const batchPromises = urlBatches.map(async (urlBatch, browserIndex) => {
         const browser = browsers[browserIndex];
+        // Scrapping happens in this function
         return await this.processBrowserBatch(browser, urlBatch);
       });
 
