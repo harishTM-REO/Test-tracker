@@ -44,16 +44,16 @@ app.post('/getTestData', async (req, res) => {
 
     let browser;
     let page;
-    
+
     try {
         browser = await connectWithRetry();
         page = await browser.newPage();
-        
+
         // Set up error handlers for the page
         page.on('error', (error) => {
             console.error('Page error:', error);
         });
-        
+
         page.on('pageerror', (error) => {
             console.error('Page script error:', error);
         });
@@ -70,10 +70,10 @@ app.post('/getTestData', async (req, res) => {
             }
         });
         // --- OPTIMIZATION END ---
-
-        await page.goto(url, { 
+        console.log('direting to url::: ', url);
+        await page.goto(url, {
             waitUntil: 'domcontentloaded',
-            timeout: 30000 
+            timeout: 30000
         });
 
         // Handle cookie consent buttons if they exist
@@ -259,7 +259,7 @@ app.post('/getTestData', async (req, res) => {
         } catch (error) {
             console.error('Error closing page:', error);
         }
-        
+
         try {
             if (browser && browser.isConnected()) {
                 await browser.disconnect();
