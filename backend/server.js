@@ -4,10 +4,7 @@ const express = require("express");
 const puppeteer = require("puppeteer");
 const cors = require("cors");
 const { connectDB } = require("./db/connection");
-// const path = require("path");
-// const fs = require("fs");
 const app = express();
-// const cron = require("node-cron");
 const port = process.env.PORT || 3000;
 const ExperimentService = require("./services/experimentService");
 const Website = require("./models/Website");
@@ -100,7 +97,7 @@ app.get("/getWebsites", async (req, res) => {
 });
 
 app.get("/getWebsiteChanges/:id", async (req, res) => {
-  const id = req.params.id; // This gets 'wsduifneiuvn2'
+  const id = req.params.id; 
   console.log("ID from URL:", id);
   const webSiteChanges = await ExperimentService.getWebsiteChanges(id);
   console.log("the website changes->", webSiteChanges);
@@ -169,6 +166,10 @@ app.post("/getTestData", async (req, res) => {
                 {
                     cookieType: 'Cookie Bot',
                     cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+                },
+                {
+                    cookieType: 'Canon',
+                    cookieSelector: '#_evidon-accept-button',
                 }
             ];
 

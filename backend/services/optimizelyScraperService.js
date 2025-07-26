@@ -60,8 +60,8 @@ class OptimizelyScraperService {
   async launchBrowser() {
     try {
       const browser = await puppeteer.launch({
-        headless: true,
-        // headless: false,
+        // headless: true,
+        headless: false,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -144,6 +144,7 @@ class OptimizelyScraperService {
    */
   async handleCookieConsent(page) {
     try {
+      const currentUrl = await page.url();
       console.log("Handling cookie consent with enhanced detection...");
       
       const cookieType = await page.evaluate(() => {
@@ -159,22 +160,22 @@ class OptimizelyScraperService {
             resolve(cookieType);
           }
 
-          function isCookieConsentElement(element) {
-            if (!element || !element.offsetParent) return false;
+          // function isCookieConsentElement(element) {
+          //   if (!element || !element.offsetParent) return false;
             
-            const parent = element.closest('[class*="cookie"], [class*="consent"], [class*="gdpr"], [id*="cookie"], [id*="consent"], [id*="gdpr"]');
-            if (!parent) return false;
+          //   const parent = element.closest('[class*="cookie"], [class*="consent"], [class*="gdpr"], [id*="cookie"], [id*="consent"], [id*="gdpr"]');
+          //   if (!parent) return false;
             
-            const rect = element.getBoundingClientRect();
-            const isVisible = rect.width > 0 && rect.height > 0 && rect.top >= 0;
-            if (!isVisible) return false;
+          //   const rect = element.getBoundingClientRect();
+          //   const isVisible = rect.width > 0 && rect.height > 0 && rect.top >= 0;
+          //   if (!isVisible) return false;
             
-            const text = element.textContent?.toLowerCase() || '';
-            const hasNavigationKeywords = ['login', 'signup', 'register', 'menu', 'search', 'close', 'back', 'next', 'submit'].some(keyword => text.includes(keyword));
-            if (hasNavigationKeywords) return false;
+          //   const text = element.textContent?.toLowerCase() || '';
+          //   const hasNavigationKeywords = ['login', 'signup', 'register', 'menu', 'search', 'close', 'back', 'next', 'submit'].some(keyword => text.includes(keyword));
+          //   if (hasNavigationKeywords) return false;
             
-            return true;
-          }
+          //   return true;
+          // }
 
           const cookieProviderAcceptSelector = [
             {
@@ -206,13 +207,9 @@ class OptimizelyScraperService {
               cookieSelector: '.qc-cmp2-summary-buttons > button[mode="primary"]',
             },
             {
-              cookieType: 'trustarc',
-              cookieSelector: '.piano-bbc-close-button',
-            },
-            {
               cookieType: 'bbc',
               cookieSelector: '.piano-bbc-close-button',
-            }
+            },
           ];
 
           let attempts = 0;
@@ -241,22 +238,22 @@ class OptimizelyScraperService {
                 '[class="piano-bbc-close-button"]'
               ];
 
-              for (const selector of specificCookieSelectors) {
-                if (found) break;
-                const elements = document.querySelectorAll(selector);
-                for (const element of elements) {
-                  if (isCookieConsentElement(element)) {
-                    const text = element.textContent?.toLowerCase() || '';
-                    if (['accept', 'allow', 'agree', 'ok'].some(keyword => text.includes(keyword))) {
-                      cookieType = 'generic';
-                      found = true;
-                      element.click();
-                      console.log(`Layer 1 - Clicked validated consent: ${text}`);
-                      break;
-                    }
-                  }
-                }
-              }
+              // for (const selector of specificCookieSelectors) {
+              //   if (found) break;
+              //   const elements = document.querySelectorAll(selector);
+              //   for (const element of elements) {
+              //     if (isCookieConsentElement(element)) {
+              //       const text = element.textContent?.toLowerCase() || '';
+              //       if (['accept', 'allow', 'agree', 'ok'].some(keyword => text.includes(keyword))) {
+              //         cookieType = 'generic';
+              //         found = true;
+              //         element.click();
+              //         console.log(`Layer 1 - Clicked validated consent: ${text}`);
+              //         break;
+              //       }
+              //     }
+              //   }
+              // }
 
               // Layer 2: Look for common button patterns in potential cookie areas
               if (!found) {
@@ -359,7 +356,7 @@ class OptimizelyScraperService {
         });
       });
 
-      console.log(`Cookie consent handling completed. Type detected: ${cookieType}`);
+      console.log(`Cookie consent handling completed for ${currentUrl}. Type detected: ${cookieType}`);
       return cookieType;
     } catch (error) {
       console.warn('Error handling cookie consent:', error.message);
@@ -421,7 +418,8 @@ class OptimizelyScraperService {
           }
 
           let attempts = 0;
-          const maxAttempts = 40; // Reduced from 100 for faster response
+          const maxAttempts = 10; // Increased to allow proper Optimizely detection
+          const optimizelyFoundMaxAttempts = 4; // If Optimizely found, give it fewer attempts to find experiments
           const baseInterval = 100; // Start with faster checks
           const maxInterval = 400; // Cap the interval growth
 
@@ -444,14 +442,15 @@ class OptimizelyScraperService {
               });
               return;
             }
-
+            
+            console.log('optimizely function check flag->', window.optimizely && typeof window.optimizely.get === 'function')
             // Check if Optimizely object exists
             if (window.optimizely && typeof window.optimizely.get === 'function') {
               console.log('Optimizely object found, checking for experiment data...');
               
-              // If we found Optimizely but no experiments after 15 attempts (1.5-2 seconds), likely no experiments exist
-              if (attempts >= 15) {
-                console.log('Optimizely found but no experiments after 15 attempts, likely no experiments');
+              // If we found Optimizely but no experiments after fewer attempts, likely no experiments exist
+              if (attempts >= optimizelyFoundMaxAttempts) {
+                console.log(`Optimizely found but no experiments after ${optimizelyFoundMaxAttempts} attempts, likely no experiments`);
                 resolve({
                   hasOptimizely: true,
                   experiments: [],
@@ -548,14 +547,14 @@ class OptimizelyScraperService {
       if (page) {
         try {
         // TODO
-          await page.close();
+          // await page.close();
         } catch (e) {
           console.warn('Error closing page:', e.message);
         }
       }
       if (browser) {
         // TODO
-        await this.closeBrowser(browser);
+        // await this.closeBrowser(browser);
       }
     }
   }
@@ -810,7 +809,11 @@ class OptimizelyScraperService {
           // Navigate and scrape
           await this.navigateToPage(page, url);
           const cookieType = await this.handleCookieConsent(page);
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Reload page after handling cookies to ensure all scripts load properly
+          console.log('Reloading page after cookie consent...');
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          
           const experimentData = await this.extractOptimizelyData(page);
           
           experimentData.cookieType = cookieType;
