@@ -13,7 +13,7 @@ class OptimizelyScraperService {
    */
   async scrapeOptimizelyExperiments(url, res = null) {
     const startTime = Date.now();
-
+    let savedData = null;
     try {
       console.log(`Starting Optimizely scrape for: ${url}`);
 
@@ -40,9 +40,10 @@ class OptimizelyScraperService {
 
       // Step 2: Launch browser and scrape experiments
       const experimentData = await this.scrapeExperimentsFromPage(url);
-
-      // Step 3: Save results to database (optional)
-      const savedData = await this.saveExperimentResults(url, website, experimentData, startTime);
+      if(false){
+        // Step 3: Save results to database (optional)
+         savedData = await this.saveExperimentResults(url, website, experimentData, startTime);
+      }
 
       // Step 4: Return formatted response
       return this.formatResponse(url, website, experimentData, savedData, startTime);
@@ -526,7 +527,7 @@ class OptimizelyScraperService {
 
       // Reload page after handling cookies to ensure Optimizely loads properly
       console.log('Reloading page after cookie consent...');
-      await page.reload({ waitUntil: 'domcontentloaded' });
+      // await page.reload({ waitUntil: 'domcontentloaded' });
       
       // Wait a moment for scripts to initialize after reload
       // await new Promise(resolve => setTimeout(resolve, 1000));
@@ -618,7 +619,7 @@ class OptimizelyScraperService {
    * @param {number} startTime - Start timestamp
    * @returns {Object} Formatted response
    */
-  formatResponse(url, website, experimentData, savedData, startTime) {
+  formatResponse(url, website, experimentData, savedData=[], startTime) {
     const duration = Date.now() - startTime;
 
     return {
@@ -688,8 +689,8 @@ class OptimizelyScraperService {
     const { 
       concurrent = 3, 
       delay = 2000, 
-      batchSize = 7,
-      maxTabs = 7 
+      batchSize = 1,
+      maxTabs = 1 
     } = options;
     
     const results = [];
