@@ -371,137 +371,358 @@ class OptimizelyScraperService {
    * @returns {Object} Experiment data
    */
   async extractOptimizelyData(page) {
+  try {
+    console.log("Extracting Optimizely data with enhanced detection...");
+    
+    // Wait for page to be ready (Puppeteer approach)
     try {
-      console.log("Extracting Optimizely data with enhanced detection...");
-      
-      const experimentData = await page.evaluate(() => {
-        return new Promise((resolve) => {
-          console.log('Waiting for Optimizely to load...');
-          
-          function getOptiExperimentDetails() {
-            console.log(!window.optimizely || typeof window.optimizely.get !== 'function');
-            if (!window.optimizely || typeof window.optimizely.get !== 'function') {
-              return null;
+      await page.waitForFunction(() => document.readyState === 'complete', { timeout: 3000 });
+      // Additional wait for potential dynamic content
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (error) {
+      console.log('Page ready timeout, proceeding anyway...');
+    }
+
+    // Set up navigation detection
+    let navigationDetected = false;
+    const navigationHandler = () => {
+      console.log('Navigation detected during extraction');
+      navigationDetected = true;
+    };
+    
+    page.on('framenavigated', navigationHandler);
+
+    try {
+      const experimentData = await Promise.race([
+        // Main extraction with timeout protection
+        page.evaluate(() => {
+          return new Promise((resolve, reject) => {
+            console.log('Starting Optimizely extraction...');
+            
+            // Track if we've already resolved to prevent multiple resolutions
+            let hasResolved = false;
+            
+            function safeResolve(data) {
+              if (!hasResolved) {
+                hasResolved = true;
+                resolve(data);
+              }
+            }
+            
+            function safeReject(error) {
+              if (!hasResolved) {
+                hasResolved = true;
+                reject(error);
+              }
             }
 
-            try {
-              const data = window.optimizely.get('data');
-              if (!data || typeof data.experiments !== 'object') {
+            function getOptiExperimentDetails() {
+              if (!window.optimizely || typeof window.optimizely.get !== 'function') {
                 return null;
               }
 
-              console.log('Optimizely data found:', data);
+              try {
+                const data = window.optimizely.get('data');
+                if (!data || typeof data.experiments !== 'object') {
+                  return null;
+                }
 
-              const experiments = data.experiments;
-              const experimentArray = [];
+                console.log('Optimizely data found:', Object.keys(data.experiments).length + ' experiments');
 
-              Object.entries(experiments).forEach(([id, exp]) => {
-                experimentArray.push({
-                  id: id,
-                  name: exp.name || "Unnamed Experiment",
-                  status: exp.status || 'unknown',
-                  variations: exp.variations || [],
-                  audience_ids: exp.audience_ids || [],
-                  metrics: exp.metrics || [],
-                  isActive: exp.status === 'Running' || false,
+                const experiments = data.experiments;
+                const experimentArray = [];
+
+                Object.entries(experiments).forEach(([id, exp]) => {
+                  experimentArray.push({
+                    id: id,
+                    name: exp.name || "Unnamed Experiment",
+                    status: exp.status || 'unknown',
+                    variations: exp.variations || [],
+                    audience_ids: exp.audience_ids || [],
+                    metrics: exp.metrics || [],
+                    isActive: exp.status === 'Running' || false,
+                  });
                 });
-              });
 
-              return {
-                experiments: experimentArray,
-                hasOptimizely: true,
-                optimizelyData: data
-              };
-            } catch (e) {
-              console.error('Error fetching Optimizely experiment details:', e);
-              return null;
-            }
-          }
-
-          let attempts = 0;
-          const maxAttempts = 10; // Increased to allow proper Optimizely detection
-          const optimizelyFoundMaxAttempts = 4; // If Optimizely found, give it fewer attempts to find experiments
-          const baseInterval = 100; // Start with faster checks
-          const maxInterval = 400; // Cap the interval growth
-
-          function checkOptimizely() {
-            attempts++;
-            console.log(`Optimizely check attempt ${attempts}/${maxAttempts}`);
-
-            const result = getOptiExperimentDetails();
-
-            // Early success - found experiments
-            if (result && result.experiments && result.experiments.length > 0) {
-              console.log('Optimizely experiments found:', result.experiments.length);
-              resolve({
-                hasOptimizely: true,
-                experiments: result.experiments,
-                experimentCount: result.experiments.length,
-                activeCount: result.experiments.filter(e => e.isActive).length,
-                error: null,
-                optimizelyData: result.optimizelyData
-              });
-              return;
-            }
-            
-            console.log('optimizely function check flag->', window.optimizely && typeof window.optimizely.get === 'function')
-            // Check if Optimizely object exists
-            if (window.optimizely && typeof window.optimizely.get === 'function') {
-              console.log('Optimizely object found, checking for experiment data...');
-              
-              // If we found Optimizely but no experiments after fewer attempts, likely no experiments exist
-              if (attempts >= optimizelyFoundMaxAttempts) {
-                console.log(`Optimizely found but no experiments after ${optimizelyFoundMaxAttempts} attempts, likely no experiments`);
-                resolve({
+                return {
+                  experiments: experimentArray,
                   hasOptimizely: true,
-                  experiments: [],
-                  experimentCount: 0,
-                  activeCount: 0,
-                  error: "Optimizely found but no experiments detected",
-                  optimizelyData: null
-                });
-                return;
+                  optimizelyData: data
+                };
+              } catch (e) {
+                console.error('Error fetching Optimizely experiment details:', e);
+                return null;
               }
             }
 
-            // Max attempts reached
-            if (attempts >= maxAttempts) {
-              console.log('Max attempts reached, no Optimizely found');
-              resolve({
-                hasOptimizely: false,
-                experiments: [],
-                experimentCount: 0,
-                activeCount: 0,
-                error: "Optimizely not found on page",
-                optimizelyData: null
-              });
-              return;
+            let attempts = 0;
+            const maxAttempts = 6; // Reduced for faster failure
+            const optimizelyFoundMaxAttempts = 2; // Even fewer attempts if Optimizely is found
+            const checkInterval = 200; // Fixed interval for predictability
+
+            function checkOptimizely() {
+              if (hasResolved) return; // Prevent execution after resolution
+              
+              attempts++;
+              console.log(`Optimizely check attempt ${attempts}/${maxAttempts}`);
+
+              try {
+                const result = getOptiExperimentDetails();
+
+                // Success case - found experiments
+                if (result && result.experiments && result.experiments.length > 0) {
+                  console.log('Optimizely experiments found:', result.experiments.length);
+                  safeResolve({
+                    hasOptimizely: true,
+                    experiments: result.experiments,
+                    experimentCount: result.experiments.length,
+                    activeCount: result.experiments.filter(e => e.isActive).length,
+                    error: null,
+                    optimizelyData: result.optimizelyData
+                  });
+                  return;
+                }
+                
+                // Check if Optimizely object exists but no experiments
+                if (window.optimizely && typeof window.optimizely.get === 'function') {
+                  console.log('Optimizely object found, checking for experiment data...');
+                  
+                  if (attempts >= optimizelyFoundMaxAttempts) {
+                    console.log(`Optimizely found but no experiments after ${optimizelyFoundMaxAttempts} attempts`);
+                    safeResolve({
+                      hasOptimizely: true,
+                      experiments: [],
+                      experimentCount: 0,
+                      activeCount: 0,
+                      error: "Optimizely found but no experiments detected",
+                      optimizelyData: null
+                    });
+                    return;
+                  }
+                }
+
+                // Max attempts reached - no Optimizely found
+                if (attempts >= maxAttempts) {
+                  console.log('Max attempts reached, no Optimizely found');
+                  safeResolve({
+                    hasOptimizely: false,
+                    experiments: [],
+                    experimentCount: 0,
+                    activeCount: 0,
+                    error: "Optimizely not found on page",
+                    optimizelyData: null
+                  });
+                  return;
+                }
+
+                // Continue checking
+                setTimeout(checkOptimizely, checkInterval);
+                
+              } catch (error) {
+                console.error('Error during Optimizely check:', error);
+                safeReject(error);
+              }
             }
+            
+            // Start checking
+            checkOptimizely();
 
-            // Progressive interval - start fast, slow down gradually
-            const interval = Math.min(baseInterval + (attempts * 15), maxInterval);
-            setTimeout(checkOptimizely, interval);
-          }
-          
-          checkOptimizely();
+            // Overall timeout to prevent hanging
+            setTimeout(() => {
+              safeReject(new Error('Optimizely extraction timeout after 4 seconds'));
+            }, 4000);
+          });
+        }),
 
-        });
-      });
+        // Timeout promise
+        new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error('Extraction timeout - possible navigation or slow page'));
+          }, 5000);
+        })
+      ]);
 
-      const currentUrl = await page.url();
+      // Clean up navigation listener
+      page.off('framenavigated', navigationHandler);
+      const currentUrl = page.url();
       console.log(`Optimizely data extracted from ${currentUrl}: ${experimentData.experiments?.length || 0} experiments found`);
       return experimentData;
-    } catch (error) {
-      console.error('Error extracting Optimizely data:', error);
-      return {
+
+    } catch (evaluationError) {
+      // Clean up navigation listener
+      
+      page.off('framenavigated', navigationHandler);
+      throw evaluationError;
+    }
+
+  } catch (error) {
+    console.error('Error extracting Optimizely data:', error);
+    
+    // Handle navigation-related errors
+    if (error.message.includes('Execution context was destroyed') || 
+        error.message.includes('Protocol error') ||
+        error.message.includes('Target closed') ||
+        navigationDetected) {
+      
+      console.log('Navigation/context issue detected, attempting recovery...');
+      
+      // Wait for navigation to settle
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      try {
+        // Check if page is still valid
+        await page.evaluate(() => document.readyState);
+        
+        // Attempt simple synchronous extraction
+        return await extractOptimizelySync(page);
+        
+      } catch (recoveryError) {
+        console.error('Recovery attempt failed:', recoveryError);
+        return {
+          hasOptimizely: false,
+          experiments: [],
+          experimentCount: 0,
+          activeCount: 0,
+          error: `Navigation interrupted extraction: ${error.message}`,
+        };
+      }
+    }
+
+    return {
+      hasOptimizely: false,
+      experiments: [],
+      experimentCount: 0,
+      activeCount: 0,
+      error: `Failed to extract data: ${error.message}`,
+    };
+  }
+}
+
+// Synchronous fallback extraction for post-navigation scenarios
+async extractOptimizelySync(page) {
+  try {
+    console.log('Attempting synchronous Optimizely extraction...');
+    
+    const result = await page.evaluate(() => {
+      // Immediate synchronous check - no waiting
+      if (!window.optimizely || typeof window.optimizely.get !== 'function') {
+        return {
+          hasOptimizely: false,
+          experiments: [],
+          experimentCount: 0,
+          activeCount: 0,
+          error: "Optimizely not found"
+        };
+      }
+
+      try {
+        const data = window.optimizely.get('data');
+        if (!data || !data.experiments) {
+          return {
+            hasOptimizely: true,
+            experiments: [],
+            experimentCount: 0,
+            activeCount: 0,
+            error: "Optimizely found but no experiments"
+          };
+        }
+
+        const experiments = Object.entries(data.experiments).map(([id, exp]) => ({
+          id: id,
+          name: exp.name || "Unnamed Experiment",
+          status: exp.status || 'unknown',
+          variations: exp.variations || [],
+          audience_ids: exp.audience_ids || [],
+          metrics: exp.metrics || [],
+          isActive: exp.status === 'Running' || false,
+        }));
+
+        return {
+          hasOptimizely: true,
+          experiments,
+          experimentCount: experiments.length,
+          activeCount: experiments.filter(e => e.isActive).length,
+          error: null
+        };
+      } catch (e) {
+        return {
+          hasOptimizely: true,
+          experiments: [],
+          experimentCount: 0,
+          activeCount: 0,
+          error: `Error reading Optimizely data: ${e.message}`
+        };
+      }
+    });
+
+    console.log(`Sync extraction completed: ${result.experimentCount} experiments found`);
+    return result;
+    
+  } catch (error) {
+    console.error('Sync extraction failed:', error);
+    return {
+      hasOptimizely: false,
+      experiments: [],
+      experimentCount: 0,
+      activeCount: 0,
+      error: `Sync extraction failed: ${error.message}`
+    };
+  }
+}
+
+// Alternative: Extract on specific page events
+async extractOptimizelyOnPageReady(page) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    let timeout;
+    
+    function safeResolve(result) {
+      if (!resolved) {
+        resolved = true;
+        if (timeout) clearTimeout(timeout);
+        resolve(result);
+      }
+    }
+    
+    // Try extraction when DOM is ready
+    page.evaluateOnNewDocument(() => {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+          console.log('DOM ready, checking for Optimizely...');
+          window.__checkOptimizely = true;
+        });
+      } else {
+        window.__checkOptimizely = true;
+      }
+    });
+    
+    // Check periodically if flag is set
+    const checkInterval = setInterval(async () => {
+      try {
+        const shouldCheck = await page.evaluate(() => window.__checkOptimizely);
+        if (shouldCheck && !resolved) {
+          clearInterval(checkInterval);
+          const result = await extractOptimizelySync(page);
+          safeResolve(result);
+        }
+      } catch (error) {
+        // Page might not be ready, continue checking
+      }
+    }, 300);
+    
+    // Fallback timeout
+    timeout = setTimeout(() => {
+      clearInterval(checkInterval);
+      safeResolve({
         hasOptimizely: false,
-        experiments: null,
+        experiments: [],
         experimentCount: 0,
         activeCount: 0,
-        error: `Failed to extract data: ${error.message}`,
-      };
-    }
-  }
+        error: "Timeout waiting for page readiness"
+      });
+    }, 8000);
+  });
+}
 
   /**
    * Main function to scrape experiments from a page
