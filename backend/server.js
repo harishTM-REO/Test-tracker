@@ -9,36 +9,9 @@ const {
 const app = express();
 const port = process.env.PORT || 3000;
 
-const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
-
-console.log('Using Browserless API Token:', BROWSERLESS_API_TOKEN?.substring(0, 4) + '...');
-if (!BROWSERLESS_API_TOKEN) {
-    console.error('BROWSERLESS_API_TOKEN is not defined in your .env file.');
-    process.exit(1);
-}
 
 app.use(cors());
 app.use(express.json());
-
-const connectWithRetry = async (retries = 3, delay = 2000) => {
-    for (let i = 0; i < retries; i++) {
-        try {
-            console.log(`Attempting connection ${i + 1}/${retries}...`);
-            return await puppeteer.connect({
-                browserWSEndpoint: `wss://production-sfo.browserless.io?token=${BROWSERLESS_API_TOKEN}`,
-                defaultViewport: null,
-                ignoreHTTPSErrors: true
-            });
-        } catch (error) {
-            if (i < retries - 1) {
-                console.log(`Connection failed, retrying in ${delay}ms...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            } else {
-                throw error;
-            }
-        }
-    }
-};
 
 app.post('/getTestData', async (req, res) => {
 
