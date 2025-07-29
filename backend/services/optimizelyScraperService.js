@@ -740,14 +740,14 @@ class OptimizelyScraperService {
       if (page) {
         try {
           // TODO
-          // await page.close();
+          await page.close();
         } catch (e) {
           console.warn('Error closing page:', e.message);
         }
       }
       if (browser) {
         // TODO
-        // await this.closeBrowser(browser);
+        await this.closeBrowser(browser);
       }
     }
   }
