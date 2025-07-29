@@ -719,7 +719,7 @@ class OptimizelyScraperService {
 
       // Reload page after handling cookies to ensure Optimizely loads properly
       console.log('Reloading page after cookie consent...');
-      // await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.reload({ waitUntil: 'domcontentloaded' });
 
       // Wait a moment for scripts to initialize after reload
       // await new Promise(resolve => setTimeout(resolve, 1000));
