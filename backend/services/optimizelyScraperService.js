@@ -80,11 +80,9 @@ class OptimizelyScraperService {
   async launchBrowser() {
     try {
       const browser = await puppeteer.launch({
-        // headless: true,
         headless: false,
         args: [
           '--no-sandbox',
-          '--disable-http2',
           '--disable-setuid-sandbox',
           '--disable-gpu',
           '--disable-dev-shm-usage',
@@ -94,7 +92,9 @@ class OptimizelyScraperService {
           "--no-zygote",
           "--disable-background-timer-throttling",
           "--disable-backgrounding-occluded-windows",
-          "--disable-renderer-backgrounding"
+          "--disable-renderer-backgrounding",
+          '--disable-http2', // Add this to disable HTTP2
+          '--disable-features=VizDisplayCompositor'
         ],
       });
 
@@ -114,20 +114,27 @@ class OptimizelyScraperService {
   async createPage(browser) {
     try {
       const page = await browser.newPage();
+      await page.setExtraHTTPHeaders({
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-GB,en-NZ;q=0.9,en-AU;q=0.8,en;q=0.7,en-US;q=0.6',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+      });
 
+      // Also set user agent separately (recommended)
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
       // Set smaller viewport as in your working code
       await page.setViewport({ width: 800, height: 600 });
 
       // Your optimized request interception
-      await page.setRequestInterception(true);
-      page.on('request', (req) => {
-        const resourceType = req.resourceType();
-        if (['image', 'stylesheet', 'font'].includes(resourceType)) {
-          req.abort();
-        } else {
-          req.continue();
-        }
-      });
+      // await page.setRequestInterception(true);
+      // page.on('request', (req) => {
+      //   const resourceType = req.resourceType();
+      //   if (['image', 'stylesheet', 'font'].includes(resourceType)) {
+      //     req.abort();
+      //   } else {
+      //     req.continue();
+      //   }
+      // });
 
       console.log('Page configured successfully');
       return page;
@@ -705,9 +712,9 @@ class OptimizelyScraperService {
 
     try {
       // Launch browser
-      // browser = await this.launchBrowser();
+      browser = await this.launchBrowser();
 
-      browser = await this.connectWithRetry();
+      // browser = await this.connectWithRetry();
 
       // Create and configure page
       page = await this.createPage(browser);
@@ -720,7 +727,7 @@ class OptimizelyScraperService {
 
       // Reload page after handling cookies to ensure Optimizely loads properly
       console.log('Reloading page after cookie consent...');
-      await page.reload({ waitUntil: 'domcontentloaded' });
+      // await page.reload({ waitUntil: 'domcontentloaded' });
 
       // Wait a moment for scripts to initialize after reload
       // await new Promise(resolve => setTimeout(resolve, 1000));
@@ -741,14 +748,14 @@ class OptimizelyScraperService {
       if (page) {
         try {
           // TODO
-          await page.close();
+          // await page.close();
         } catch (e) {
           console.warn('Error closing page:', e.message);
         }
       }
       if (browser) {
         // TODO
-        await this.closeBrowser(browser);
+        // await this.closeBrowser(browser);
       }
     }
   }
