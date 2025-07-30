@@ -720,7 +720,7 @@ class OptimizelyScraperService {
 
       // Reload page after handling cookies to ensure Optimizely loads properly
       console.log('Reloading page after cookie consent...');
-      // await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.reload({ waitUntil: 'domcontentloaded' });
 
       // Wait a moment for scripts to initialize after reload
       // await new Promise(resolve => setTimeout(resolve, 1000));
@@ -741,14 +741,14 @@ class OptimizelyScraperService {
       if (page) {
         try {
           // TODO
-          // await page.close();
+          await page.close();
         } catch (e) {
           console.warn('Error closing page:', e.message);
         }
       }
       if (browser) {
         // TODO
-        // await this.closeBrowser(browser);
+        await this.closeBrowser(browser);
       }
     }
   }
