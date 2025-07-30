@@ -84,6 +84,7 @@ class OptimizelyScraperService {
         headless: false,
         args: [
           '--no-sandbox',
+          '--disable-http2',
           '--disable-setuid-sandbox',
           '--disable-gpu',
           '--disable-dev-shm-usage',
