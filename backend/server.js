@@ -116,7 +116,7 @@ app.post("/getTestData", async (req, res) => {
   const startTime = Date.now();
 
   try {
-    const browser = await puppeteer.launch({
+    let browser = await puppeteer.launch({
         headless: true,
         // defaultViewport: null, // No longer needed as we set a specific viewport
         args: [

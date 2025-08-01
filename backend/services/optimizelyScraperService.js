@@ -3,6 +3,7 @@ const puppeteer = require('puppeteer');
 const ExperimentService = require('./experimentService'); // Comment out if not available
 const OptimizelyResult = require('../models/OptimizelyResult');
 
+const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
 class OptimizelyScraperService {
   /**
    * function to connect browserless.io
@@ -87,6 +88,7 @@ class OptimizelyScraperService {
         headless: false,
         args: [
           '--no-sandbox',
+          '--disable-http2',
           '--disable-setuid-sandbox',
           '--disable-gpu',
           '--disable-dev-shm-usage',
