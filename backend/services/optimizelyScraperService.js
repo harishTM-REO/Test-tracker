@@ -4,6 +4,28 @@ const ExperimentService = require('./experimentService'); // Comment out if not 
 const OptimizelyResult = require('../models/OptimizelyResult');
 
 class OptimizelyScraperService {
+  /**
+   * function to connect browserless.io
+   */
+  async connectWithRetry(retries = 3, delay = 2000) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        console.log(`Attempting connection ${i + 1}/${retries}...`);
+        return await puppeteer.connect({
+          browserWSEndpoint: `wss://production-sfo.browserless.io?token=${BROWSERLESS_API_TOKEN}`,
+          defaultViewport: null,
+          ignoreHTTPSErrors: true
+        });
+      } catch (error) {
+        if (i < retries - 1) {
+          console.log(`Connection failed, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          throw error;
+        }
+      }
+    }
+  };
 
   /**
    * Main function to scrape Optimizely experiments from a URL
@@ -735,7 +757,9 @@ async extractOptimizelyOnPageReady(page) {
 
     try {
       // Launch browser
-      browser = await this.launchBrowser();
+      // browser = await this.launchBrowser();
+
+      browser = await this.connectWithRetry();
       
       // Create and configure page
       page = await this.createPage(browser);
