@@ -9,25 +9,77 @@ if (!BROWSERLESS_API_TOKEN) {
 }
 
 class OptimizelyScraperService {
-  async connectWithRetry(retries = 3, delay = 2000) {
-    for (let i = 0; i < retries; i++) {
-      try {
-        console.log(`Attempting connection ${i + 1}/${retries}...`);
-        return await puppeteer.connect({
-          browserWSEndpoint: `wss://production-sfo.browserless.io?token=${BROWSERLESS_API_TOKEN}`,
-          defaultViewport: null,
-          ignoreHTTPSErrors: true
-        });
-      } catch (error) {
-        if (i < retries - 1) {
-          console.log(`Connection failed, retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        } else {
-          throw error;
-        }
+
+async connectWithRetry(url) {
+  const timeout = 60000;
+  const queryParams = new URLSearchParams({
+    timeout,
+    token: BROWSERLESS_API_TOKEN,
+  }).toString();
+  
+  // First, navigate to the page (this creates the browser session)
+  const query = `
+    mutation GotoAndReconnect($url: String!) {
+      goto(url: $url, waitUntil: networkIdle) {
+        status
+      }
+      reconnect(timeout: 10000) {
+        browserWSEndpoint
       }
     }
+  `;
+  
+  const variables = { url };
+  const endpoint = `https://production-lon.browserless.io/chromium/bql?${queryParams}&headless=false&stealth=false&blockConsentModals=false`;
+  
+  console.log('body is::::::', JSON.stringify({
+    query,
+    variables,
+  }));
+  
+  const options = {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      query,
+      variables,
+    }),
   };
+  
+  const response = await fetch(endpoint, options);
+  if (!response.ok) {
+    throw new Error(`Got non-ok response:\n` + (await response.text()));
+  }
+  
+  const { data, errors } = await response.json();
+  
+  // Add error checking
+  if (errors) {
+    throw new Error(`BQL errors: ${JSON.stringify(errors)}`);
+  }
+  
+  console.log('data:::::', JSON.stringify(data));
+  
+  // Check if reconnect succeeded
+  if (!data.reconnect || !data.reconnect.browserWSEndpoint) {
+    throw new Error('Failed to get reconnect information');
+  }
+  
+  const browserWSEndpoint = data.reconnect.browserWSEndpoint;
+  console.log(`Got OK response! Connecting puppeteer to ${browserWSEndpoint}`);
+  
+  const browser = await puppeteer.connect({
+    browserWSEndpoint,
+  });
+  
+  console.log(`Connected to ${await browser.version()}`);
+  const pages = await browser.pages();
+  const page = pages.find((p) => p.url().includes(url)) || pages[0];
+  
+  return page;
+}
   /**
    * Main function to scrape Optimizely experiments from a URL
    * @param {string} url - The website URL to scrape
@@ -114,20 +166,27 @@ class OptimizelyScraperService {
   async createPage(browser) {
     try {
       const page = await browser.newPage();
+      // await page.setExtraHTTPHeaders({
+      //   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      //   'Accept-Language': 'en-GB,en-NZ;q=0.9,en-AU;q=0.8,en;q=0.7,en-US;q=0.6',
+      //   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+      // });
 
+      // // Also set user agent separately (recommended)
+      // await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
       // Set smaller viewport as in your working code
       await page.setViewport({ width: 800, height: 600 });
 
       // Your optimized request interception
-      await page.setRequestInterception(true);
-      page.on('request', (req) => {
-        const resourceType = req.resourceType();
-        if (['image', 'stylesheet', 'font'].includes(resourceType)) {
-          req.abort();
-        } else {
-          req.continue();
-        }
-      });
+      // await page.setRequestInterception(true);
+      // page.on('request', (req) => {
+      //   const resourceType = req.resourceType();
+      //   if (['image', 'stylesheet', 'font'].includes(resourceType)) {
+      //     req.abort();
+      //   } else {
+      //     req.continue();
+      //   }
+      // });
 
       console.log('Page configured successfully');
       return page;
@@ -706,11 +765,11 @@ class OptimizelyScraperService {
     try {
       // Launch browser
       // browser = await this.launchBrowser();
-
-      browser = await this.connectWithRetry();
+      // browser = await this.connectWithRetry(url);
 
       // Create and configure page
-      page = await this.createPage(browser);
+      // page = await this.createPage(browser);
+      page = await this.connectWithRetry(url);
 
       // Navigate to URL
       await this.navigateToPage(page, url);
