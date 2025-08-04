@@ -65,4 +65,63 @@ router.delete('/:id', datasetController.deleteDataset);
  */
 router.get('/:id/download', datasetController.downloadDataset);
 
+/**
+ * @route   GET /api/datasets/:id/scraping-status
+ * @desc    Get scraping status for a dataset
+ * @access  Public
+ * @param   id - Dataset ID
+ */
+router.get('/:id/scraping-status', datasetController.getScrapingStatus);
+
+/**
+ * @route   POST /api/datasets/:id/run-change-detection
+ * @desc    Manually trigger change detection for a dataset
+ * @access  Public
+ * @param   id - Dataset ID
+ */
+router.post('/:id/run-change-detection', datasetController.runChangeDetection);
+
+/**
+ * @route   GET /api/datasets/:id/change-detection-status
+ * @desc    Get change detection status for a dataset
+ * @access  Public
+ * @param   id - Dataset ID
+ */
+router.get('/:id/change-detection-status', datasetController.getChangeDetectionStatus);
+
+/**
+ * @route   GET /api/datasets/:id/change-history
+ * @desc    Get change detection history for a dataset
+ * @access  Public
+ * @param   id - Dataset ID
+ * @query   page, limit, triggerType, fromDate, toDate
+ */
+router.get('/:id/change-history', datasetController.getChangeHistory);
+
+/**
+ * @route   GET /api/datasets/:id/change-history/:versionNumber
+ * @desc    Get specific version details for a dataset
+ * @access  Public
+ * @param   id - Dataset ID
+ * @param   versionNumber - Version number
+ */
+router.get('/:id/change-history/:versionNumber', datasetController.getChangeHistoryVersion);
+
+/**
+ * @route   GET /api/datasets/:id/change-trends
+ * @desc    Get change trends over time for a dataset
+ * @access  Public
+ * @param   id - Dataset ID
+ * @query   timeRange (1month, 3months, 6months, 1year)
+ */
+router.get('/:id/change-trends', datasetController.getChangeTrends);
+
+/**
+ * @route   GET /api/datasets/:id/debug-versions
+ * @desc    Debug endpoint to check version data
+ * @access  Public
+ * @param   id - Dataset ID
+ */
+router.get('/:id/debug-versions', datasetController.debugVersions);
+
 module.exports = router;

@@ -919,7 +919,7 @@ async extractOptimizelyOnPageReady(page) {
    */
   async batchScrapeUrls(urls, options = {}) {
     const { 
-      concurrent = 3, 
+      concurrent = 1, //Avinash check here 
       delay = 2000, 
       batchSize = 1,
       maxTabs = 1 

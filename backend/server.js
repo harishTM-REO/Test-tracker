@@ -18,6 +18,7 @@ const optimizelyRoutes = require('./routes/optimizelyRoutes');
 const changeDetectionRoutes = require('./routes/changeDetectionRoutes');
 const { errorHandler, requestLogger } = require('./middleware/errorHandler');
 const CronJobService = require('./services/cronJobService');
+const BackgroundScrapingService = require('./services/backgroundScrapingService');
 
 app.use(cors());
 
@@ -97,6 +98,15 @@ app.listen(port, async () => {
   } catch (error) {
     console.error('❌ Failed to start cron jobs:', error);
   }
+
+  // Start periodic cleanup for stuck scraping jobs
+  setInterval(async () => {
+    try {
+      await BackgroundScrapingService.checkPendingJobs();
+    } catch (error) {
+      console.error('Error in periodic scraping cleanup:', error);
+    }
+  }, 10 * 60 * 1000); // Check every 10 minutes
 });
 
 app.get("/getWebsites", async (req, res) => {

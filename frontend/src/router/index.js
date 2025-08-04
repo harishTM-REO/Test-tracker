@@ -8,6 +8,7 @@ import Ingestion from '@/views/Ingestion.vue'
 import ExperimentChanges from '@/views/ExperimentChanges.vue'
 import DatasetsList from '@/views/DatasetsList.vue'
 import DatasetDetails from '@/views/DatasetDetails.vue'
+import ChangeHistory from '@/views/ChangeHistory.vue'
 
 const routes = [
   {
@@ -54,6 +55,11 @@ const routes = [
     path: '/dataset/:id',
     name: 'DatasetDetails',
     component: DatasetDetails
+  },
+  {
+    path: '/dataset/:id/change-history',
+    name: 'ChangeHistory',
+    component: ChangeHistory
   }
 ]
 
