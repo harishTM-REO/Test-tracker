@@ -399,22 +399,16 @@ class OptimizelyScraperService {
     console.log("Extracting Optimizely data with enhanced detection...");
     
     // Wait for page to be ready (Puppeteer approach)
-    try {
-      await page.waitForFunction(() => document.readyState === 'complete', { timeout: 3000 });
-      // Additional wait for potential dynamic content
-      await new Promise(resolve => setTimeout(resolve, 500));
-    } catch (error) {
-      console.log('Page ready timeout, proceeding anyway...');
-    }
+    // try {
+    //   await page.waitForFunction(() => document.readyState === 'complete', { timeout: 3000 });
+    //   // Additional wait for potential dynamic content
+    //   await new Promise(resolve => setTimeout(resolve, 500));
+    // } catch (error) {
+    //   console.log('Page ready timeout, proceeding anyway...');
+    // }
 
-    // Set up navigation detection
+    // Skip navigation detection to avoid false positives from intentional reloads
     let navigationDetected = false;
-    const navigationHandler = () => {
-      console.log('Navigation detected during extraction');
-      navigationDetected = true;
-    };
-    
-    page.on('framenavigated', navigationHandler);
 
     try {
       const experimentData = await Promise.race([
@@ -566,16 +560,13 @@ class OptimizelyScraperService {
         })
       ]);
 
-      // Clean up navigation listener
-      page.off('framenavigated', navigationHandler);
+      // No navigation listener to clean up
       const currentUrl = page.url();
       console.log(`Optimizely data extracted from ${currentUrl}: ${experimentData.experiments?.length || 0} experiments found`);
       return experimentData;
 
     } catch (evaluationError) {
-      // Clean up navigation listener
-      
-      page.off('framenavigated', navigationHandler);
+      // No navigation listener to clean up
       throw evaluationError;
     }
 
@@ -598,7 +589,7 @@ class OptimizelyScraperService {
         await page.evaluate(() => document.readyState);
         
         // Attempt simple synchronous extraction
-        return await extractOptimizelySync(page);
+        return await this.extractOptimizelySync(page);
         
       } catch (recoveryError) {
         console.error('Recovery attempt failed:', recoveryError);
@@ -759,9 +750,9 @@ async extractOptimizelyOnPageReady(page) {
 
     try {
       // Launch browser
-      // browser = await this.launchBrowser();
+      browser = await this.launchBrowser();
 
-      browser = await this.connectWithRetry();
+      // browser = await this.connectWithRetry();
       
       // Create and configure page
       page = await this.createPage(browser);
@@ -771,14 +762,8 @@ async extractOptimizelyOnPageReady(page) {
       
       // Handle cookie consent with detection
       const cookieType = await this.handleCookieConsent(page);
-
-      // Reload page after handling cookies to ensure Optimizely loads properly
-      console.log('Reloading page after cookie consent...');
-      // await page.reload({ waitUntil: 'domcontentloaded' });
-      
-      // Wait a moment for scripts to initialize after reload
-      // await new Promise(resolve => setTimeout(resolve, 1000));
-      
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await page.reload({ waitUntil: ['domcontentloaded'] });
       // Extract Optimizely data with intelligent waiting
       const experimentData = await this.extractOptimizelyData(page);
       
@@ -795,14 +780,14 @@ async extractOptimizelyOnPageReady(page) {
       if (page) {
         try {
         // TODO
-          // await page.close();
+          await page.close();
         } catch (e) {
           console.warn('Error closing page:', e.message);
         }
       }
       if (browser) {
         // TODO
-        // await this.closeBrowser(browser);
+        await this.closeBrowser(browser);
       }
     }
   }
@@ -981,6 +966,7 @@ async extractOptimizelyOnPageReady(page) {
       console.log(`Launching ${browserCount} browsers for ${urls.length} URLs`);
       
       for (let i = 0; i < browserCount; i++) {
+        // const browser = await this.connectWithRetry();
         const browser = await this.launchBrowser();
         browsers.push(browser);
       }
@@ -1061,6 +1047,7 @@ async extractOptimizelyOnPageReady(page) {
           // Reload page after handling cookies to ensure all scripts load properly
           console.log('Reloading page after cookie consent...');
           await page.reload({ waitUntil: 'domcontentloaded' });
+          await new Promise(resolve => setTimeout(resolve, 1000));
           
           const experimentData = await this.extractOptimizelyData(page);
           

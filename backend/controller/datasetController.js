@@ -121,6 +121,7 @@ const datasetController = {
   
   // GET /api/datasets
   getAllDatasets: async (req, res) => {
+    console.log('Fetching all datasets with pagination and filtering');
     try {
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 20;
@@ -155,7 +156,7 @@ const datasetController = {
         .skip((page - 1) * limit)
         .select('-sheets.rows') 
         .lean();
-
+      console.log('the datasets', datasets);
       const total = await Dataset.countDocuments(query);
 
       res.status(200).json({

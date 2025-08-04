@@ -75,6 +75,12 @@ export default {
       <v-btn text class="nav-btn" @click="$router.push('/monitored-websites')"
         >Monitored Sites</v-btn
       >
+      <v-btn text class="nav-btn" @click="$router.push('/datasets')"
+        >Datasets</v-btn
+      >
+      <v-btn text class="nav-btn" @click="$router.push('/address-ingestion')"
+        >Upload Dataset</v-btn
+      >
       <v-btn text class="nav-btn add-website" @click="$router.push('/add-website')"
         >Add Website</v-btn
       >

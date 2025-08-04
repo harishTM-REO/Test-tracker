@@ -15,7 +15,9 @@ const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const datasetRoutes = require('./routes/datasetRoutes');
 const optimizelyRoutes = require('./routes/optimizelyRoutes');
+const changeDetectionRoutes = require('./routes/changeDetectionRoutes');
 const { errorHandler, requestLogger } = require('./middleware/errorHandler');
+const CronJobService = require('./services/cronJobService');
 
 app.use(cors());
 
@@ -70,6 +72,9 @@ app.use('/api/datasets', datasetRoutes);
 // Optimizely Routes[batch scrape, etc.]
 app.use('/api/optimizely', optimizelyRoutes);
 
+// Change Detection Routes
+app.use('/api/change-detection', changeDetectionRoutes);
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
@@ -84,6 +89,14 @@ app.get('/api/health', (req, res) => {
 app.listen(port, async () => {
   console.log(`Server running on http://localhost:${port}`);
   await connectDB();
+  
+  // Start cron jobs after server starts
+  try {
+    CronJobService.startCronJobs();
+    console.log('✅ Cron jobs initialized successfully');
+  } catch (error) {
+    console.error('❌ Failed to start cron jobs:', error);
+  }
 });
 
 app.get("/getWebsites", async (req, res) => {

@@ -5,6 +5,9 @@ import WebsiteBreakdown from '@/views/WebsiteBreakdown.vue'
 import AddWebsite from '@/views/AddWebsite.vue'
 import ListExperience from '@/views/ListExperience.vue'
 import Ingestion from '@/views/Ingestion.vue'
+import ExperimentChanges from '@/views/ExperimentChanges.vue'
+import DatasetsList from '@/views/DatasetsList.vue'
+import DatasetDetails from '@/views/DatasetDetails.vue'
 
 const routes = [
   {
@@ -37,7 +40,21 @@ const routes = [
     name: 'Ingestion',
     component: Ingestion
   },
-  
+  {
+    path: '/experiment-changes/:slug',
+    name: 'ExperimentChanges',
+    component: ExperimentChanges
+  },
+  {
+    path: '/datasets',
+    name: 'DatasetsList',
+    component: DatasetsList
+  },
+  {
+    path: '/dataset/:id',
+    name: 'DatasetDetails',
+    component: DatasetDetails
+  }
 ]
 
 const router = createRouter({
