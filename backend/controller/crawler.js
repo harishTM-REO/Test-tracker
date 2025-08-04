@@ -65,7 +65,10 @@ class ExperimentWatcher {
             browser = await puppeteer.launch({
                 headless: "new",
                 executablePath: getChromeExecutablePath(),
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
+                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless,
+                ignoreHTTPSErrors: true,
             });
     
             const page = await browser.newPage();

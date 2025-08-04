@@ -1,7 +1,8 @@
 // Load environment variables from .env file
 require("dotenv").config();
 const express = require("express");
-const puppeteer = require("puppeteer");
+const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer-core');
 const cors = require("cors");
 const { connectDB } = require("./db/connection");
 const app = express();
@@ -130,15 +131,17 @@ app.post("/getTestData", async (req, res) => {
 
   try {
     let browser = await puppeteer.launch({
-        headless: true,
-        // defaultViewport: null, // No longer needed as we set a specific viewport
-        args: [
-            '--no-sandbox', // Essential for some environments like Render free tier
-            '--disable-setuid-sandbox',
-            '--disable-gpu', // Recommended for headless environments
-            '--disable-dev-shm-usage', // Recommended for Docker/containerized environments
-            '--window-size=800,600' // Set a smaller initial window size
-        ]
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+      // defaultViewport: null, // No longer needed as we set a specific viewport
+      args: [
+        '--no-sandbox', // Essential for some environments like Render free tier
+        '--disable-setuid-sandbox',
+        '--disable-gpu', // Recommended for headless environments
+        '--disable-dev-shm-usage', // Recommended for Docker/containerized environments
+        '--window-size=800,600' // Set a smaller initial window size
+      ]
     });
 
     const page = await browser.newPage();
