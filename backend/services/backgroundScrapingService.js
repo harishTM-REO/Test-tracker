@@ -103,7 +103,7 @@ class BackgroundScrapingService {
           delay: 1000
         }
       }, {
-        timeout: 300000, // 5 minutes timeout
+        timeout:  process.env.TIME_OUT_TIME || 2700000, // 45 minutes timeout
         headers: {
           'Content-Type': 'application/json'
         }

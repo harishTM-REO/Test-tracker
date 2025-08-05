@@ -252,7 +252,7 @@ class BackgroundChangeDetectionService {
       console.log(`Calling change detection endpoint: ${endpoint}`);
       
       const response = await axios.post(endpoint, {}, {
-        timeout: 600000, // 10 minutes timeout
+        timeout: process.env.TIME_OUT_TIME || 2700000, // 45 minutes timeout
         headers: {
           'Content-Type': 'application/json'
         }

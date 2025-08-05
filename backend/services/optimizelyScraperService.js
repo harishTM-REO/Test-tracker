@@ -152,7 +152,7 @@ class OptimizelyScraperService {
       
       await page.goto(url, { 
         waitUntil: 'domcontentloaded',
-        timeout: 30000
+        timeout: process.env.TIME_OUT_TIME || 2700000, // 45 minutes timeout
       });
 
       console.log("Page loaded successfully");
