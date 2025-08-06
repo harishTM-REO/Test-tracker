@@ -186,6 +186,70 @@ const datasetSchema = new mongoose.Schema({
     },
     default: 'active'
   },
+  
+  // Scraping Status
+  scrapingStatus: {
+    type: String,
+    enum: {
+      values: ['pending', 'in_progress', 'completed', 'failed', 'not_started'],
+      message: 'Scraping status must be pending, in_progress, completed, failed, or not_started'
+    },
+    default: 'not_started'
+  },
+  scrapingStartedAt: {
+    type: Date,
+    default: null
+  },
+  scrapingCompletedAt: {
+    type: Date,
+    default: null
+  },
+  scrapingError: {
+    type: String,
+    default: null
+  },
+  scrapingStats: {
+    totalUrls: { type: Number, default: 0 },
+    successfulScans: { type: Number, default: 0 },
+    failedScans: { type: Number, default: 0 },
+    optimizelyDetected: { type: Number, default: 0 },
+    totalExperiments: { type: Number, default: 0 },
+    duration: { type: String, default: null }
+  },
+
+  // Change Detection Status
+  changeDetectionStatus: {
+    type: String,
+    enum: {
+      values: ['not_started', 'pending', 'in_progress', 'completed', 'failed'],
+      message: 'Change detection status must be not_started, pending, in_progress, completed, or failed'
+    },
+    default: 'not_started'
+  },
+  changeDetectionStartedAt: {
+    type: Date,
+    default: null
+  },
+  changeDetectionCompletedAt: {
+    type: Date,
+    default: null
+  },
+  changeDetectionError: {
+    type: String,
+    default: null
+  },
+  lastChangeDetectionRun: {
+    type: Date,
+    default: null
+  },
+  changeDetectionStats: {
+    totalVersions: { type: Number, default: 0 },
+    lastVersionNumber: { type: Number, default: 0 },
+    totalChangesDetected: { type: Number, default: 0 },
+    lastRunDuration: { type: String, default: null },
+    manualRuns: { type: Number, default: 0 },
+    cronRuns: { type: Number, default: 0 }
+  },
   isPublic: {
     type: Boolean,
     default: true
@@ -279,6 +343,92 @@ datasetSchema.methods.restore = function() {
   this.isDeleted = false;
   this.deletedAt = null;
   this.status = 'active';
+  return this.save();
+};
+
+datasetSchema.methods.startScraping = function() {
+  this.scrapingStatus = 'in_progress';
+  this.scrapingStartedAt = new Date();
+  this.scrapingError = null;
+  return this.save();
+};
+
+datasetSchema.methods.completeScraping = function(stats = {}) {
+  this.scrapingStatus = 'completed';
+  this.scrapingCompletedAt = new Date();
+  this.scrapingError = null;
+  
+  if (stats) {
+    this.scrapingStats = {
+      ...this.scrapingStats,
+      ...stats
+    };
+  }
+  
+  if (this.scrapingStartedAt) {
+    const duration = Math.round((new Date() - this.scrapingStartedAt) / 1000);
+    this.scrapingStats.duration = `${Math.floor(duration / 60)}m ${duration % 60}s`;
+  }
+  
+  return this.save();
+};
+
+datasetSchema.methods.failScraping = function(error) {
+  this.scrapingStatus = 'failed';
+  this.scrapingError = error;
+  this.scrapingCompletedAt = new Date();
+  return this.save();
+};
+
+// Change Detection Status Methods
+datasetSchema.methods.startChangeDetection = function(triggerType = 'manual') {
+  this.changeDetectionStatus = 'in_progress';
+  this.changeDetectionStartedAt = new Date();
+  this.changeDetectionError = null;
+  
+  // Update stats
+  if (triggerType === 'manual') {
+    this.changeDetectionStats.manualRuns = (this.changeDetectionStats.manualRuns || 0) + 1;
+  } else if (triggerType === 'cron') {
+    this.changeDetectionStats.cronRuns = (this.changeDetectionStats.cronRuns || 0) + 1;
+  }
+  
+  return this.save();
+};
+
+datasetSchema.methods.completeChangeDetection = function(versionNumber, totalChanges = 0, duration = null) {
+  this.changeDetectionStatus = 'completed';
+  this.changeDetectionCompletedAt = new Date();
+  this.lastChangeDetectionRun = new Date();
+  this.changeDetectionError = null;
+  
+  // Update stats
+  this.changeDetectionStats.totalVersions = (this.changeDetectionStats.totalVersions || 0) + 1;
+  this.changeDetectionStats.lastVersionNumber = versionNumber;
+  this.changeDetectionStats.totalChangesDetected = (this.changeDetectionStats.totalChangesDetected || 0) + totalChanges;
+  
+  if (duration && this.changeDetectionStartedAt) {
+    const durationMs = duration || (new Date() - this.changeDetectionStartedAt);
+    const durationSec = Math.round(durationMs / 1000);
+    const minutes = Math.floor(durationSec / 60);
+    const seconds = durationSec % 60;
+    this.changeDetectionStats.lastRunDuration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  }
+  
+  return this.save();
+};
+
+datasetSchema.methods.failChangeDetection = function(error) {
+  this.changeDetectionStatus = 'failed';
+  this.changeDetectionError = error;
+  this.changeDetectionCompletedAt = new Date();
+  this.lastChangeDetectionRun = new Date();
+  return this.save();
+};
+
+datasetSchema.methods.setPendingChangeDetection = function() {
+  this.changeDetectionStatus = 'pending';
+  this.changeDetectionError = null;
   return this.save();
 };
 

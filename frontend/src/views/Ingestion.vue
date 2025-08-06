@@ -1066,6 +1066,11 @@ export default {
         await this.loadDatasets();
 
         this.saving = false;
+
+        // Redirect to datasets page after successful upload
+        setTimeout(() => {
+          this.$router.push('/datasets');
+        }, 2000); // 2 second delay to show success message
       } catch (err) {
         this.error = `Failed to save dataset: ${err.message}`;
         this.saving = false;

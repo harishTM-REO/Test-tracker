@@ -17,7 +17,7 @@ const monitoringLogSchema = new mongoose.Schema(
       enum: ["success", "error", "timeout"],
       index: true,
     },
-    duration: Number, // milliseconds
+    duration: Number, 
     experimentsFound: Number,
     changes: {
       detected: Boolean,

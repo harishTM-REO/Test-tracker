@@ -1,5 +1,6 @@
 // controller/datasetController.js
 const Dataset = require('../models/Dataset');
+const BackgroundScrapingService = require('../services/backgroundScrapingService');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -116,6 +117,16 @@ function generateFileHash(filePath) {
   return crypto.createHash('md5').update(fileBuffer).digest('hex');
 }
 
+// Helper function to extract domain from URL
+function extractDomain(url) {
+  try {
+    const domain = new URL(url).hostname;
+    return domain.replace(/^www\./, '');
+  } catch (e) {
+    return url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0];
+  }
+}
+
 // Controller object
 const datasetController = {
   
@@ -208,10 +219,73 @@ const datasetController = {
         });
       }
 
+      // Get Optimizely results if scraping is completed
+      let optimizelyResults = null;
+      if (dataset.scrapingStatus === 'completed') {
+        const OptimizelyResult = require('../models/OptimizelyResult');
+        optimizelyResults = await OptimizelyResult.findOne({ datasetId: id }).lean();
+      }
+
+      // Merge company data with Optimizely results
+      const companiesWithOptimizely = dataset.companies ? dataset.companies.map(company => {
+        const domain = extractDomain(company.companyURL);
+        let optimizelyInfo = null;
+
+        if (optimizelyResults) {
+          // Find matching website result
+          const websiteResult = optimizelyResults.websiteResults.find(wr => 
+            wr.domain === domain || wr.url === company.companyURL
+          );
+          
+          if (websiteResult) {
+            optimizelyInfo = {
+              hasOptimizely: websiteResult.optimizelyDetected,
+              experimentCount: websiteResult.experimentCount,
+              activeCount: websiteResult.activeCount,
+              cookieType: websiteResult.cookieType,
+              experiments: websiteResult.experiments || []
+            };
+          } else {
+            // Check if it's in the "without optimizely" list
+            const withoutOptimizely = optimizelyResults.websitesWithoutOptimizely.find(wo => 
+              wo.domain === domain || wo.url === company.companyURL
+            );
+            
+            if (withoutOptimizely) {
+              optimizelyInfo = {
+                hasOptimizely: false,
+                experimentCount: 0,
+                activeCount: 0,
+                cookieType: withoutOptimizely.cookieType,
+                experiments: []
+              };
+            }
+          }
+        }
+
+        return {
+          ...company,
+          optimizely: optimizelyInfo
+        };
+      }) : [];
+
+      const responseData = {
+        ...dataset,
+        companies: companiesWithOptimizely,
+        optimizelyResults: optimizelyResults ? {
+          totalUrls: optimizelyResults.totalUrls,
+          successfulScrapes: optimizelyResults.successfulScrapes,
+          failedScrapes: optimizelyResults.failedScrapes,
+          optimizelyDetectedCount: optimizelyResults.optimizelyDetectedCount,
+          totalExperiments: optimizelyResults.totalExperiments,
+          scrapingStats: optimizelyResults.scrapingStats
+        } : null
+      };
+
       res.status(200).json({
         success: true,
         message: 'Dataset retrieved successfully',
-        data: dataset
+        data: responseData
       });
 
     } catch (error) {
@@ -293,11 +367,19 @@ const datasetController = {
 
         const savedDataset = await dataset.save();
 
+        // Start background scraping if companies are available
+        let scrapingInitiated = false;
+        if (datasetData.companies && datasetData.companies.length > 0) {
+          console.log(`Initiating background scraping for dataset: ${savedDataset._id}`);
+          scrapingInitiated = await BackgroundScrapingService.startScrapingForDataset(savedDataset._id);
+        }
+
         res.status(201).json({
           success: true,
           message: 'Dataset created successfully',
           data: savedDataset,
-          companiesExtracted: datasetData.companies ? datasetData.companies.length : 0
+          companiesExtracted: datasetData.companies ? datasetData.companies.length : 0,
+          scrapingInitiated: scrapingInitiated
         });
 
         console.log('Dataset created successfully');
@@ -490,6 +572,258 @@ const datasetController = {
       res.status(500).json({
         success: false,
         message: 'Search failed',
+        error: error.message
+      });
+    }
+  },
+
+  // GET /api/datasets/:id/scraping-status
+  getScrapingStatus: async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const status = await BackgroundScrapingService.getScrapingStatus(id);
+      
+      if (!status) {
+        return res.status(404).json({
+          success: false,
+          message: 'Dataset not found'
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Scraping status retrieved successfully',
+        data: status
+      });
+
+    } catch (error) {
+      console.error('Error in getScrapingStatus:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve scraping status',
+        error: error.message
+      });
+    }
+  },
+
+  // POST /api/datasets/:id/run-change-detection
+  runChangeDetection: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const BackgroundChangeDetectionService = require('../services/backgroundChangeDetectionService');
+
+      // Check if dataset exists and has been scraped
+      const dataset = await Dataset.findById(id);
+      if (!dataset) {
+        return res.status(404).json({
+          success: false,
+          message: 'Dataset not found'
+        });
+      }
+
+      if (dataset.scrapingStatus !== 'completed') {
+        return res.status(400).json({
+          success: false,
+          message: 'Dataset must be scraped before running change detection',
+          scrapingStatus: dataset.scrapingStatus
+        });
+      }
+
+      // Start background change detection
+      const started = await BackgroundChangeDetectionService.startChangeDetectionForDataset(id, 'manual', 'user');
+      
+      if (started) {
+        res.status(200).json({
+          success: true,
+          message: 'Change detection started successfully',
+          data: {
+            datasetId: id,
+            status: 'pending',
+            triggeredAt: new Date().toISOString(),
+            triggerType: 'manual'
+          }
+        });
+      } else {
+        res.status(409).json({
+          success: false,
+          message: 'Change detection is already running for this dataset or could not be started'
+        });
+      }
+
+    } catch (error) {
+      console.error('Error in runChangeDetection:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to start change detection',
+        error: error.message
+      });
+    }
+  },
+
+  // GET /api/datasets/:id/change-detection-status
+  getChangeDetectionStatus: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const BackgroundChangeDetectionService = require('../services/backgroundChangeDetectionService');
+
+      const status = await BackgroundChangeDetectionService.getChangeDetectionStatus(id);
+      
+      if (!status) {
+        return res.status(404).json({
+          success: false,
+          message: 'Dataset not found'
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Change detection status retrieved successfully',
+        data: status
+      });
+
+    } catch (error) {
+      console.error('Error in getChangeDetectionStatus:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve change detection status',
+        error: error.message
+      });
+    }
+  },
+
+  // GET /api/datasets/:id/change-history
+  getChangeHistory: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const {
+        page = 1,
+        limit = 20,
+        triggerType,
+        fromDate,
+        toDate
+      } = req.query;
+
+      const ChangeDetectionVersionService = require('../services/changeDetectionVersionService');
+
+      const historyData = await ChangeDetectionVersionService.getVersionHistory(id, {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        triggerType,
+        fromDate,
+        toDate
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'Change history retrieved successfully',
+        data: {
+          datasetId: id,
+          ...historyData
+        }
+      });
+
+    } catch (error) {
+      console.error('Error in getChangeHistory:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve change history',
+        error: error.message
+      });
+    }
+  },
+
+  // GET /api/datasets/:id/change-history/:versionNumber
+  getChangeHistoryVersion: async (req, res) => {
+    try {
+      const { id, versionNumber } = req.params;
+      const ChangeDetectionVersionService = require('../services/changeDetectionVersionService');
+
+      const versionDetails = await ChangeDetectionVersionService.getVersionDetails(id, versionNumber);
+
+      res.status(200).json({
+        success: true,
+        message: 'Version details retrieved successfully',
+        data: {
+          datasetId: id,
+          version: versionDetails
+        }
+      });
+
+    } catch (error) {
+      console.error('Error in getChangeHistoryVersion:', error);
+      const statusCode = error.message.includes('not found') ? 404 : 500;
+      res.status(statusCode).json({
+        success: false,
+        message: 'Failed to retrieve version details',
+        error: error.message
+      });
+    }
+  },
+
+  // GET /api/datasets/:id/change-trends
+  getChangeTrends: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { timeRange = '6months' } = req.query;
+      const ChangeDetectionVersionService = require('../services/changeDetectionVersionService');
+
+      const trends = await ChangeDetectionVersionService.getChangeTrends(id, timeRange);
+
+      res.status(200).json({
+        success: true,
+        message: 'Change trends retrieved successfully',
+        data: {
+          datasetId: id,
+          ...trends
+        }
+      });
+
+    } catch (error) {
+      console.error('Error in getChangeTrends:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve change trends',
+        error: error.message
+      });
+    }
+  },
+
+  // GET /api/datasets/:id/debug-versions - Debug endpoint to check version data
+  debugVersions: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const ChangeDetectionVersion = require('../models/ChangeDetectionVersion');
+
+      const allVersions = await ChangeDetectionVersion.find({ datasetId: id })
+        .sort({ versionNumber: 1 })
+        .select('versionNumber status triggerType runTimestamp experimentsSnapshot.totalExperiments changesSinceLastVersion.summary.totalChanges')
+        .lean();
+
+      const versionSummary = allVersions.map(v => ({
+        version: v.versionNumber,
+        status: v.status,
+        trigger: v.triggerType,
+        timestamp: v.runTimestamp,
+        experiments: v.experimentsSnapshot?.totalExperiments || 0,
+        changes: v.changesSinceLastVersion?.summary?.totalChanges || 0
+      }));
+
+      res.status(200).json({
+        success: true,
+        message: 'Debug version data retrieved',
+        data: {
+          datasetId: id,
+          totalVersions: allVersions.length,
+          versions: versionSummary
+        }
+      });
+
+    } catch (error) {
+      console.error('Error in debugVersions:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve debug data',
         error: error.message
       });
     }

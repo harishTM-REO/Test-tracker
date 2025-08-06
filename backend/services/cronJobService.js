@@ -1,5 +1,6 @@
 const cron = require('node-cron');
-const ExperimentChangeDetectionService = require('./experimentChangeDetectionService');
+const BackgroundChangeDetectionService = require('./backgroundChangeDetectionService');
+const Dataset = require('../models/Dataset');
 
 class CronJobService {
   constructor() {
@@ -26,6 +27,13 @@ class CronJobService {
       timezone: "America/New_York" // Adjust timezone as needed
     });
 
+    // Cleanup stuck change detection jobs - runs every 4 hours
+    const cleanupStuckJobs = cron.schedule('0 */4 * * *', async () => {
+      await this.cleanupStuckChangeDetectionJobs();
+    }, {
+      scheduled: false,
+      timezone: "America/New_York"
+    });
     
     // Test job - runs every day at midnight (for testing purposes)
     const dailyTestJob = cron.schedule('0 0 * * *', async () => {
@@ -37,10 +45,12 @@ class CronJobService {
     
     // Store jobs
     this.jobs.set('monthlyChangeDetection', monthlyChangeDetection);
+    this.jobs.set('cleanupStuckJobs', cleanupStuckJobs);
     this.jobs.set('dailyTest', dailyTestJob);
     
     // Start jobs
     monthlyChangeDetection.start();
+    cleanupStuckJobs.start();
     // dailyTestJob.start(); // Uncomment for testing
     
     this.isRunning = true;
@@ -66,7 +76,7 @@ class CronJobService {
   }
   
   /**
-   * Run monthly change detection
+   * Run monthly change detection for all datasets
    */
   async runMonthlyChangeDetection() {
     try {
@@ -75,56 +85,126 @@ class CronJobService {
       
       const startTime = Date.now();
       
-      // Run change detection for all datasets
-      const results = await ExperimentChangeDetectionService.runChangeDetectionForAllDatasets();
+      // Get all datasets that have been scraped
+      const datasets = await Dataset.find({
+        isDeleted: false,
+        scrapingStatus: 'completed'
+      }).select('_id name changeDetectionStatus').lean();
+      
+      console.log(`Found ${datasets.length} datasets ready for change detection`);
+      
+      const results = {
+        totalDatasets: datasets.length,
+        successful: 0,
+        failed: 0,
+        alreadyRunning: 0,
+        results: []
+      };
+      
+      // Run change detection for each dataset
+      for (const dataset of datasets) {
+        try {
+          console.log(`Processing dataset: ${dataset.name} (${dataset._id})`);
+          
+          const started = await BackgroundChangeDetectionService.startChangeDetectionForDataset(
+            dataset._id, 
+            'cron', 
+            'monthly_scheduler'
+          );
+          
+          if (started) {
+            results.successful++;
+            results.results.push({
+              datasetId: dataset._id,
+              datasetName: dataset.name,
+              status: 'started',
+              message: 'Change detection initiated successfully'
+            });
+            console.log(`✅ Change detection started for ${dataset.name}`);
+          } else {
+            results.alreadyRunning++;
+            results.results.push({
+              datasetId: dataset._id,
+              datasetName: dataset.name,
+              status: 'skipped',
+              message: 'Change detection already running or could not be started'
+            });
+            console.log(`⚠️ Change detection skipped for ${dataset.name} (already running or error)`);
+          }
+          
+          // Add small delay between dataset processing to avoid overwhelming the system
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+        } catch (error) {
+          results.failed++;
+          results.results.push({
+            datasetId: dataset._id,
+            datasetName: dataset.name,
+            status: 'failed',
+            message: error.message
+          });
+          console.error(`❌ Failed to start change detection for ${dataset.name}:`, error.message);
+        }
+      }
       
       const duration = Date.now() - startTime;
       
-      console.log('📊 Monthly change detection completed:');
-      console.log(`- Duration: ${duration}ms`);
+      console.log('📊 Monthly change detection batch completed:');
+      console.log(`- Duration: ${duration}ms (${Math.round(duration/1000)}s)`);
       console.log(`- Datasets processed: ${results.totalDatasets}`);
-      console.log(`- Total changes detected: ${results.changesDetected}`);
+      console.log(`- Successfully started: ${results.successful}`);
+      console.log(`- Failed: ${results.failed}`);
+      console.log(`- Already running/skipped: ${results.alreadyRunning}`);
       
-      // Log detailed results
-      results.results.forEach(result => {
-        console.log(`  📁 ${result.datasetName}: ${result.totalChanges} changes`);
-        if (result.changesByType && Object.keys(result.changesByType).length > 0) {
-          Object.entries(result.changesByType).forEach(([type, count]) => {
-            console.log(`    - ${type}: ${count}`);
-          });
-        }
-      });
-      
-      // Send notification or alert if needed
-      if (results.changesDetected > 0) {
+      // Send notification about the batch completion
+      if (results.totalDatasets > 0) {
         await this.sendChangeNotification(results);
       }
+      
+      return results;
       
     } catch (error) {
       console.error('❌ Error in monthly change detection:', error);
       
       // Log error for monitoring
       await this.logCronError('monthlyChangeDetection', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cleanup stuck change detection jobs
+   */
+  async cleanupStuckChangeDetectionJobs() {
+    try {
+      console.log('🧹 Running cleanup for stuck change detection jobs...');
+      await BackgroundChangeDetectionService.checkPendingChangeDetectionJobs();
+      console.log('✅ Cleanup completed');
+    } catch (error) {
+      console.error('❌ Error during cleanup:', error);
+      await this.logCronError('cleanupStuckJobs', error);
     }
   }
   
   /**
-   * Send notification about detected changes
-   * @param {Object} results - Change detection results
+   * Send notification about change detection batch completion
+   * @param {Object} results - Change detection batch results
    */
   async sendChangeNotification(results) {
     try {
       // This is where you can implement email notifications, Slack alerts, etc.
-      console.log('📧 Sending change notification...');
+      console.log('📧 Sending change detection batch notification...');
       
       const summary = {
         timestamp: new Date().toISOString(),
         totalDatasets: results.totalDatasets,
-        totalChanges: results.changesDetected,
-        details: results.results.map(r => ({
+        successful: results.successful,
+        failed: results.failed,
+        alreadyRunning: results.alreadyRunning,
+        datasets: results.results.map(r => ({
           dataset: r.datasetName,
-          changes: r.totalChanges,
-          types: r.changesByType
+          status: r.status,
+          message: r.message
         }))
       };
       
@@ -134,7 +214,15 @@ class CronJobService {
       // - Post to Slack webhook
       // - Create dashboard alert
       
-      console.log('Notification summary:', JSON.stringify(summary, null, 2));
+      console.log('📊 Change Detection Batch Summary:', JSON.stringify(summary, null, 2));
+      
+      // Log summary for monitoring
+      if (results.failed > 0) {
+        console.warn(`⚠️ ${results.failed} datasets failed to start change detection`);
+      }
+      if (results.successful > 0) {
+        console.log(`✅ Successfully initiated change detection for ${results.successful} datasets`);
+      }
       
     } catch (error) {
       console.error('Error sending change notification:', error);
@@ -200,6 +288,7 @@ class CronJobService {
   logNextExecutions() {
     console.log('📅 Next scheduled executions:');
     console.log('- Monthly Change Detection: 1st of every month at 2:00 AM');
+    console.log('- Cleanup Stuck Jobs: Every 4 hours');
     console.log('- Daily Test Job: Every day at midnight (disabled by default)');
   }
   

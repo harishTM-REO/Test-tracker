@@ -157,7 +157,7 @@ class OptimizelyScraperService {
       
       await page.goto(url, { 
         waitUntil: 'domcontentloaded',
-        timeout: 30000
+        timeout: process.env.TIME_OUT_TIME || 2700000, // 45 minutes timeout
       });
 
       console.log("Page loaded successfully");
@@ -924,7 +924,7 @@ async extractOptimizelyOnPageReady(page) {
    */
   async batchScrapeUrls(urls, options = {}) {
     const { 
-      concurrent = 3, 
+      concurrent = 1, //Avinash check here 
       delay = 2000, 
       batchSize = 1,
       maxTabs = 1 
@@ -966,18 +966,28 @@ async extractOptimizelyOnPageReady(page) {
     const browsers = [];
 
     try {
-      // Launch browsers for this chunk
-      const browserCount = Math.min(Math.ceil(urls.length / maxTabs), concurrent);
-      console.log(`Launching ${browserCount} browsers for ${urls.length} URLs`);
+      // Calculate optimal browser count to ensure all URLs are processed
+      // We need enough browsers to handle all URLs within the maxTabs constraint
+      const optimalBrowserCount = Math.ceil(urls.length / maxTabs);
+      const actualBrowserCount = Math.min(optimalBrowserCount, concurrent);
       
-      for (let i = 0; i < browserCount; i++) {
+      console.log(`Launching ${actualBrowserCount} browsers for ${urls.length} URLs (optimal: ${optimalBrowserCount}, max concurrent: ${concurrent})`);
+      
+      for (let i = 0; i < actualBrowserCount; i++) {
         // const browser = await this.connectWithRetry();
         const browser = await this.launchBrowser();
         browsers.push(browser);
       }
 
-      // Distribute URLs across browsers
+      // Distribute URLs across browsers with improved algorithm
       const urlBatches = this.distributeUrlsAcrossBrowsers(urls, browsers.length, maxTabs);
+      
+      // Verify all URLs are distributed
+      const totalDistributedUrls = urlBatches.flat().length;
+      if (totalDistributedUrls !== urls.length) {
+        console.warn(`⚠️ URL distribution mismatch: ${totalDistributedUrls}/${urls.length} URLs distributed`);
+        console.warn('URL batches:', urlBatches.map((batch, i) => `Browser ${i}: ${batch.length} URLs`));
+      }
       
       // Process each browser's batch
       const batchPromises = urlBatches.map(async (urlBatch, browserIndex) => {
@@ -1015,10 +1025,33 @@ async extractOptimizelyOnPageReady(page) {
   distributeUrlsAcrossBrowsers(urls, browserCount, maxTabs) {
     const batches = Array.from({ length: browserCount }, () => []);
     
-    urls.forEach((url, index) => {
-      const browserIndex = index % browserCount;
-      if (batches[browserIndex].length < maxTabs) {
-        batches[browserIndex].push(url);
+    // Smart distribution: Fill browsers evenly, respecting maxTabs limit
+    let currentBrowserIndex = 0;
+    
+    for (const url of urls) {
+      // Find the next available browser that hasn't reached maxTabs
+      let attempts = 0;
+      while (batches[currentBrowserIndex].length >= maxTabs && attempts < browserCount) {
+        currentBrowserIndex = (currentBrowserIndex + 1) % browserCount;
+        attempts++;
+      }
+      
+      // If all browsers are at maxTabs, use round-robin anyway (fallback)
+      if (attempts >= browserCount) {
+        currentBrowserIndex = urls.indexOf(url) % browserCount;
+        console.warn(`⚠️ All browsers at maxTabs (${maxTabs}), using round-robin for URL: ${url}`);
+      }
+      
+      batches[currentBrowserIndex].push(url);
+      
+      // Move to next browser for better distribution
+      currentBrowserIndex = (currentBrowserIndex + 1) % browserCount;
+    }
+
+    // Log distribution for debugging
+    batches.forEach((batch, index) => {
+      if (batch.length > 0) {
+        console.log(`Browser ${index}: ${batch.length} URLs (${batch.length > maxTabs ? 'OVER LIMIT' : 'within limit'})`);
       }
     });
 

@@ -53,6 +53,11 @@
             <div class="dataset-meta">
               <span class="dataset-filename">📄 {{ dataset.originalFileName }}</span>
               <span class="dataset-version">{{ dataset.version }}</span>
+              <div class="scraping-status">
+                <span :class="['status-badge', getScrapingStatusClass(dataset.scrapingStatus)]">
+                  {{ getScrapingStatusText(dataset.scrapingStatus) }}
+                </span>
+              </div>
             </div>
           </div>
           
@@ -65,6 +70,11 @@
             <div class="stat-row">
               <span class="stat-label">Companies:</span>
               <span class="stat-value">{{ dataset.companies ? dataset.companies.length : 0 }}</span>
+            </div>
+            
+            <div v-if="dataset.scrapingStatus === 'completed' && dataset.scrapingStats" class="stat-row">
+              <span class="stat-label">Optimizely Sites:</span>
+              <span class="stat-value optimizely">{{ dataset.scrapingStats.optimizelyDetected || 0 }}</span>
             </div>
             
             <div class="stat-row">
@@ -101,7 +111,8 @@ export default {
     return {
       datasets: [],
       loading: false,
-      error: null
+      error: null,
+      refreshInterval: null
     }
   },
   
@@ -116,6 +127,11 @@ export default {
   
   created() {
     this.fetchDatasets()
+    this.startAutoRefresh()
+  },
+
+  beforeUnmount() {
+    this.stopAutoRefresh()
   },
   
   methods: {
@@ -147,6 +163,48 @@ export default {
       if (!dateString) return 'Unknown'
       const date = new Date(dateString)
       return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    },
+
+    getScrapingStatusText(status) {
+      const statusMap = {
+        'not_started': 'Not Scraped',
+        'pending': 'Scraping Queued',
+        'in_progress': 'Scraping...',
+        'completed': 'Scraped',
+        'failed': 'Scraping Failed'
+      }
+      return statusMap[status] || 'Unknown'
+    },
+
+    getScrapingStatusClass(status) {
+      const classMap = {
+        'not_started': 'status-not-started',
+        'pending': 'status-pending',
+        'in_progress': 'status-in-progress',
+        'completed': 'status-completed',
+        'failed': 'status-failed'
+      }
+      return classMap[status] || 'status-unknown'
+    },
+
+    startAutoRefresh() {
+      // Refresh every 10 seconds if there are datasets in progress
+      this.refreshInterval = setInterval(() => {
+        const hasActiveScrapingJobs = this.datasets.some(dataset => 
+          dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'
+        )
+        
+        if (hasActiveScrapingJobs) {
+          this.fetchDatasets()
+        }
+      }, 10000) // 10 seconds
+    },
+
+    stopAutoRefresh() {
+      if (this.refreshInterval) {
+        clearInterval(this.refreshInterval)
+        this.refreshInterval = null
+      }
     }
   }
 }
@@ -337,6 +395,11 @@ export default {
   color: #2c3e50;
 }
 
+.stat-row .stat-value.optimizely {
+  color: #27ae60;
+  font-size: 1.05rem;
+}
+
 .stat-row .stat-value.experiments {
   color: #27ae60;
   font-size: 1.1rem;
@@ -380,6 +443,68 @@ export default {
   color: #666;
   font-style: italic;
   line-height: 1.3;
+}
+
+.scraping-status {
+  margin-top: 8px;
+}
+
+.status-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-not-started {
+  background: #f8f9fa;
+  color: #6c757d;
+  border: 1px solid #dee2e6;
+}
+
+.status-pending {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeaa7;
+}
+
+.status-in-progress {
+  background: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #bee5eb;
+  animation: pulse 2s infinite;
+}
+
+.status-completed {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.status-failed {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.status-unknown {
+  background: #e2e3e5;
+  color: #495057;
+  border: 1px solid #ced4da;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 .dataset-actions {
