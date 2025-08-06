@@ -1035,7 +1035,7 @@ export default {
         formData.append('file', this.selectedFile);
         formData.append('data', JSON.stringify(payload));
 
-        const response = await fetch(`${this.apiBaseUrl}/datasets`, {
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets`, {
           method: 'POST',
           body: formData
         });
@@ -1083,7 +1083,7 @@ export default {
       this.loadingDatasets = true;
       
       try {
-        const response = await fetch(`${this.apiBaseUrl}/datasets?limit=50&sortBy=createdAt&sortOrder=desc`);
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets?limit=50&sortBy=createdAt&sortOrder=desc`);
         
         if (!response.ok) {
           const errorData = await response.json();
@@ -1104,7 +1104,7 @@ export default {
     async loadDataset(dataset) {
       try {
         // Fetch full dataset with row data
-        const response = await fetch(`${this.apiBaseUrl}/datasets/${dataset._id}?includeRows=true`);
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${dataset._id}?includeRows=true`);
         
         if (!response.ok) {
           const errorData = await response.json();
@@ -1153,7 +1153,7 @@ export default {
       if (!confirmed) return;
 
       try {
-        const response = await fetch(`${this.apiBaseUrl}/datasets/${datasetId}`, {
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${datasetId}`, {
           method: 'DELETE'
         });
 
@@ -1182,8 +1182,8 @@ export default {
     async downloadDataset(dataset, version = null) {
       try {
         const url = version 
-          ? `${this.apiBaseUrl}/datasets/${dataset._id}/download?version=${version}`
-          : `${this.apiBaseUrl}/datasets/${dataset._id}/download`;
+          ? `${this.apiBaseUrl}/api/datasets/${dataset._id}/download?version=${version}`
+          : `${this.apiBaseUrl}/api/datasets/${dataset._id}/download`;
 
         // Create a temporary link and click it
         const link = document.createElement('a');
@@ -1212,7 +1212,7 @@ export default {
       if (!newName) return;
 
       try {
-        const response = await fetch(`${this.apiBaseUrl}/datasets/${dataset._id}/duplicate`, {
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${dataset._id}/duplicate`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -1251,7 +1251,7 @@ export default {
       this.datasetVersions = [];
 
       try {
-        const response = await fetch(`${this.apiBaseUrl}/datasets/${dataset._id}/versions`);
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${dataset._id}/versions`);
         
         if (!response.ok) {
           const errorData = await response.json();
