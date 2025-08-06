@@ -216,7 +216,9 @@ export default {
     return {
       data: null,
       loading: false,
-      error: null
+      error: null,
+      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
+
     }
   },
   methods: {
@@ -230,7 +232,7 @@ export default {
       this.error = null;
 
       try {
-        const response = await fetch(`http://localhost:3000/getExperiments/${this.$route.query.id}`);
+        const response = await fetch(`${this.apiBaseUrl}/getExperiments/${this.$route.query.id}`);
         
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);

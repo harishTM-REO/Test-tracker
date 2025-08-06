@@ -225,6 +225,7 @@ export default {
       disableBtn: false,
       responseData: [],
       isProperWebsite: false,
+      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
     }
   },
   methods: {
@@ -232,8 +233,8 @@ export default {
       this.disableBtn = true;
       console.log('websiteURL', this.websiteURL);
       axios
-        // .get(`http://localhost:3000/api/optimizely/scrape?url=${encodeURIComponent(this.websiteURL)}`)
-        .get(`http://localhost:3000/api/optimizely/scrape?url=${this.websiteURL}`)
+        // .get(`${this.apiBaseUrl}/api/optimizely/scrape?url=${encodeURIComponent(this.websiteURL)}`)
+        .get(`${this.apiBaseUrl}/api/optimizely/scrape?url=${this.websiteURL}`)
         .then((response) => {
           console.log(response.data);
           // this.responseData = response.data.data; 
