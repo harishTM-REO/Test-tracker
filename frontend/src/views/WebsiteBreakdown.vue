@@ -283,7 +283,8 @@ const data = ref({
     total: 0,
     limit: 50,
     skip: 0,
-    hasMore: false
+    hasMore: false,
+    apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
   }
 })
 
@@ -309,7 +310,7 @@ const pendingNotificationsCount = computed(() => {
 // Methods
 const fetchData = () => {
   axios
-    .get('http://localhost:3000/getWebsiteChanges/' + route.query.id)
+    .get(`{this.apiBaseUrl}/getWebsiteChanges/` + route.query.id)
     .then((response) => {
       data.value = response.data
     })

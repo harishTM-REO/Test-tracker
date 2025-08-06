@@ -8,6 +8,7 @@ export default {
       responseData: [],
       isProperWebsite: false,
       showloader: true,
+      apiBaseUrl: import.meta.env.VITE_APP_TITLE_BACKEND_URL,
     }
   },
 
@@ -25,7 +26,7 @@ export default {
   methods: {
     // handleClick() {
     //   this.disableBtn = true;
-    //   axios.post('http://localhost:3000/getTestData', {
+    //   axios.post(`${this.apiBaseUrl}/getTestData`, {
     //     url: this.websiteURL,
     //   })
     //     .then((response) => {
@@ -44,7 +45,7 @@ export default {
     getAllWebsitesData() {
       this.disableBtn = true
       axios
-        .get('http://localhost:3000/getWebsites', {
+        .get(`${this.apiBaseUrl}/getWebsites`, {
           url: this.websiteURL,
         })
         .then((response) => {

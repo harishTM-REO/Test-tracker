@@ -643,7 +643,8 @@ export default {
         version: '',
         description: ''
       },
-      apiBaseUrl: 'http://localhost:3000/api', // Configure your backend URL
+      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
+ // Configure your backend URL
       // Notification system
       showNotification: false,
       notificationMessage: '',
