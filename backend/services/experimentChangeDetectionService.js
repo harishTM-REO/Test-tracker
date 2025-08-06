@@ -71,7 +71,8 @@ class ExperimentChangeDetectionService {
       
       // Extract URLs from previous scan
       const urlsToScan = [];
-      
+      console.log('the previous data ----------------------------------------------------');
+      console.log(previousData);
       // Add URLs with Optimizely
       previousData.websiteResults.forEach(site => {
         if (site.url) urlsToScan.push(site.url);
@@ -82,6 +83,14 @@ class ExperimentChangeDetectionService {
         if (site.url) urlsToScan.push(site.url);
       });
       
+      // Also retry previously failed websites during change detection
+      // if (previousData.failedWebsites && previousData.failedWebsites.length > 0) {
+      //   console.log(`Including ${previousData.failedWebsites.length} previously failed websites for retry`);
+      //   previousData.failedWebsites.forEach(site => {
+      //     if (site.url) urlsToScan.push(site.url);
+      //   });
+      // }
+      console.log('The dataset URLs to scan:', urlsToScan);
       console.log(`📡 Re-scanning ${urlsToScan.length} URLs for dataset ${datasetId}`);
       
       if (urlsToScan.length === 0) {

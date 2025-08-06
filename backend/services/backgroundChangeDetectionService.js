@@ -18,27 +18,134 @@ class BackgroundChangeDetectionService {
    * Generate a hash of experiment content for change detection
    */
   static generateExperimentHash(experiment) {
-    // Create a normalized object with consistent key ordering
-    const normalizedExp = {
+    const normalizedExp = this.normalizeExperimentForHashing(experiment);
+    const deterministicString = this.createDeterministicString(normalizedExp);
+    return crypto.createHash('md5').update(deterministicString).digest('hex');
+  }
+
+  /**
+   * Normalize experiment for consistent hashing - excludes volatile fields
+   */
+  static normalizeExperimentForHashing(experiment) {
+    // Only include fields that represent actual experiment content
+    // Exclude timestamps, metadata, and other volatile fields
+    const normalized = {
       id: experiment.id || '',
       name: experiment.name || '',
       status: experiment.status || '',
-      // Sort arrays and objects to ensure consistent hashing
-      variations: experiment.variations ? [...experiment.variations].sort((a, b) => 
-        (a.id || a.name || '').localeCompare(b.id || b.name || '')
-      ) : [],
-      audience_ids: experiment.audience_ids ? [...experiment.audience_ids].sort() : [],
-      metrics: experiment.metrics ? [...experiment.metrics].sort((a, b) => 
-        (a.id || a.name || '').localeCompare(b.id || b.name || '')
-      ) : [],
       isActive: experiment.isActive || false,
       domain: experiment.domain || '',
       url: experiment.url || ''
     };
 
-    // Create hash of the normalized experiment
-    const hashString = JSON.stringify(normalizedExp);
-    return crypto.createHash('md5').update(hashString).digest('hex');
+    // Handle variations - sort and normalize
+    if (experiment.variations && Array.isArray(experiment.variations)) {
+      normalized.variations = experiment.variations
+        .map(v => ({
+          id: v.id || '',
+          name: v.name || '',
+          weight: v.weight || 0,
+          // Exclude volatile fields like timestamps
+          actions: v.actions || []
+        }))
+        .sort((a, b) => (a.id || a.name || '').localeCompare(b.id || b.name || ''));
+    } else {
+      normalized.variations = [];
+    }
+
+    // Handle audience_ids - sort for consistency
+    if (experiment.audience_ids && Array.isArray(experiment.audience_ids)) {
+      normalized.audience_ids = [...experiment.audience_ids].sort();
+    } else {
+      normalized.audience_ids = [];
+    }
+
+    // Handle metrics - sort and normalize
+    if (experiment.metrics && Array.isArray(experiment.metrics)) {
+      normalized.metrics = experiment.metrics
+        .map(m => ({
+          id: m.id || '',
+          name: m.name || '',
+          event_type: m.event_type || '',
+          // Exclude volatile fields
+          scope: m.scope || ''
+        }))
+        .sort((a, b) => (a.id || a.name || '').localeCompare(b.id || b.name || ''));
+    } else {
+      normalized.metrics = [];
+    }
+
+    return normalized;
+  }
+
+  /**
+   * Create deterministic string representation for consistent hashing
+   */
+  static createDeterministicString(obj) {
+    if (obj === null || obj === undefined) {
+      return 'null';
+    }
+    
+    if (typeof obj !== 'object') {
+      return String(obj);
+    }
+    
+    if (Array.isArray(obj)) {
+      return '[' + obj.map(item => this.createDeterministicString(item)).join(',') + ']';
+    }
+    
+    // Sort object keys for consistent ordering
+    const sortedKeys = Object.keys(obj).sort();
+    const pairs = sortedKeys.map(key => {
+      return `"${key}":${this.createDeterministicString(obj[key])}`;
+    });
+    
+    return '{' + pairs.join(',') + '}';
+  }
+
+  /**
+   * Debug experiment differences for hash mismatch troubleshooting
+   */
+  static debugExperimentDifferences(exp1, exp2, label1 = 'Previous', label2 = 'Current') {
+    console.log(`\n🔍 Debug: Comparing experiments for ${exp1.id} on ${exp1.domain}`);
+    
+    const norm1 = this.normalizeExperimentForHashing(exp1);
+    const norm2 = this.normalizeExperimentForHashing(exp2);
+    
+    const hash1 = this.generateExperimentHash(exp1);
+    const hash2 = this.generateExperimentHash(exp2);
+    
+    console.log(`${label1} hash: ${hash1}`);
+    console.log(`${label2} hash: ${hash2}`);
+    console.log(`Hashes match: ${hash1 === hash2}`);
+    
+    if (hash1 !== hash2) {
+      console.log('\n📋 Normalized experiment comparison:');
+      
+      // Compare each field
+      const allKeys = new Set([...Object.keys(norm1), ...Object.keys(norm2)]);
+      
+      for (const key of allKeys) {
+        const val1 = norm1[key];
+        const val2 = norm2[key];
+        const str1 = this.createDeterministicString(val1);
+        const str2 = this.createDeterministicString(val2);
+        
+        if (str1 !== str2) {
+          console.log(`❌ Field '${key}' differs:`);
+          console.log(`  ${label1}: ${str1}`);
+          console.log(`  ${label2}: ${str2}`);
+        } else {
+          console.log(`✅ Field '${key}' matches`);
+        }
+      }
+      
+      console.log('\n🔧 Raw normalized objects:');
+      console.log(`${label1}:`, JSON.stringify(norm1, null, 2));
+      console.log(`${label2}:`, JSON.stringify(norm2, null, 2));
+    }
+    
+    return hash1 === hash2;
   }
 
   /**
@@ -519,6 +626,9 @@ class BackgroundChangeDetectionService {
           console.log(`Content changed for experiment ${currentExp.id} on ${currentExp.domain}`);
           console.log(`- Previous hash: ${previousHash}`);
           console.log(`- Current hash: ${currentHash}`);
+          
+          // Debug hash differences for troubleshooting
+          this.debugExperimentDifferences(previousExp, currentExp, 'Previous', 'Current');
           
           // Use detailed comparison to identify specific changes
           const detailedChanges = this.compareExperiments(previousExp, currentExp);

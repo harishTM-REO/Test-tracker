@@ -29,6 +29,10 @@
           <span class="stat-number">{{ dataset.companies ? dataset.companies.length : 0 }}</span>
           <span class="stat-label">Companies</span>
         </div>
+        <div class="stat-card" v-if="dataset.scrapingStats && dataset.scrapingStats.totalExperiments">
+          <span class="stat-number">{{ dataset.scrapingStats.totalExperiments || 0 }}</span>
+          <span class="stat-label">Total Experiments</span>
+        </div>
         <div class="stat-card">
           <span class="stat-number">{{ dataset.fileType }}</span>
           <span class="stat-label">File Type</span>
@@ -102,6 +106,10 @@
             <div v-if="dataset.changeDetectionStats && dataset.changeDetectionStats.totalChangesDetected" class="status-item">
               <span class="status-label">Total Changes:</span>
               <span class="status-value">{{ dataset.changeDetectionStats.totalChangesDetected }}</span>
+            </div>
+            <div v-if="dataset.scrapingStats && dataset.scrapingStats.totalExperiments" class="status-item">
+              <span class="status-label">Total Experiments:</span>
+              <span class="status-value experiment-count">{{ dataset.scrapingStats.totalExperiments }}</span>
             </div>
           </div>
 
@@ -675,6 +683,12 @@ export default {
 
 .status-failed {
   color: #e74c3c !important;
+}
+
+.experiment-count {
+  color: #27ae60 !important;
+  font-weight: 700;
+  font-size: 1.1rem;
 }
 
 .error-message {
