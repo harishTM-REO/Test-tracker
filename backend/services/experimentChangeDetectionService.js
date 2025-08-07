@@ -6,6 +6,151 @@ const crypto = require('crypto');
 class ExperimentChangeDetectionService {
   
   /**
+   * Run change detection for a dataset and create a new version
+   * @param {string} datasetId - Dataset ID to check
+   * @returns {Object} Change detection results with version info
+   */
+  async runVersionedChangeDetectionForDataset(datasetId) {
+    const ChangeDetectionVersion = require('../models/ChangeDetectionVersion');
+    
+    try {
+      console.log(`🔍 Starting versioned change detection for dataset: ${datasetId}`);
+      
+      // Check if there's already a running change detection
+      const runningVersion = await ChangeDetectionVersion.getRunningVersion(datasetId);
+      if (runningVersion) {
+        throw new Error('Change detection is already running for this dataset');
+      }
+      
+      // Get previous scan data from OptimizelyResult
+      const previousData = await OptimizelyResult.findOne({ datasetId });
+      if (!previousData) {
+        throw new Error(`No previous data found for dataset: ${datasetId}`);
+      }
+      
+      // Get the next version number
+      const nextVersionNumber = await ChangeDetectionVersion.getNextVersionNumber(datasetId);
+      
+      // Create new version record in running state
+      const mongoose = require('mongoose');
+      const newVersion = new ChangeDetectionVersion({
+        datasetId: new mongoose.Types.ObjectId(datasetId),
+        datasetName: previousData.datasetName,
+        versionNumber: nextVersionNumber,
+        triggerType: 'manual',
+        triggeredBy: 'system',
+        status: 'running'
+      });
+      
+      await newVersion.save();
+      console.log(`📝 Created version ${nextVersionNumber} for dataset ${datasetId}`);
+      
+      try {
+        // Extract URLs from previous scan
+        const urlsToScan = [];
+        previousData.websiteResults.forEach(site => {
+          if (site.url) urlsToScan.push(site.url);
+        });
+        previousData.websitesWithoutOptimizely.forEach(site => {
+          if (site.url) urlsToScan.push(site.url);
+        });
+        
+        console.log(`📡 Re-scanning ${urlsToScan.length} URLs for dataset ${datasetId}`);
+        
+        if (urlsToScan.length === 0) {
+          await newVersion.markFailed('No URLs found to scan');
+          return {
+            versionNumber: nextVersionNumber,
+            urlsScanned: 0,
+            successfulScans: 0,
+            totalChanges: 0,
+            message: 'No URLs found to scan',
+            status: 'failed'
+          };
+        }
+        
+        // Re-scrape all URLs
+        const newScanResults = await OptimizelyScraperService.batchScrapeUrls(urlsToScan, {
+          concurrent: 2,
+          delay: 1000,
+          batchSize: 5
+        });
+        
+        console.log(`📊 Scan completed. ${newScanResults.filter(r => r.success).length}/${newScanResults.length} successful`);
+        
+        // Get the latest completed version for comparison
+        const latestVersion = await ChangeDetectionVersion.getLatestVersion(datasetId);
+        
+        // Compare with the latest version's snapshot
+        const changes = await this.compareWithLatestVersion(
+          datasetId,
+          previousData.datasetName,
+          newScanResults,
+          latestVersion
+        );
+        
+        // Create snapshots for the new version
+        const experimentsSnapshot = await this.createExperimentsSnapshot(newScanResults);
+        
+        // Update the version with results
+        newVersion.experimentsSnapshot = experimentsSnapshot;
+        
+        if (latestVersion) {
+          newVersion.changesSinceLastVersion = {
+            hasChanges: changes.length > 0,
+            previousVersionNumber: latestVersion.versionNumber,
+            previousRunTimestamp: latestVersion.runTimestamp,
+            changeDetails: this.organizeChangeDetails(changes),
+            summary: this.createChangeSummary(changes)
+          };
+        }
+        
+        newVersion.processingStats = {
+          totalUrlsProcessed: urlsToScan.length,
+          successfulScans: newScanResults.filter(r => r.success).length,
+          failedScans: newScanResults.filter(r => !r.success).length,
+          domainsWithOptimizely: new Set(
+            newScanResults
+              .filter(r => r.success && r.data?.hasOptimizely)
+              .map(r => this.extractDomain(r.url))
+          ).size,
+          processingErrors: newScanResults
+            .filter(r => !r.success)
+            .map(r => ({
+              domain: this.extractDomain(r.url),
+              url: r.url,
+              error: r.error || 'Unknown error'
+            }))
+        };
+        
+        await newVersion.markCompleted();
+        
+        // Update the dataset results with new scan data
+        await this.updateDatasetResults(datasetId, previousData.datasetName, newScanResults);
+        
+        console.log(`🔍 Versioned change detection completed. Found ${changes.length} changes in version ${nextVersionNumber}`);
+        
+        return {
+          versionNumber: nextVersionNumber,
+          urlsScanned: urlsToScan.length,
+          successfulScans: newScanResults.filter(r => r.success).length,
+          totalChanges: changes.length,
+          changesByType: this.summarizeChangesByType(changes),
+          status: 'completed'
+        };
+        
+      } catch (error) {
+        await newVersion.markFailed(error.message);
+        throw error;
+      }
+      
+    } catch (error) {
+      console.error(`Error in runVersionedChangeDetectionForDataset for ${datasetId}:`, error);
+      throw error;
+    }
+  }
+  
+  /**
    * Run change detection for all datasets
    * @returns {Object} Summary of changes detected
    */
@@ -689,6 +834,266 @@ class ExperimentChangeDetectionService {
       summary[change.changeType] = (summary[change.changeType] || 0) + 1;
     });
     return summary;
+  }
+
+  /**
+   * Compare new scan results with the latest version's snapshot
+   * @param {string} datasetId - Dataset ID
+   * @param {string} datasetName - Dataset name  
+   * @param {Array} newScanResults - New scan results
+   * @param {Object} latestVersion - Latest version to compare against
+   * @returns {Array} Array of detected changes
+   */
+  async compareWithLatestVersion(datasetId, datasetName, newScanResults, latestVersion) {
+    const changes = [];
+    const currentScanDate = new Date();
+    
+    if (!latestVersion) {
+      console.log('No previous version found, all experiments will be treated as new');
+      return [];
+    }
+    
+    console.log(`🔄 Comparing with version ${latestVersion.versionNumber}`);
+    
+    // Create lookup maps for efficient comparison
+    const previousByUrl = new Map();
+    const previousByExperimentId = new Map();
+    
+    // Map previous results from version snapshot
+    if (latestVersion.experimentsSnapshot && latestVersion.experimentsSnapshot.allExperiments) {
+      latestVersion.experimentsSnapshot.allExperiments.forEach(experiment => {
+        const key = `${experiment.url}_${experiment.id}`;
+        previousByExperimentId.set(key, experiment);
+        
+        if (!previousByUrl.has(experiment.url)) {
+          previousByUrl.set(experiment.url, {
+            hasOptimizely: true,
+            experiments: [],
+            experimentCount: 0
+          });
+        }
+        
+        const urlData = previousByUrl.get(experiment.url);
+        urlData.experiments.push(experiment);
+        urlData.experimentCount++;
+      });
+    }
+    
+    // Compare each new result
+    for (const newResult of newScanResults) {
+      if (!newResult.success) continue;
+      
+      const newData = newResult.data;
+      const domain = this.extractDomain(newResult.url);
+      const previousSite = previousByUrl.get(newResult.url);
+      
+      // Check if site gained/lost Optimizely
+      const hadOptimizely = !!previousSite;
+      const hasOptimizely = newData.hasOptimizely;
+      
+      if (hadOptimizely !== hasOptimizely) {
+        changes.push({
+          datasetId,
+          datasetName,
+          url: newResult.url,
+          domain,
+          experimentId: 'OPTIMIZELY_STATUS',
+          changeType: hasOptimizely ? 'NEW' : 'REMOVED',
+          changeDetails: {
+            previousData: { hasOptimizely: hadOptimizely },
+            newData: { hasOptimizely: hasOptimizely }
+          },
+          scanDate: currentScanDate,
+          previousScanDate: latestVersion.runTimestamp
+        });
+      }
+      
+      // If site has Optimizely, compare experiments
+      if (hasOptimizely && newData.experiments) {
+        // Get previous experiments for this URL
+        const previousExperiments = previousSite ? previousSite.experiments : [];
+        
+        // Use hash-based comparison for experiments
+        const prevExperimentsHash = this.generateExperimentsListHash(previousExperiments);
+        const newExperimentsHash = this.generateExperimentsListHash(newData.experiments);
+        
+        // Only process changes if hashes are different
+        if (prevExperimentsHash !== newExperimentsHash) {
+          const experimentChanges = this.detectExperimentListChanges(
+            previousExperiments,
+            newData.experiments,
+            {
+              datasetId,
+              datasetName,
+              url: newResult.url,
+              domain,
+              scanDate: currentScanDate,
+              previousScanDate: latestVersion.runTimestamp
+            }
+          );
+          
+          changes.push(...experimentChanges);
+        }
+      }
+    }
+    
+    // Save all changes to database
+    if (changes.length > 0) {
+      await ExperimentChangeHistory.insertMany(changes);
+      console.log(`💾 Saved ${changes.length} changes for dataset ${datasetId}`);
+    }
+    
+    return changes;
+  }
+
+  /**
+   * Create experiments snapshot from scan results
+   * @param {Array} scanResults - Scan results
+   * @returns {Object} Experiments snapshot
+   */
+  async createExperimentsSnapshot(scanResults) {
+    const allExperiments = [];
+    const experimentsByDomain = [];
+    let totalExperiments = 0;
+    let activeExperiments = 0;
+    const domainMap = new Map();
+    
+    scanResults.forEach(result => {
+      if (result.success && result.data?.hasOptimizely && result.data.experiments) {
+        const domain = this.extractDomain(result.url);
+        
+        result.data.experiments.forEach(experiment => {
+          const experimentSnapshot = {
+            id: experiment.id,
+            name: experiment.name || 'Unnamed Experiment',
+            status: experiment.status || 'unknown',
+            variations: experiment.variations || [],
+            audience_ids: experiment.audience_ids || [],
+            metrics: experiment.metrics || [],
+            isActive: experiment.status === 'Running' || experiment.status === 'running',
+            domain: domain,
+            url: result.url
+          };
+          
+          allExperiments.push(experimentSnapshot);
+          totalExperiments++;
+          
+          if (experimentSnapshot.isActive) {
+            activeExperiments++;
+          }
+          
+          // Group by domain
+          if (!domainMap.has(domain)) {
+            domainMap.set(domain, {
+              domain: domain,
+              url: result.url,
+              experimentsCount: 0,
+              experiments: []
+            });
+          }
+          
+          const domainGroup = domainMap.get(domain);
+          domainGroup.experiments.push(experimentSnapshot);
+          domainGroup.experimentsCount++;
+        });
+      }
+    });
+    
+    // Convert domain map to array
+    experimentsByDomain.push(...domainMap.values());
+    
+    return {
+      totalExperiments,
+      totalDomains: domainMap.size,
+      activeExperiments,
+      experimentsByDomain,
+      allExperiments
+    };
+  }
+
+  /**
+   * Organize change details into categories
+   * @param {Array} changes - Array of changes
+   * @returns {Object} Organized change details
+   */
+  organizeChangeDetails(changes) {
+    const organized = {
+      newExperiments: [],
+      removedExperiments: [],
+      statusChanges: [],
+      modifiedExperiments: []
+    };
+    
+    changes.forEach(change => {
+      const baseChange = {
+        experimentId: change.experimentId,
+        experimentName: change.changeDetails.newData?.name || change.changeDetails.previousData?.name || 'Unknown',
+        domain: change.domain,
+        url: change.url,
+        changeHistoryId: change._id
+      };
+      
+      switch (change.changeType) {
+        case 'NEW':
+          organized.newExperiments.push({
+            ...baseChange,
+            status: change.changeDetails.newData?.status || 'unknown'
+          });
+          break;
+        case 'REMOVED':
+          organized.removedExperiments.push({
+            ...baseChange,
+            previousStatus: change.changeDetails.previousData?.status || 'unknown'
+          });
+          break;
+        case 'STATUS_CHANGED':
+          organized.statusChanges.push({
+            ...baseChange,
+            previousStatus: change.changeDetails.previousData?.status || 'unknown',
+            newStatus: change.changeDetails.newData?.status || 'unknown'
+          });
+          break;
+        case 'MODIFIED':
+          organized.modifiedExperiments.push({
+            ...baseChange,
+            modifiedFields: change.changeDetails.changedFields?.map(f => f.field) || []
+          });
+          break;
+      }
+    });
+    
+    return organized;
+  }
+
+  /**
+   * Create change summary from changes array
+   * @param {Array} changes - Array of changes
+   * @returns {Object} Change summary
+   */
+  createChangeSummary(changes) {
+    const changesByType = {
+      NEW: 0,
+      REMOVED: 0,
+      STATUS_CHANGED: 0,
+      MODIFIED: 0
+    };
+    
+    const affectedDomains = new Set();
+    
+    changes.forEach(change => {
+      changesByType[change.changeType] = (changesByType[change.changeType] || 0) + 1;
+      affectedDomains.add(change.domain);
+    });
+    
+    const totalChanges = Object.values(changesByType).reduce((sum, count) => sum + count, 0);
+    
+    return {
+      totalChanges,
+      changesByType,
+      affectedDomains: Array.from(affectedDomains),
+      affectedDomainsCount: affectedDomains.size,
+      significantChanges: totalChanges >= 5 || affectedDomains.size >= 3
+    };
   }
 }
 

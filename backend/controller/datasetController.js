@@ -269,9 +269,28 @@ const datasetController = {
         };
       }) : [];
 
+      // Get change detection version statistics
+      let changeDetectionStats = dataset.changeDetectionStats || {};
+      if (dataset.scrapingStatus === 'completed') {
+        const ChangeDetectionVersion = require('../models/ChangeDetectionVersion');
+        const versionStats = await ChangeDetectionVersion.getStatistics(id);
+        
+        changeDetectionStats = {
+          ...changeDetectionStats,
+          totalVersions: versionStats.totalVersions || 0,
+          totalChangesDetected: versionStats.totalChanges || 0,
+          lastVersionNumber: versionStats.totalVersions || 0,
+          lastRun: versionStats.lastRun,
+          avgChangesPerVersion: Math.round(versionStats.avgChangesPerVersion || 0),
+          manualRuns: versionStats.manualRuns || 0,
+          cronRuns: versionStats.cronRuns || 0
+        };
+      }
+
       const responseData = {
         ...dataset,
         companies: companiesWithOptimizely,
+        changeDetectionStats: changeDetectionStats,
         optimizelyResults: optimizelyResults ? {
           totalUrls: optimizelyResults.totalUrls,
           successfulScrapes: optimizelyResults.successfulScrapes,
@@ -611,7 +630,7 @@ const datasetController = {
   runChangeDetection: async (req, res) => {
     try {
       const { id } = req.params;
-      const BackgroundChangeDetectionService = require('../services/backgroundChangeDetectionService');
+      const ExperimentChangeDetectionService = require('../services/experimentChangeDetectionService');
 
       // Check if dataset exists and has been scraped
       const dataset = await Dataset.findById(id);
@@ -630,24 +649,30 @@ const datasetController = {
         });
       }
 
-      // Start background change detection
-      const started = await BackgroundChangeDetectionService.startChangeDetectionForDataset(id, 'manual', 'user');
+      // Run versioned change detection (this now handles version creation internally)
+      const result = await ExperimentChangeDetectionService.runVersionedChangeDetectionForDataset(id);
       
-      if (started) {
+      if (result.status === 'completed') {
         res.status(200).json({
           success: true,
-          message: 'Change detection started successfully',
+          message: `Change detection completed successfully. Version ${result.versionNumber} created with ${result.totalChanges} changes detected.`,
           data: {
             datasetId: id,
-            status: 'pending',
+            versionNumber: result.versionNumber,
+            status: result.status,
+            urlsScanned: result.urlsScanned,
+            successfulScans: result.successfulScans,
+            totalChanges: result.totalChanges,
+            changesByType: result.changesByType,
             triggeredAt: new Date().toISOString(),
             triggerType: 'manual'
           }
         });
       } else {
-        res.status(409).json({
+        res.status(500).json({
           success: false,
-          message: 'Change detection is already running for this dataset or could not be started'
+          message: result.message || 'Change detection failed',
+          data: result
         });
       }
 
@@ -655,7 +680,7 @@ const datasetController = {
       console.error('Error in runChangeDetection:', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to start change detection',
+        message: 'Failed to run change detection',
         error: error.message
       });
     }

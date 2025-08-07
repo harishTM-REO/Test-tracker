@@ -1216,6 +1216,9 @@ async extractOptimizelyOnPageReady(page) {
         }
       );
 
+      // Create initial version 1 in change detection system
+      await this.createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutOptimizely, endTime);
+
       console.log(`✅ Saved batch results to database for dataset ${datasetId}`);
       console.log(`📊 Summary: ${successfulScrapes}/${results.length} successful, ${optimizelyDetectedCount} with Optimizely, ${websitesWithoutOptimizely.length} without Optimizely, ${totalExperiments} total experiments`);
       
@@ -1289,6 +1292,153 @@ async extractOptimizelyOnPageReady(page) {
     } catch (error) {
       console.error('Error getting failed websites:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Create initial version 1 in change detection system after first scraping
+   * @param {string} datasetId - Dataset ID
+   * @param {string} datasetName - Dataset name  
+   * @param {Array} websiteResults - Websites with Optimizely
+   * @param {Array} websitesWithoutOptimizely - Websites without Optimizely
+   * @param {Date} scrapingCompletedAt - When scraping completed
+   */
+  async createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutOptimizely, scrapingCompletedAt) {
+    try {
+      const ChangeDetectionVersion = require('../models/ChangeDetectionVersion');
+      
+      console.log(`🆕 Creating initial version 1 for dataset ${datasetId}`);
+      
+      // Check if version 1 already exists
+      const existingVersion = await ChangeDetectionVersion.findOne({ 
+        datasetId: datasetId, 
+        versionNumber: 1 
+      });
+      
+      if (existingVersion) {
+        console.log(`⚠️  Version 1 already exists for dataset ${datasetId}, skipping creation`);
+        return existingVersion;
+      }
+      
+      // Prepare experiment snapshots
+      const allExperiments = [];
+      const experimentsByDomain = [];
+      let totalExperiments = 0;
+      let activeExperiments = 0;
+      const domainMap = new Map();
+      
+      // Process websites with Optimizely
+      websiteResults.forEach(site => {
+        if (site.experiments && site.experiments.length > 0) {
+          site.experiments.forEach(experiment => {
+            const experimentSnapshot = {
+              id: experiment.id,
+              name: experiment.name || 'Unnamed Experiment',
+              status: experiment.status || 'unknown',
+              variations: experiment.variations || [],
+              audience_ids: experiment.audience_ids || [],
+              metrics: experiment.metrics || [],
+              isActive: experiment.status === 'Running' || experiment.status === 'running',
+              domain: site.domain,
+              url: site.url
+            };
+            
+            allExperiments.push(experimentSnapshot);
+            totalExperiments++;
+            
+            if (experimentSnapshot.isActive) {
+              activeExperiments++;
+            }
+            
+            // Group by domain
+            if (!domainMap.has(site.domain)) {
+              domainMap.set(site.domain, {
+                domain: site.domain,
+                url: site.url,
+                experimentsCount: 0,
+                experiments: []
+              });
+            }
+            
+            const domainGroup = domainMap.get(site.domain);
+            domainGroup.experiments.push(experimentSnapshot);
+            domainGroup.experimentsCount++;
+          });
+        }
+      });
+      
+      // Convert domain map to array
+      experimentsByDomain.push(...domainMap.values());
+      
+      // Create the initial version document
+      const mongoose = require('mongoose');
+      const initialVersion = new ChangeDetectionVersion({
+        datasetId: new mongoose.Types.ObjectId(datasetId),
+        datasetName: datasetName,
+        versionNumber: 1,
+        triggerType: 'manual', // Initial scraping is considered manual
+        triggeredBy: 'system',
+        runTimestamp: scrapingCompletedAt,
+        status: 'completed',
+        startTime: scrapingCompletedAt,
+        endTime: scrapingCompletedAt,
+        duration: 0,
+        
+        experimentsSnapshot: {
+          totalExperiments: totalExperiments,
+          totalDomains: domainMap.size,
+          activeExperiments: activeExperiments,
+          experimentsByDomain: experimentsByDomain,
+          allExperiments: allExperiments
+        },
+        
+        changesSinceLastVersion: {
+          hasChanges: false, // No changes for initial version
+          previousVersionNumber: null,
+          previousRunTimestamp: null,
+          
+          changeDetails: {
+            newExperiments: [],
+            removedExperiments: [],
+            statusChanges: [],
+            modifiedExperiments: []
+          },
+          
+          summary: {
+            totalChanges: 0,
+            changesByType: {
+              NEW: 0,
+              REMOVED: 0,
+              STATUS_CHANGED: 0,
+              MODIFIED: 0
+            },
+            affectedDomains: [],
+            affectedDomainsCount: 0,
+            significantChanges: false
+          }
+        },
+        
+        processingStats: {
+          totalUrlsProcessed: websiteResults.length + websitesWithoutOptimizely.length,
+          successfulScans: websiteResults.length + websitesWithoutOptimizely.length,
+          failedScans: 0,
+          domainsWithOptimizely: domainMap.size,
+          processingErrors: []
+        }
+      });
+      
+      await initialVersion.save();
+      
+      console.log(`✅ Created initial version 1 for dataset ${datasetId}`);
+      console.log(`📊 Initial snapshot: ${totalExperiments} experiments across ${domainMap.size} domains, ${activeExperiments} active`);
+      
+      return initialVersion;
+      
+    } catch (error) {
+      console.error('Error creating initial version:', error);
+      // Don't throw error as this is additional functionality - the main scraping should not fail
+      console.warn('Initial version creation failed, but scraping results are still saved');
+      return null;
     }
   }
 }
