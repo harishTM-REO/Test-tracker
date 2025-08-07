@@ -99,7 +99,8 @@ export default {
       toDate: '',
       limit: 20,
       skip: 0,
-      hasMore: true
+      hasMore: true,
+      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
     }
   },
   
@@ -147,7 +148,7 @@ export default {
           params.append('toDate', this.toDate)
         }
         
-        const response = await fetch(`/api/change-detection/history/${this.datasetId}?${params}`)
+        const response = await fetch(`${this.apiBaseUrl}/api/change-detection/history/${this.datasetId}?${params}`)
         const data = await response.json()
         
         if (data.success) {
