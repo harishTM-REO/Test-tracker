@@ -384,7 +384,8 @@ export default {
         limit: 20,
         total: 0,
         pages: 0
-      }
+      },
+      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
     }
   },
   
@@ -428,7 +429,7 @@ export default {
           if (dates.toDate) params.append('toDate', dates.toDate)
         }
         
-        const response = await fetch(`/api/datasets/${this.datasetId}/change-history?${params}`)
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}/change-history?${params}`)
         const data = await response.json()
         
         if (data.success) {
@@ -457,7 +458,7 @@ export default {
 
     async fetchDatasetName() {
       try {
-        const response = await fetch(`/api/datasets/${this.datasetId}`)
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}`)
         const data = await response.json()
         if (data.success) {
           this.datasetName = data.data.name
@@ -469,7 +470,7 @@ export default {
 
     async fetchStatistics() {
       try {
-        const response = await fetch(`/api/datasets/${this.datasetId}`)
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}`)
         const data = await response.json()
         if (data.success && data.data.changeDetectionStats) {
           this.statistics = data.data.changeDetectionStats

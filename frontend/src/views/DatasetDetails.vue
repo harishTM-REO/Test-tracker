@@ -229,7 +229,8 @@ export default {
       changeDetectionStatus: 'not_started',
       changeDetectionError: null,
       latestVersionSummary: null,
-      statusPollingInterval: null
+      statusPollingInterval: null,      
+      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL
     }
   },
   
@@ -261,7 +262,7 @@ export default {
       this.error = null
       
       try {
-        const response = await fetch(`/api/datasets/${this.datasetId}`)
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}`)
         const data = await response.json()
         
         if (data.success) {
@@ -287,7 +288,7 @@ export default {
 
     async fetchChangeDetectionStatus() {
       try {
-        const response = await fetch(`/api/datasets/${this.datasetId}/change-detection-status`)
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}/change-detection-status`)
         const data = await response.json()
         
         if (data.success) {
@@ -306,7 +307,7 @@ export default {
 
     async fetchLatestVersionSummary() {
       try {
-        const response = await fetch(`/api/datasets/${this.datasetId}/change-history?limit=1`)
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}/change-history?limit=1`)
         const data = await response.json()
         
         if (data.success && data.data.versions && data.data.versions.length > 0) {
@@ -333,7 +334,7 @@ export default {
       this.changeDetectionError = null
       
       try {
-        const response = await fetch(`/api/datasets/${this.datasetId}/run-change-detection`, {
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}/run-change-detection`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'

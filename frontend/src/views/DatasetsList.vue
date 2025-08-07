@@ -112,7 +112,8 @@ export default {
       datasets: [],
       loading: false,
       error: null,
-      refreshInterval: null
+      refreshInterval: null,
+      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
     }
   },
   
@@ -140,7 +141,7 @@ export default {
       this.error = null
       
       try {
-        const response = await fetch('/api/datasets')
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets`)
         const data = await response.json()
         
         if (data.success) {
