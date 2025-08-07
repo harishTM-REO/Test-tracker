@@ -9,20 +9,20 @@
         <v-btn
           class="text-subtitle-1 mt-6 primary-btn"
           dark
-          @click="goToMonitoredWebsites"
+          @click="goToViewDataSets"
           :disabled="disableBtn"
         >
-          View Monitored Websites
+          View Datasets
         </v-btn>
 
-        <v-btn
+        <!-- <v-btn
           class="text-subtitle-1 mt-6 secondary-btn"
           dark
           @click="goToAddWebsite"
           :disabled="disableBtn"
         >
           Add new Website for Monitoring
-        </v-btn>
+        </v-btn> -->
       </div>
     </section>
   </div>
@@ -44,10 +44,13 @@ export default {
   },
   methods: {
     goToMonitoredWebsites() {
-      this.$router.push('/monitored-websites')
+      this.$router.push('/monitored-websites');
     },
     goToAddWebsite() {
-      this.$router.push('/add-website')
+      this.$router.push('/add-website');
+    },
+    goToViewDataSets() {
+      this.$router.push('/datasets');
     },
   },
 }
