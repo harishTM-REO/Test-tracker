@@ -79,12 +79,12 @@ export default {
       <v-btn text class="nav-btn" @click="$router.push('/datasets')"
         >Datasets</v-btn
       >
-      <v-btn text class="nav-btn" @click="$router.push('/address-ingestion')"
+      <v-btn text class="nav-btn add-website" @click="$router.push('/address-ingestion')"
         >Upload Dataset</v-btn
       >
-      <v-btn text class="nav-btn add-website" @click="$router.push('/add-website')"
+      <!-- <v-btn text class="nav-btn add-website" @click="$router.push('/add-website')"
         >Add Website</v-btn
-      >
+      > -->
     </v-app-bar>
 
     <v-main>
@@ -202,5 +202,6 @@ header {
   border-radius: 10px;
   color: black;
   padding:7px 10px;
+  font-weight: 500;
 }
 </style>
