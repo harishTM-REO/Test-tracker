@@ -51,9 +51,6 @@ class ExperimentChangeDetectionService {
         previousData.websiteResults.forEach(site => {
           if (site.url) urlsToScan.push(site.url);
         });
-        previousData.websitesWithoutOptimizely.forEach(site => {
-          if (site.url) urlsToScan.push(site.url);
-        });
         
         console.log(`📡 Re-scanning ${urlsToScan.length} URLs for dataset ${datasetId}`);
         
@@ -71,9 +68,9 @@ class ExperimentChangeDetectionService {
         
         // Re-scrape all URLs
         const newScanResults = await OptimizelyScraperService.batchScrapeUrls(urlsToScan, {
-          concurrent: 2,
+          concurrent: 1,
           delay: 1000,
-          batchSize: 5
+          batchSize: 1
         });
         
         console.log(`📊 Scan completed. ${newScanResults.filter(r => r.success).length}/${newScanResults.length} successful`);
@@ -347,12 +344,32 @@ class ExperimentChangeDetectionService {
       }
       
       if (newData.hasOptimizely && newData.experiments) {
+        // Corner case optimization: if both experiment lists are empty, skip hash comparison
+        const prevExperimentCount = previousSite.experiments ? previousSite.experiments.length : 0;
+        const newExperimentCount = newData.experiments.length;
+        
+        if (prevExperimentCount === 0 && newExperimentCount === 0) {
+          // Both lists are empty, no changes to detect - skip expensive hash computation
+          continue;
+        }
+        
         // Use hash-based comparison for experiments
-        const prevExperimentsHash = this.generateExperimentsListHash(previousSite.experiments);
-        const newExperimentsHash = this.generateExperimentsListHash(newData.experiments);
+        // Normalize both experiment lists to only include core experiment fields
+        const normalizedPrevExperiments = this.normalizeExperimentsForComparison(previousSite.experiments);
+        const normalizedNewExperiments = this.normalizeExperimentsForComparison(newData.experiments);
+        
+        const prevExperimentsHash = this.generateExperimentsListHash(normalizedPrevExperiments);
+        const newExperimentsHash = this.generateExperimentsListHash(normalizedNewExperiments);
         
         // Only log changes if hashes are different
         if (prevExperimentsHash !== newExperimentsHash) {
+          // Fallback deep comparison to verify actual changes exist
+          if (this.areExperimentListsIdentical(previousSite.experiments, newData.experiments)) {
+            // Hash mismatch but lists are actually identical - skip change detection
+            console.log(`Hash mismatch but experiments are identical for ${newResult.url} - skipping`);
+            continue;
+          }
+          
           const experimentChanges = this.detectExperimentListChanges(
             previousSite.experiments,
             newData.experiments,
@@ -426,7 +443,8 @@ class ExperimentChangeDetectionService {
         });
       }
     });
-    
+    console.log('the changes');
+    console.log(changes);
     // Check for modified experiments using hash comparison
     previousExperiments.forEach(prevExp => {
       const newExp = newMap.get(prevExp.id);
@@ -456,9 +474,110 @@ class ExperimentChangeDetectionService {
       }
     });
     
+    console.log('the changes 1');
+    console.log(changes);
+    
     return changes;
   }
   
+  /**
+   * Normalize experiment lists to only include core fields for consistent comparison
+   * Removes fields like _id, url, domain that are added during storage
+   * @param {Array} experiments - Array of experiments to normalize
+   * @returns {Array} Normalized experiments with only core fields
+   */
+  normalizeExperimentsForComparison(experiments) {
+    if (!Array.isArray(experiments)) {
+      return [];
+    }
+    
+    return experiments.map(exp => ({
+      id: exp.id,
+      name: exp.name || '',
+      status: exp.status || '',
+      variations: exp.variations || [],
+      audience_ids: exp.audience_ids || [],
+      metrics: exp.metrics || [],
+      isActive: exp.isActive || (exp.status === 'Running' || exp.status === 'running')
+    }));
+  }
+
+  /**
+   * Deep comparison to check if two experiment lists are identical
+   * @param {Array} prevExperiments - Previous experiments list
+   * @param {Array} newExperiments - New experiments list
+   * @returns {boolean} True if lists are identical
+   */
+  areExperimentListsIdentical(prevExperiments, newExperiments) {
+    // Normalize both lists first to ensure consistent comparison
+    const normalizedPrev = this.normalizeExperimentsForComparison(prevExperiments);
+    const normalizedNew = this.normalizeExperimentsForComparison(newExperiments);
+    
+    // Quick length check
+    if (normalizedPrev.length !== normalizedNew.length) {
+      return false;
+    }
+    
+    // Sort both arrays by experiment ID for consistent comparison
+    const sortedPrev = normalizedPrev.slice().sort((a, b) => a.id.localeCompare(b.id));
+    const sortedNew = normalizedNew.slice().sort((a, b) => a.id.localeCompare(b.id));
+    
+    // Compare each experiment
+    for (let i = 0; i < sortedPrev.length; i++) {
+      const prevExp = sortedPrev[i];
+      const newExp = sortedNew[i];
+      
+      // Compare essential fields that would indicate actual changes
+      if (prevExp.id !== newExp.id ||
+          prevExp.name !== newExp.name ||
+          prevExp.status !== newExp.status ||
+          !this.areArraysEqual(prevExp.audience_ids || [], newExp.audience_ids || []) ||
+          !this.areArraysEqual(prevExp.metrics || [], newExp.metrics || []) ||
+          !this.areVariationsEqual(prevExp.variations || [], newExp.variations || [])) {
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
+  /**
+   * Compare two arrays for equality (order-independent)
+   * @param {Array} arr1 - First array
+   * @param {Array} arr2 - Second array
+   * @returns {boolean} True if arrays contain same elements
+   */
+  areArraysEqual(arr1, arr2) {
+    if (arr1.length !== arr2.length) return false;
+    
+    const sorted1 = arr1.slice().sort();
+    const sorted2 = arr2.slice().sort();
+    
+    return sorted1.every((val, index) => val === sorted2[index]);
+  }
+
+  /**
+   * Compare two variations arrays for equality
+   * @param {Array} vars1 - First variations array
+   * @param {Array} vars2 - Second variations array
+   * @returns {boolean} True if variations are identical
+   */
+  areVariationsEqual(vars1, vars2) {
+    if (vars1.length !== vars2.length) return false;
+    
+    // Sort variations by ID or name for consistent comparison
+    const sorted1 = vars1.slice().sort((a, b) => (a.id || a.name).localeCompare(b.id || b.name));
+    const sorted2 = vars2.slice().sort((a, b) => (a.id || a.name).localeCompare(b.id || b.name));
+    
+    return sorted1.every((var1, index) => {
+      const var2 = sorted2[index];
+      return var1.id === var2.id &&
+             var1.name === var2.name &&
+             var1.weight === var2.weight &&
+             var1.status === var2.status;
+    });
+  }
+
   /**
    * Generate a stable hash for an experiment
    * @param {Object} experiment - Experiment object
@@ -583,7 +702,8 @@ class ExperimentChangeDetectionService {
         }
       }
     });
-    
+    console.log('the changes point 2');
+    console.log(changes)
     return changes;
   }
   
@@ -886,39 +1006,58 @@ class ExperimentChangeDetectionService {
       const newData = newResult.data;
       const domain = this.extractDomain(newResult.url);
       const previousSite = previousByUrl.get(newResult.url);
-      
       // Check if site gained/lost Optimizely
       const hadOptimizely = !!previousSite;
       const hasOptimizely = newData.hasOptimizely;
-      
-      if (hadOptimizely !== hasOptimizely) {
-        changes.push({
-          datasetId,
-          datasetName,
-          url: newResult.url,
-          domain,
-          experimentId: 'OPTIMIZELY_STATUS',
-          changeType: hasOptimizely ? 'NEW' : 'REMOVED',
-          changeDetails: {
-            previousData: { hasOptimizely: hadOptimizely },
-            newData: { hasOptimizely: hasOptimizely }
-          },
-          scanDate: currentScanDate,
-          previousScanDate: latestVersion.runTimestamp
-        });
-      }
+      // #TODO:  since we are iterating through only the optimizely sites, this check is not needed
+      // if (hadOptimizely !== hasOptimizely) {
+      //   changes.push({
+      //     datasetId,
+      //     datasetName,
+      //     url: newResult.url,
+      //     domain,
+      //     experimentId: 'OPTIMIZELY_STATUS',
+      //     changeType: hasOptimizely ? 'NEW' : 'REMOVED',
+      //     changeDetails: {
+      //       previousData: { hasOptimizely: hadOptimizely },
+      //       newData: { hasOptimizely: hasOptimizely }
+      //     },
+      //     scanDate: currentScanDate,
+      //     previousScanDate: latestVersion.runTimestamp
+      //   });
+      // }
       
       // If site has Optimizely, compare experiments
       if (hasOptimizely && newData.experiments) {
         // Get previous experiments for this URL
         const previousExperiments = previousSite ? previousSite.experiments : [];
         
-        // Use hash-based comparison for experiments
-        const prevExperimentsHash = this.generateExperimentsListHash(previousExperiments);
-        const newExperimentsHash = this.generateExperimentsListHash(newData.experiments);
+        // Corner case optimization: if both experiment lists are empty, skip hash comparison
+        const prevExperimentCount = previousExperiments.length;
+        const newExperimentCount = newData.experiments.length;
         
+        if (prevExperimentCount === 0 && newExperimentCount === 0) {
+          // Both lists are empty, no changes to detect - skip expensive hash computation
+          continue;
+        }
+        
+        // Use hash-based comparison for experiments
+        
+        // Normalize both experiment lists to only include core experiment fields
+        const normalizedPrevExperiments = this.normalizeExperimentsForComparison(previousExperiments);
+        const normalizedNewExperiments = this.normalizeExperimentsForComparison(newData.experiments);
+        
+        const prevExperimentsHash = this.generateExperimentsListHash(normalizedPrevExperiments);
+        const newExperimentsHash = this.generateExperimentsListHash(normalizedNewExperiments);
         // Only process changes if hashes are different
         if (prevExperimentsHash !== newExperimentsHash) {
+          // Fallback deep comparison to verify actual changes exist
+          if (this.areExperimentListsIdentical(previousExperiments, newData.experiments)) {
+            // Hash mismatch but lists are actually identical - skip change detection
+            console.log(`Hash mismatch but experiments are identical for ${newResult.url} - skipping`);
+            continue;
+          }
+          
           const experimentChanges = this.detectExperimentListChanges(
             previousExperiments,
             newData.experiments,
@@ -942,7 +1081,8 @@ class ExperimentChangeDetectionService {
       await ExperimentChangeHistory.insertMany(changes);
       console.log(`💾 Saved ${changes.length} changes for dataset ${datasetId}`);
     }
-    
+    console.log('the changes');
+    console.log(changes);
     return changes;
   }
 

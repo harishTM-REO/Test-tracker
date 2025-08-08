@@ -28,6 +28,8 @@
     "multer": "^2.0.1",
     "node-cron": "^4.2.1",
     "nodemailer": "^7.0.5",
+    "puppeteer": "^24.2.0",
+    "uuid": "^11.1.0",
     "puppeteer-core": "^24.15.0",
     "xlsx": "^0.18.5"
   },
