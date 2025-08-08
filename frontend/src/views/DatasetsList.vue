@@ -113,7 +113,7 @@ export default {
       loading: false,
       error: null,
       refreshInterval: null,
-      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
+      apiBaseUrl: import.meta.env.VITE_APP_TITLE_BACKEND_URL,
     }
   },
   

@@ -1,5 +1,7 @@
 // services/optimizelyScraperService.js - Enhanced with your working code
-const puppeteer = require('puppeteer');
+
+const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer-core');
 const ExperimentService = require('./experimentService'); // Comment out if not available
 const OptimizelyResult = require('../models/OptimizelyResult');
 
@@ -100,6 +102,9 @@ class OptimizelyScraperService {
           "--disable-backgrounding-occluded-windows",
           "--disable-renderer-backgrounding"
         ],
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
       });
 
       console.log('Browser launched successfully');
