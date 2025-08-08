@@ -75,13 +75,28 @@ class JobQueue {
   /**
    * Mark job as failed
    */
-  failJob(jobId, error) {
+  async failJob(jobId, error) {
     const job = this.jobs.get(jobId);
     if (job) {
       job.status = 'failed';
       job.error = error;
       job.completedAt = new Date();
       this.currentRunningJobs--;
+      
+      // For dataset scraping jobs, also update the dataset status
+      if (job.type === 'dataset-scraping' && job.data?.datasetId) {
+        try {
+          const Dataset = require('../models/Dataset');
+          const dataset = await Dataset.findById(job.data.datasetId);
+          if (dataset) {
+            await dataset.failScraping(error);
+            console.log(`Updated dataset ${job.data.datasetId} status to failed: ${error}`);
+          }
+        } catch (updateError) {
+          console.error('Error updating dataset with job failure:', updateError);
+        }
+      }
+      
       this.processQueue(); // Start next job if available
     }
   }
@@ -112,7 +127,7 @@ class JobQueue {
     const worker = this.workers.get(pendingJob.type);
     if (!worker) {
       console.error(`No worker registered for job type: ${pendingJob.type}`);
-      this.failJob(pendingJob.id, `No worker available for job type: ${pendingJob.type}`);
+      await this.failJob(pendingJob.id, `No worker available for job type: ${pendingJob.type}`);
       return;
     }
 
@@ -133,7 +148,7 @@ class JobQueue {
         console.log(`Job ${pendingJob.id} completed successfully`);
       } catch (error) {
         console.error(`Job ${pendingJob.id} failed:`, error);
-        this.failJob(pendingJob.id, error.message);
+        await this.failJob(pendingJob.id, error.message);
       }
     });
   }
@@ -146,23 +161,42 @@ class JobQueue {
   }
 
   /**
-   * Clean up old completed jobs (older than 1 hour)
+   * Clean up old completed jobs (older than 1 hour) and check for stuck jobs
    */
   cleanup() {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const jobsToDelete = [];
+    const stuckJobs = [];
 
     for (const [jobId, job] of this.jobs) {
+      // Clean up old completed/failed jobs
       if ((job.status === 'completed' || job.status === 'failed') && 
           job.completedAt && job.completedAt < oneHourAgo) {
         jobsToDelete.push(jobId);
       }
+      
+      // Check for stuck running jobs (running for more than 2 hours)
+      if (job.status === 'running' && job.startedAt && job.startedAt < twoHoursAgo) {
+        stuckJobs.push(jobId);
+      }
     }
 
+    // Clean up old jobs
     jobsToDelete.forEach(jobId => this.jobs.delete(jobId));
+    
+    // Handle stuck jobs
+    stuckJobs.forEach(async (jobId) => {
+      console.error(`Marking stuck job ${jobId} as failed (running for >2 hours)`);
+      await this.failJob(jobId, 'Job timeout - running for more than 2 hours');
+    });
     
     if (jobsToDelete.length > 0) {
       console.log(`Cleaned up ${jobsToDelete.length} old jobs`);
+    }
+    
+    if (stuckJobs.length > 0) {
+      console.log(`Failed ${stuckJobs.length} stuck jobs due to timeout`);
     }
   }
 

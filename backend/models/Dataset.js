@@ -137,8 +137,8 @@ const datasetSchema = new mongoose.Schema({
       default: ''
     },
     fileHash: {
-      type: String,
-      index: true // For duplicate detection
+      type: String
+      // Index removed - defined separately below
     },
     ipAddress: {
       type: String,

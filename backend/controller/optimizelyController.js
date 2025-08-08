@@ -253,6 +253,19 @@ async function scrapeFromDataset(req, res) {
   } catch (error) {
     console.error('Error in scrapeFromDataset controller:', error);
     
+    // Update dataset status to failed if there was an error during job creation
+    try {
+      if (datasetId) {
+        const Dataset = require('../models/Dataset');
+        const datasetDoc = await Dataset.findById(datasetId);
+        if (datasetDoc) {
+          await datasetDoc.failScraping(error.message);
+        }
+      }
+    } catch (updateError) {
+      console.error('Error updating dataset with failure:', updateError);
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Failed to queue scraping job',
@@ -808,6 +821,19 @@ async function scrapeFromDatasetBrowserLess(req, res){
 
   } catch (error) {
     console.error('Error in scrapeFromDatasetBrowserLess controller:', error);
+    
+    // Update dataset status to failed if there was an error during scraping
+    try {
+      if (datasetId) {
+        const Dataset = require('../models/Dataset');
+        const datasetDoc = await Dataset.findById(datasetId);
+        if (datasetDoc) {
+          await datasetDoc.failScraping(error.message);
+        }
+      }
+    } catch (updateError) {
+      console.error('Error updating dataset with failure:', updateError);
+    }
     
     res.status(500).json({
       success: false,

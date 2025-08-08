@@ -151,7 +151,7 @@ const optimizelyResultSchema = new mongoose.Schema({
   timestamps: true
 });
 
-optimizelyResultSchema.index({ datasetId: 1 });
+// datasetId index removed - already has unique constraint
 optimizelyResultSchema.index({ "websiteResults.domain": 1 });
 optimizelyResultSchema.index({ "websiteResults.optimizelyDetected": 1 });
 optimizelyResultSchema.index({ "websitesWithoutOptimizely.domain": 1 });

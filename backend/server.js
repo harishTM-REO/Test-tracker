@@ -21,6 +21,9 @@ const { errorHandler, requestLogger } = require('./middleware/errorHandler');
 const CronJobService = require('./services/cronJobService');
 const BackgroundScrapingService = require('./services/backgroundScrapingService');
 
+// Trust proxy for rate limiting (needed when behind reverse proxy/load balancer)
+app.set('trust proxy', 1);
+
 app.use(cors());
 
 app.use(express.json());
