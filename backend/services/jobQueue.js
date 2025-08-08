@@ -5,8 +5,15 @@ class JobQueue {
   constructor() {
     this.jobs = new Map();
     this.workers = new Map();
-    this.maxConcurrentJobs = 3;
+    this.maxConcurrentJobs = 2; // Reduced from 3 to 2 for better efficiency
     this.currentRunningJobs = 0;
+    
+    // Dynamic resource management
+    this.resourceThresholds = {
+      single_job_concurrency: { concurrent: 3, maxTabs: 7, delay: 1000 },
+      multi_job_concurrency: { concurrent: 1, maxTabs: 3, delay: 2000 },
+      heavy_load_concurrency: { concurrent: 1, maxTabs: 1, delay: 3000 }
+    };
   }
 
   /**
@@ -201,10 +208,39 @@ class JobQueue {
   }
 
   /**
+   * Get adaptive scraping options based on current load
+   */
+  getAdaptiveScrapeOptions() {
+    const runningJobs = this.currentRunningJobs;
+    
+    if (runningJobs <= 1) {
+      // Single job - maximum performance
+      return {
+        ...this.resourceThresholds.single_job_concurrency,
+        loadLevel: 'single'
+      };
+    } else if (runningJobs <= 2) {
+      // Multiple jobs - balanced performance
+      return {
+        ...this.resourceThresholds.multi_job_concurrency,
+        loadLevel: 'multi'
+      };
+    } else {
+      // Heavy load - conservative approach
+      return {
+        ...this.resourceThresholds.heavy_load_concurrency,
+        loadLevel: 'heavy'
+      };
+    }
+  }
+
+  /**
    * Get queue statistics
    */
   getStats() {
     const jobs = Array.from(this.jobs.values());
+    const adaptiveOptions = this.getAdaptiveScrapeOptions();
+    
     return {
       total: jobs.length,
       pending: jobs.filter(j => j.status === 'pending').length,
@@ -212,7 +248,13 @@ class JobQueue {
       completed: jobs.filter(j => j.status === 'completed').length,
       failed: jobs.filter(j => j.status === 'failed').length,
       currentRunningJobs: this.currentRunningJobs,
-      maxConcurrentJobs: this.maxConcurrentJobs
+      maxConcurrentJobs: this.maxConcurrentJobs,
+      currentLoadLevel: adaptiveOptions.loadLevel,
+      adaptiveSettings: {
+        concurrent: adaptiveOptions.concurrent,
+        maxTabs: adaptiveOptions.maxTabs,
+        delay: adaptiveOptions.delay
+      }
     };
   }
 }
