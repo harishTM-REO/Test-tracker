@@ -320,15 +320,21 @@ class BackgroundScrapingService {
 
   static async getScrapingStatus(datasetId) {
     try {
+      console.log(`🔍 Getting scraping status for dataset: ${datasetId}`);
+      
       const dataset = await Dataset.findById(datasetId)
         .select('scrapingStatus scrapingStartedAt scrapingCompletedAt scrapingError scrapingStats');
       
       if (!dataset) {
+        console.log(`❌ Dataset not found: ${datasetId}`);
         return null;
       }
 
       // Check for active job in job queue
       const activeJob = this.findActiveJobForDataset(datasetId);
+      console.log(`📋 Active job found: ${!!activeJob}`);
+      console.log(`📊 Dataset status: ${dataset.scrapingStatus}`);
+      console.log(`📊 Total jobs in queue: ${jobQueue.getAllJobs().length}`);
       
       if (activeJob) {
         // If there's an active job, return job status instead of dataset status

@@ -86,8 +86,9 @@ class OptimizelyScraperService {
   async launchBrowser() {
     try {
       const browser = await puppeteer.launch({
-        // headless: true,
-        headless: false,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
         args: [
           '--no-sandbox',
           '--disable-http2',
@@ -413,7 +414,7 @@ class OptimizelyScraperService {
     // }
 
     // Skip navigation detection to avoid false positives from intentional reloads
-    let navigationDetected = false;
+    // navigationDetected already declared at function level
 
     try {
       const experimentData = await Promise.race([
@@ -752,6 +753,7 @@ async extractOptimizelyOnPageReady(page) {
   async scrapeExperimentsFromPage(url) {
     let browser = null;
     let page = null;
+    let navigationDetected = false; // Declare at function level
 
     try {
       // Launch browser
