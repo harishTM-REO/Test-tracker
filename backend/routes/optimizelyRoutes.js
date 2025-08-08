@@ -5,6 +5,8 @@ const {
   scrapeExperiments, 
   batchScrapeExperiments, 
   scrapeFromDataset, 
+  getJobStatus,
+  getAllJobs,
   healthCheck,
   getDatasetResults,
   getWebsitesWithOptimizely,
@@ -36,14 +38,33 @@ router.post('/batch-scrape', batchScrapeExperiments);
 
 /**
  * @route   POST /api/optimizely/scrape-from-dataset
- * @desc    Scrape URLs from a saved dataset (Enhanced)
+ * @desc    Scrape URLs from a saved dataset (Background Processing)
  * @access  Public
  * @body    { datasetId: string, options?: { concurrent?: number, delay?: number } }
  * @example POST /api/optimizely/scrape-from-dataset
  *          Body: { "datasetId": "64abc123def456789", "options": { "concurrent": 2 } }
- * @features Dataset integration with enhanced analytics and reporting
+ * @features Background job processing with job tracking
  */
 router.post('/scrape-from-dataset', scrapeFromDataset);
+
+/**
+ * @route   GET /api/optimizely/job-status/:jobId
+ * @desc    Get the status of a background scraping job
+ * @access  Public
+ * @param   jobId - Job ID returned from scrape-from-dataset
+ * @example GET /api/optimizely/job-status/550e8400-e29b-41d4-a716-446655440000
+ * @features Real-time job progress tracking with detailed status
+ */
+router.get('/job-status/:jobId', getJobStatus);
+
+/**
+ * @route   GET /api/optimizely/jobs
+ * @desc    Get all jobs and queue statistics
+ * @access  Public
+ * @example GET /api/optimizely/jobs
+ * @features Complete job queue overview with statistics
+ */
+router.get('/jobs', getAllJobs);
 
 /**
  * @route   POST /api/optimizely/scrape-from-dataset-browser-less

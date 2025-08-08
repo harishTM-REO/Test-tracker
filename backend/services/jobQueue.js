@@ -1,0 +1,194 @@
+// services/jobQueue.js
+const { v4: uuidv4 } = require('uuid');
+
+class JobQueue {
+  constructor() {
+    this.jobs = new Map();
+    this.workers = new Map();
+    this.maxConcurrentJobs = 3;
+    this.currentRunningJobs = 0;
+  }
+
+  /**
+   * Create a new job
+   */
+  createJob(type, data, options = {}) {
+    const jobId = uuidv4();
+    const job = {
+      id: jobId,
+      type,
+      data,
+      status: 'pending', // pending, running, completed, failed
+      progress: 0,
+      result: null,
+      error: null,
+      createdAt: new Date(),
+      startedAt: null,
+      completedAt: null,
+      ...options
+    };
+
+    this.jobs.set(jobId, job);
+    
+    // Try to start the job immediately if we have capacity
+    this.processQueue();
+    
+    return jobId;
+  }
+
+  /**
+   * Get job status and details
+   */
+  getJob(jobId) {
+    return this.jobs.get(jobId);
+  }
+
+  /**
+   * Update job progress
+   */
+  updateJobProgress(jobId, progress, partialResult = null) {
+    const job = this.jobs.get(jobId);
+    if (job) {
+      job.progress = Math.min(100, Math.max(0, progress));
+      if (partialResult) {
+        job.partialResult = partialResult;
+      }
+      job.updatedAt = new Date();
+    }
+  }
+
+  /**
+   * Mark job as completed
+   */
+  completeJob(jobId, result) {
+    const job = this.jobs.get(jobId);
+    if (job) {
+      job.status = 'completed';
+      job.progress = 100;
+      job.result = result;
+      job.completedAt = new Date();
+      this.currentRunningJobs--;
+      this.processQueue(); // Start next job if available
+    }
+  }
+
+  /**
+   * Mark job as failed
+   */
+  failJob(jobId, error) {
+    const job = this.jobs.get(jobId);
+    if (job) {
+      job.status = 'failed';
+      job.error = error;
+      job.completedAt = new Date();
+      this.currentRunningJobs--;
+      this.processQueue(); // Start next job if available
+    }
+  }
+
+  /**
+   * Register a worker for a specific job type
+   */
+  registerWorker(jobType, workerFunction) {
+    this.workers.set(jobType, workerFunction);
+  }
+
+  /**
+   * Process the queue - start pending jobs if we have capacity
+   */
+  async processQueue() {
+    if (this.currentRunningJobs >= this.maxConcurrentJobs) {
+      return; // At capacity
+    }
+
+    // Find next pending job
+    const pendingJob = Array.from(this.jobs.values())
+      .find(job => job.status === 'pending');
+
+    if (!pendingJob) {
+      return; // No pending jobs
+    }
+
+    const worker = this.workers.get(pendingJob.type);
+    if (!worker) {
+      console.error(`No worker registered for job type: ${pendingJob.type}`);
+      this.failJob(pendingJob.id, `No worker available for job type: ${pendingJob.type}`);
+      return;
+    }
+
+    // Start the job
+    pendingJob.status = 'running';
+    pendingJob.startedAt = new Date();
+    this.currentRunningJobs++;
+
+    console.log(`Starting job ${pendingJob.id} of type ${pendingJob.type}`);
+
+    // Run the worker in the background
+    setImmediate(async () => {
+      try {
+        const result = await worker(pendingJob.data, (progress, partialResult) => {
+          this.updateJobProgress(pendingJob.id, progress, partialResult);
+        });
+        this.completeJob(pendingJob.id, result);
+        console.log(`Job ${pendingJob.id} completed successfully`);
+      } catch (error) {
+        console.error(`Job ${pendingJob.id} failed:`, error);
+        this.failJob(pendingJob.id, error.message);
+      }
+    });
+  }
+
+  /**
+   * Get all jobs (for debugging)
+   */
+  getAllJobs() {
+    return Array.from(this.jobs.values());
+  }
+
+  /**
+   * Clean up old completed jobs (older than 1 hour)
+   */
+  cleanup() {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const jobsToDelete = [];
+
+    for (const [jobId, job] of this.jobs) {
+      if ((job.status === 'completed' || job.status === 'failed') && 
+          job.completedAt && job.completedAt < oneHourAgo) {
+        jobsToDelete.push(jobId);
+      }
+    }
+
+    jobsToDelete.forEach(jobId => this.jobs.delete(jobId));
+    
+    if (jobsToDelete.length > 0) {
+      console.log(`Cleaned up ${jobsToDelete.length} old jobs`);
+    }
+  }
+
+  /**
+   * Get queue statistics
+   */
+  getStats() {
+    const jobs = Array.from(this.jobs.values());
+    return {
+      total: jobs.length,
+      pending: jobs.filter(j => j.status === 'pending').length,
+      running: jobs.filter(j => j.status === 'running').length,
+      completed: jobs.filter(j => j.status === 'completed').length,
+      failed: jobs.filter(j => j.status === 'failed').length,
+      currentRunningJobs: this.currentRunningJobs,
+      maxConcurrentJobs: this.maxConcurrentJobs
+    };
+  }
+}
+
+// Create singleton instance
+const jobQueue = new JobQueue();
+
+// Clean up old jobs every 30 minutes
+setInterval(() => {
+  jobQueue.cleanup();
+}, 150 * 60 * 1000);
+
+module.exports = jobQueue;

@@ -99,6 +99,14 @@ app.listen(port, async () => {
     console.error('❌ Failed to start cron jobs:', error);
   }
 
+  // Initialize background scraping service with job queue
+  try {
+    BackgroundScrapingService.initialize();
+    console.log('✅ Background scraping service initialized successfully');
+  } catch (error) {
+    console.error('❌ Failed to initialize background scraping service:', error);
+  }
+
   // Start periodic cleanup for stuck scraping jobs
   setInterval(async () => {
     try {

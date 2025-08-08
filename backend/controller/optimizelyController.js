@@ -120,8 +120,8 @@ async function batchScrapeExperiments(req, res) {
     // Enhanced analysis of results
     const successful = results.filter(r => r.success);
     const failed = results.filter(r => !r.success);
-    const withOptimizely = successful.filter(r => r.data?.hasOptimizely);
-    const withExperiments = successful.filter(r => r.data?.experiments?.length > 0);
+    const withOptimizely = successful.filter(r => r.data?.optimizely?.detected);
+    const withExperiments = successful.filter(r => r.data?.optimizely?.experiments?.length > 0);
 
     res.status(200).json({
       success: true,
@@ -155,7 +155,7 @@ async function batchScrapeExperiments(req, res) {
 
 /**
  * POST /api/optimizely/scrape-from-dataset
- * Scrape URLs from a saved dataset
+ * Scrape URLs from a saved dataset (Background Processing)
  */
 async function scrapeFromDataset(req, res) {
   try {
@@ -183,8 +183,7 @@ async function scrapeFromDataset(req, res) {
       isDeleted: false 
     })
     .lean();
-    // const dataset = await Dataset.find();
-    console.log('dataset', dataset);
+    
     if (!dataset) {
       return res.status(404).json({
         success: false,
@@ -201,7 +200,6 @@ async function scrapeFromDataset(req, res) {
         }
       });
     }
-    console.log(`urls`, urls);
 
     if (urls.length === 0) {
       return res.status(400).json({
@@ -211,31 +209,33 @@ async function scrapeFromDataset(req, res) {
       });
     }
 
-    console.log(`🔍 Starting scrape from dataset "${dataset.name}" with ${urls.length} URLs`);
+    console.log(`🔍 Queuing background scrape for dataset "${dataset.name}" with ${urls.length} URLs`);
 
-    // Record start time for database saving
-    const startTime = new Date();
+    // Update dataset status to pending immediately
+    const datasetDoc = await Dataset.findById(datasetId);
+    if (datasetDoc) {
+      datasetDoc.scrapingStatus = 'pending';
+      datasetDoc.scrapingStartedAt = null;
+      datasetDoc.scrapingCompletedAt = null;
+      datasetDoc.scrapingError = null;
+      await datasetDoc.save();
+    }
 
-    // Perform batch scraping with enhanced service
-    const results = await OptimizelyScraperService.batchScrapeUrls(urls, options);
+    // Create background job using job queue
+    const jobQueue = require('../services/jobQueue');
+    const jobId = jobQueue.createJob('dataset-scraping', {
+      datasetId,
+      datasetName: dataset.name,
+      urls,
+      options
+    });
 
-    // Save results to database
-    const savedResults = await OptimizelyScraperService.saveBatchResults(
-      datasetId, 
-      dataset.name, 
-      results, 
-      startTime
-    );
-
-    // Enhanced analysis
-    const successful = results.filter(r => r.success);
-    const withOptimizely = successful.filter(r => r.data?.hasOptimizely);
-    const withExperiments = successful.filter(r => r.data?.experiments?.length > 0);
-
-    res.status(200).json({
+    // Return immediately with job ID for tracking
+    res.status(202).json({
       success: true,
-      message: 'Dataset scraping completed and saved to database',
+      message: 'Scraping job queued successfully',
       data: {
+        jobId,
         dataset: {
           id: dataset._id,
           name: dataset.name,
@@ -243,21 +243,10 @@ async function scrapeFromDataset(req, res) {
         },
         summary: {
           totalUrls: urls.length,
-          successful: successful.length,
-          failed: results.length - successful.length,
-          withOptimizely: withOptimizely.length,
-          withExperiments: withExperiments.length,
-          optimizelyRate: `${((withOptimizely.length / urls.length) * 100).toFixed(1)}%`,
-          experimentRate: `${((withExperiments.length / urls.length) * 100).toFixed(1)}%`
+          status: 'queued'
         },
-        savedResults: {
-          id: savedResults._id,
-          totalExperiments: savedResults.totalExperiments,
-          optimizelyDetectedCount: savedResults.optimizelyDetectedCount,
-          failedWebsitesCount: savedResults.failedWebsites.length
-        },
-        results: results,
-        completedAt: new Date().toISOString()
+        statusEndpoint: `/api/optimizely/job-status/${jobId}`,
+        estimatedTime: `${Math.ceil(urls.length * 0.5)} minutes`
       }
     });
 
@@ -266,7 +255,7 @@ async function scrapeFromDataset(req, res) {
     
     res.status(500).json({
       success: false,
-      message: 'Failed to scrape from dataset',
+      message: 'Failed to queue scraping job',
       error: error.message,
       timestamp: new Date().toISOString()
     });
@@ -592,16 +581,125 @@ function processExternalAPIResults(results) {
       url: result.url,
       success: true,
       data: {
-        hasOptimizely: externalData.optimizelyDetected || false,
-        experiments: externalData.experiments || [],
-        experimentCount: externalData.experiments ? externalData.experiments.length : 0,
-        activeCount: externalData.experiments ? externalData.experiments.filter(exp => exp.status === 'Running').length : 0,
-        cookieType: externalData.cookieType || 'unknown',
-        error: null,
-        optimizelyData: externalData.optimizelyData || null
+        optimizely: {
+          detected: externalData.optimizelyDetected || false,
+          experiments: externalData.experiments || [],
+          experimentCount: externalData.experiments ? externalData.experiments.length : 0,
+          activeCount: externalData.experiments ? externalData.experiments.filter(exp => exp.status === 'Running').length : 0,
+          cookieType: externalData.cookieType || 'unknown',
+          error: null,
+          optimizelyData: externalData.optimizelyData || null
+        }
       }
     };
   });
+}
+
+/**
+ * GET /api/optimizely/job-status/:jobId
+ * Get the status of a background scraping job
+ */
+async function getJobStatus(req, res) {
+  try {
+    const { jobId } = req.params;
+
+    if (!jobId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Job ID is required'
+      });
+    }
+
+    const jobQueue = require('../services/jobQueue');
+    const job = jobQueue.getJob(jobId);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: 'Job not found',
+        jobId
+      });
+    }
+
+    // Calculate elapsed time
+    const now = new Date();
+    const elapsedMs = job.startedAt ? now - job.startedAt : 0;
+    const elapsedMinutes = Math.floor(elapsedMs / (1000 * 60));
+    const elapsedSeconds = Math.floor((elapsedMs % (1000 * 60)) / 1000);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        jobId: job.id,
+        type: job.type,
+        status: job.status,
+        progress: job.progress,
+        createdAt: job.createdAt,
+        startedAt: job.startedAt,
+        completedAt: job.completedAt,
+        elapsedTime: job.startedAt ? `${elapsedMinutes}m ${elapsedSeconds}s` : '0s',
+        result: job.result,
+        partialResult: job.partialResult,
+        error: job.error,
+        datasetInfo: job.data ? {
+          datasetId: job.data.datasetId,
+          datasetName: job.data.datasetName,
+          totalUrls: job.data.urls?.length || 0
+        } : null
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in getJobStatus controller:', error);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get job status',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+
+/**
+ * GET /api/optimizely/jobs
+ * Get all jobs and queue statistics
+ */
+async function getAllJobs(req, res) {
+  try {
+    const jobQueue = require('../services/jobQueue');
+    const jobs = jobQueue.getAllJobs();
+    const stats = jobQueue.getStats();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        stats,
+        jobs: jobs.map(job => ({
+          jobId: job.id,
+          type: job.type,
+          status: job.status,
+          progress: job.progress,
+          createdAt: job.createdAt,
+          startedAt: job.startedAt,
+          completedAt: job.completedAt,
+          datasetName: job.data?.datasetName,
+          totalUrls: job.data?.urls?.length || 0,
+          error: job.error
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in getAllJobs controller:', error);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get jobs',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 }
 
 async function scrapeFromDatasetBrowserLess(req, res){
@@ -677,8 +775,8 @@ async function scrapeFromDatasetBrowserLess(req, res){
 
     // Calculate summary statistics
     const successful = processedResults.filter(r => r.success);
-    const withOptimizely = successful.filter(r => r.data?.hasOptimizely);
-    const withExperiments = successful.filter(r => r.data?.experiments?.length > 0);
+    const withOptimizely = successful.filter(r => r.data?.optimizely?.detected);
+    const withExperiments = successful.filter(r => r.data?.optimizely?.experiments?.length > 0);
 
     res.status(200).json({
       success: true,
@@ -724,6 +822,8 @@ module.exports = {
   scrapeExperiments,
   batchScrapeExperiments,
   scrapeFromDataset,
+  getJobStatus,
+  getAllJobs,
   healthCheck,
   getDatasetResults,
   getWebsitesWithOptimizely,

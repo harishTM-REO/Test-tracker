@@ -1143,18 +1143,18 @@ async extractOptimizelyOnPageReady(page) {
           successfulScrapes++;
           const domain = this.extractDomain(result.url);
           
-          if (result.data.hasOptimizely) {
+          if (result.data.optimizely?.detected) {
             // Website has Optimizely - add to websiteResults
             const websiteResult = {
               url: result.url,
               domain: domain,
               success: true,
               optimizelyDetected: true,
-              experiments: result.data.experiments || [],
-              experimentCount: result.data.experimentCount || 0,
-              activeCount: result.data.activeCount || 0,
-              cookieType: result.data.cookieType || 'unknown',
-              error: result.data.error,
+              experiments: result.data.optimizely.experiments || [],
+              experimentCount: result.data.optimizely.experimentCount || 0,
+              activeCount: result.data.optimizely.activeCount || 0,
+              cookieType: result.data.optimizely.cookieType || 'unknown',
+              error: result.data.optimizely.error,
               scrapedAt: new Date()
             };
 
@@ -1166,7 +1166,7 @@ async extractOptimizelyOnPageReady(page) {
             const websiteWithoutOptimizely = {
               url: result.url,
               domain: domain,
-              cookieType: result.data.cookieType || 'unknown',
+              cookieType: result.data.optimizely?.cookieType || 'unknown',
               scrapedAt: new Date()
             };
 
