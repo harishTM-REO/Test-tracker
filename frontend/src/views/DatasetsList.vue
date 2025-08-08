@@ -146,6 +146,8 @@ export default {
         
         if (data.success) {
           this.datasets = data.data
+          // Check if we need to start/stop auto-refresh based on current job status
+          this.startAutoRefresh()
         } else {
           this.error = data.message || 'Failed to fetch datasets'
         }
@@ -189,16 +191,33 @@ export default {
     },
 
     startAutoRefresh() {
-      // Refresh every 10 seconds if there are datasets in progress
-      this.refreshInterval = setInterval(() => {
-        const hasActiveScrapingJobs = this.datasets.some(dataset => 
-          dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'
-        )
-        
-        if (hasActiveScrapingJobs) {
+      // Only start refresh if there are active scraping jobs
+      const hasActiveScrapingJobs = this.datasets.some(dataset => 
+        dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'
+      )
+      
+      if (hasActiveScrapingJobs && !this.refreshInterval) {
+        console.log('🔄 Starting auto-refresh for active scraping jobs')
+        this.refreshInterval = setInterval(() => {
           this.fetchDatasets()
-        }
-      }, 10000) // 10 seconds
+          
+          // Check if we should stop refreshing after each fetch
+          setTimeout(() => {
+            const stillHasActiveJobs = this.datasets.some(dataset => 
+              dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'
+            )
+            
+            if (!stillHasActiveJobs) {
+              console.log('✅ No more active jobs, stopping auto-refresh')
+              this.stopAutoRefresh()
+            }
+          }, 1000) // Small delay to let fetchDatasets complete
+        }, 10000) // 10 seconds
+      } else if (!hasActiveScrapingJobs && this.refreshInterval) {
+        // Stop refreshing if no active jobs
+        console.log('⏹️ No active jobs found, stopping auto-refresh')
+        this.stopAutoRefresh()
+      }
     },
 
     stopAutoRefresh() {

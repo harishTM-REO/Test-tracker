@@ -1,7 +1,14 @@
 // services/optimizelyScraperService.js - Enhanced with your working code
 
 const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
+
+// Try to use regular puppeteer first (for local development), fallback to puppeteer-core
+let puppeteer;
+try {
+  puppeteer = require('puppeteer');
+} catch (e) {
+  puppeteer = require('puppeteer-core');
+}
 const ExperimentService = require('./experimentService'); // Comment out if not available
 const OptimizelyResult = require('../models/OptimizelyResult');
 
@@ -85,13 +92,14 @@ class OptimizelyScraperService {
    */
   async launchBrowser() {
     try {
-      const browser = await puppeteer.launch({
-        executablePath: await chromium.executablePath(),
-        headless: chromium.headless,
+      // Check if we're in a serverless environment or local development
+      const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
+      
+      let browserOptions = {
+        headless: true,
         ignoreHTTPSErrors: true,
         args: [
           '--no-sandbox',
-          '--disable-http2',
           '--disable-setuid-sandbox',
           '--disable-gpu',
           '--disable-dev-shm-usage',
@@ -103,10 +111,15 @@ class OptimizelyScraperService {
           "--disable-backgrounding-occluded-windows",
           "--disable-renderer-backgrounding"
         ],
-        executablePath: await chromium.executablePath(),
-        headless: chromium.headless,
-        ignoreHTTPSErrors: true,
-      });
+      };
+
+      // Use chromium for production/serverless, regular puppeteer for local
+      if (!isLocal) {
+        browserOptions.executablePath = await chromium.executablePath();
+        browserOptions.headless = chromium.headless;
+      }
+
+      const browser = await puppeteer.launch(browserOptions);
 
       console.log('Browser launched successfully');
       return browser;
@@ -401,6 +414,7 @@ class OptimizelyScraperService {
    * @returns {Object} Experiment data
    */
   async extractOptimizelyData(page) {
+    let navigationDetected = false; // Declare at function level
   try {
     console.log("Extracting Optimizely data with enhanced detection...");
     
