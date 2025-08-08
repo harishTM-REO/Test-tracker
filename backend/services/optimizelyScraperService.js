@@ -939,12 +939,17 @@ async extractOptimizelyOnPageReady(page) {
    * @returns {Array} Array of results
    */
   async batchScrapeUrls(urls, options = {}) {
+    const jobQueue = require('./jobQueue');
+    const adaptiveOptions = jobQueue.getAdaptiveScrapeOptions();
+    
     const { 
-      concurrent = 1, //Avinash check here 
-      delay = 2000, 
-      batchSize = 1,
-      maxTabs = 1 
+      concurrent = adaptiveOptions.concurrent,
+      delay = adaptiveOptions.delay, 
+      batchSize = adaptiveOptions.concurrent,
+      maxTabs = adaptiveOptions.maxTabs 
     } = options;
+    
+    console.log(`🎯 Using adaptive settings for ${adaptiveOptions.loadLevel} load level`);
     
     const results = [];
     console.log(`Starting optimized batch scrape of ${urls.length} URLs`);

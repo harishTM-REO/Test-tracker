@@ -6,6 +6,18 @@ const jobQueue = require('./jobQueue');
 class BackgroundScrapingService {
   
   /**
+   * Helper function to validate URL format
+   */
+  static isValidUrl(url) {
+    try {
+      const urlObj = new URL(url);
+      return ['http:', 'https:'].includes(urlObj.protocol);
+    } catch (error) {
+      return false;
+    }
+  }
+  
+  /**
    * Initialize the job queue worker
    */
   static initialize() {
@@ -128,9 +140,14 @@ class BackgroundScrapingService {
    */
   static async batchScrapeWithProgress(urls, options = {}, progressCallback) {
     const OptimizelyScraperService = require('./optimizelyScraperService');
-    const { concurrent = 2, delay = 1000 } = options;
+    const jobQueue = require('./jobQueue');
     
-    console.log(`Processing ${urls.length} URLs with ${concurrent} concurrent requests`);
+    // Get adaptive options based on current system load
+    const adaptiveOptions = jobQueue.getAdaptiveScrapeOptions();
+    const { concurrent = adaptiveOptions.concurrent, delay = adaptiveOptions.delay } = options;
+    
+    console.log(`🔧 Adaptive scraping mode: ${adaptiveOptions.loadLevel} load`);
+    console.log(`Processing ${urls.length} URLs with ${concurrent} concurrent requests, ${delay}ms delay`);
     
     const results = [];
     const totalUrls = urls.length;
@@ -246,26 +263,55 @@ class BackgroundScrapingService {
       await dataset.startScraping();
       console.log(`Scraping started for dataset: ${dataset.name}`);
 
-      // Call the existing scrape-from-dataset endpoint
-      const scrapingResponse = await this.callScrapingEndpoint(datasetId);
+      // Perform direct scraping instead of calling endpoint to avoid double job creation
+      const startTime = new Date();
       
-      if (scrapingResponse.success) {
-        // Extract stats from the response
-        const stats = {
-          totalUrls: scrapingResponse.data.summary.totalUrls,
-          successfulScans: scrapingResponse.data.summary.successful,
-          failedScans: scrapingResponse.data.summary.failed,
-          optimizelyDetected: scrapingResponse.data.summary.withOptimizely,
-          totalExperiments: scrapingResponse.data.savedResults?.totalExperiments || 0
-        };
-
-        await dataset.completeScraping(stats);
-        console.log(`Scraping completed successfully for dataset: ${dataset.name}`);
-        console.log(`Stats:`, stats);
-        
-      } else {
-        throw new Error(scrapingResponse.message || 'Scraping failed');
+      // Extract URLs from companies data
+      const urls = [];
+      if (dataset.companies && Array.isArray(dataset.companies)) {
+        dataset.companies.forEach(company => {
+          if (company.companyURL && this.isValidUrl(company.companyURL)) {
+            urls.push(company.companyURL);
+          }
+        });
       }
+      
+      console.log(`Performing direct scraping for ${urls.length} URLs`);
+      
+      // Import the OptimizelyScraperService
+      const OptimizelyScraperService = require('./optimizelyScraperService');
+      
+      // Perform batch scraping with progress updates
+      const results = await this.batchScrapeWithProgress(urls, {
+        concurrent: 2,
+        delay: 1000
+      }, (progress, partialResult) => {
+        console.log(`Scraping progress: ${progress}%`);
+      });
+      
+      // Save results to database
+      const savedResults = await OptimizelyScraperService.saveBatchResults(
+        datasetId, 
+        dataset.name, 
+        results, 
+        startTime
+      );
+      
+      // Calculate final statistics
+      const successful = results.filter(r => r.success);
+      const withOptimizely = successful.filter(r => r.data?.optimizely?.detected);
+      
+      const stats = {
+        totalUrls: urls.length,
+        successfulScans: successful.length,
+        failedScans: results.length - successful.length,
+        optimizelyDetected: withOptimizely.length,
+        totalExperiments: savedResults.totalExperiments
+      };
+
+      await dataset.completeScraping(stats);
+      console.log(`✅ Scraping completed successfully for dataset: ${dataset.name}`);
+      console.log(`📊 Stats:`, stats);
       
     } catch (error) {
       console.error(`Error during scraping for dataset ${datasetId}:`, error);
@@ -276,47 +322,6 @@ class BackgroundScrapingService {
     }
   }
 
-  static async callScrapingEndpoint(datasetId) {
-    try {
-      const baseUrl = process.env.API_BASE_URL || 'http://localhost:3000';
-      const endpoint = `${baseUrl}/api/optimizely/scrape-from-dataset`;
-      
-      console.log(`Calling scraping endpoint: ${endpoint}`);
-      
-      const response = await axios.post(endpoint, {
-        datasetId: datasetId,
-        options: {
-          concurrent: 2,
-          delay: 1000
-        }
-      }, {
-        timeout:  process.env.TIME_OUT_TIME || 2700000, // 45 minutes timeout
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      console.log(`Scraping endpoint response status: ${response.status}`);
-      return response.data;
-      
-    } catch (error) {
-      console.error('Error calling scraping endpoint:', error.message);
-      
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', error.response.data);
-        return {
-          success: false,
-          message: error.response.data?.message || error.message
-        };
-      }
-      
-      return {
-        success: false,
-        message: error.message
-      };
-    }
-  }
 
   static async getScrapingStatus(datasetId) {
     try {
