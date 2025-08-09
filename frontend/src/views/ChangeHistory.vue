@@ -398,6 +398,16 @@ export default {
       this.error = 'No dataset ID provided'
     }
   },
+
+  beforeRouteEnter(to, from, next) {
+    next(vm => {
+      // Always refresh data when entering this route
+      console.log('📊 Entering change history page, fetching latest data...')
+      if (vm.datasetId) {
+        vm.refreshHistory()
+      }
+    })
+  },
   
   watch: {
     '$route.params.id'(newId) {
@@ -405,6 +415,12 @@ export default {
       this.resetData()
       this.fetchChangeHistory()
       this.fetchStatistics()
+    },
+    '$route'() {
+      // Refresh data whenever route changes (including navigating back to this page)
+      if (this.$route.name === 'ChangeHistory' && this.datasetId) {
+        this.refreshHistory()
+      }
     }
   },
   
