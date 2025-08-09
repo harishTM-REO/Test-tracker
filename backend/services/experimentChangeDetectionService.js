@@ -125,6 +125,14 @@ class ExperimentChangeDetectionService {
         // Update the dataset results with new scan data
         await this.updateDatasetResults(datasetId, previousData.datasetName, newScanResults);
         
+        // Update dataset change detection stats
+        const Dataset = require('../models/Dataset');
+        const dataset = await Dataset.findById(datasetId);
+        if (dataset) {
+          await dataset.completeChangeDetection(nextVersionNumber, changes.length);
+          console.log(`📊 Updated dataset change detection stats: version ${nextVersionNumber}, ${changes.length} changes`);
+        }
+        
         console.log(`🔍 Versioned change detection completed. Found ${changes.length} changes in version ${nextVersionNumber}`);
         
         return {

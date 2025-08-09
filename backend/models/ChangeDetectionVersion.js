@@ -465,6 +465,7 @@ changeDetectionVersionSchema.statics.getStatistics = async function(datasetId) {
         manualRuns: { $sum: { $cond: [{ $eq: ['$triggerType', 'manual'] }, 1, 0] } },
         cronRuns: { $sum: { $cond: [{ $eq: ['$triggerType', 'cron'] }, 1, 0] } },
         lastRun: { $max: '$runTimestamp' },
+        lastVersionNumber: { $max: '$versionNumber' },
         avgDuration: { $avg: '$duration' }
       }
     }
@@ -477,6 +478,7 @@ changeDetectionVersionSchema.statics.getStatistics = async function(datasetId) {
     manualRuns: 0,
     cronRuns: 0,
     lastRun: null,
+    lastVersionNumber: 0,
     avgDuration: 0
   };
 };

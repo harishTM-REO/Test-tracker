@@ -279,7 +279,7 @@ const datasetController = {
           ...changeDetectionStats,
           totalVersions: versionStats.totalVersions || 0,
           totalChangesDetected: versionStats.totalChanges || 0,
-          lastVersionNumber: versionStats.totalVersions || 0,
+          lastVersionNumber: versionStats.lastVersionNumber || 0,
           lastRun: versionStats.lastRun,
           avgChangesPerVersion: Math.round(versionStats.avgChangesPerVersion || 0),
           manualRuns: versionStats.manualRuns || 0,
