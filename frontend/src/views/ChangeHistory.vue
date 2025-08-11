@@ -75,262 +75,136 @@
         </div>
       </div>
 
-      <!-- Version History List -->
+      <!-- Version History Table -->
       <div v-if="!versions || versions.length === 0" class="no-versions">
         <p>No change detection history found.</p>
         <p class="help-text">Run change detection to start tracking experiment changes over time.</p>
       </div>
 
-      <div v-else class="versions-list">
+      <div v-else class="versions-container">
         <div v-for="version in versions" :key="version._id" class="version-card">
-          <div class="version-header">
+          <!-- Version Header -->
+          <div class="version-header" @click="toggleVersionExpansion(version._id)">
             <div class="version-info">
-              <h3>Version {{ version.versionNumber }}</h3>
-              <div class="version-meta">
-                <span class="trigger-type" :class="version.triggerType">
+              <div class="version-main">
+                <span class="version-number">Version {{ version.versionNumber }}</span>
+                <span class="version-date">{{ formatDate(version.runTimestamp) }}</span>
+                <span class="trigger-badge" :class="version.triggerType">
                   {{ version.triggerType === 'manual' ? '👤 Manual' : '⏰ Scheduled' }}
                 </span>
-                <span class="run-date">{{ formatDate(version.runTimestamp) }}</span>
-                <span v-if="version.duration" class="duration">⏱️ {{ formatDuration(version.duration) }}</span>
+                <span class="duration">{{ version.duration ? formatDuration(version.duration) : 'N/A' }}</span>
+              </div>
+              <div class="version-summary">
+                <span v-if="version.changesSinceLastVersion && version.changesSinceLastVersion.hasChanges" 
+                      class="changes-count total">
+                  {{ version.changesSinceLastVersion.summary.totalChanges }} Total Changes
+                </span>
+                <span v-else class="no-changes-badge">No Changes</span>
+                
+                <div class="change-counts" v-if="version.changesSinceLastVersion?.hasChanges">
+                  <span v-if="version.changesSinceLastVersion?.summary?.changesByType?.NEW > 0" 
+                        class="changes-count added">
+                    +{{ version.changesSinceLastVersion.summary.changesByType.NEW }} Added
+                  </span>
+                  <span v-if="version.changesSinceLastVersion?.summary?.changesByType?.REMOVED > 0" 
+                        class="changes-count removed">
+                    -{{ version.changesSinceLastVersion.summary.changesByType.REMOVED }} Removed
+                  </span>
+                  <span v-if="version.changesSinceLastVersion?.summary?.changesByType?.MODIFIED > 0" 
+                        class="changes-count modified">
+                    {{ version.changesSinceLastVersion.summary.changesByType.MODIFIED }} Modified
+                  </span>
+                  <span v-if="version.changesSinceLastVersion?.summary?.changesByType?.STATUS_CHANGED > 0" 
+                        class="changes-count status">
+                    {{ version.changesSinceLastVersion.summary.changesByType.STATUS_CHANGED }} Status Changed
+                  </span>
+                </div>
               </div>
             </div>
-            <div class="version-actions">
-              <button @click="toggleVersionDetails(version)" class="details-btn">
-                {{ expandedVersions.has(version._id) ? '➖ Less' : '➕ More' }}
-              </button>
-              <button @click="viewVersionDetails(version)" class="view-btn">
-                🔍 View Details
-              </button>
-            </div>
-          </div>
-          
-          <!-- Changes Summary -->
-          <div class="changes-summary">
-            <div v-if="version.changesSinceLastVersion && version.changesSinceLastVersion.hasChanges" class="changes-stats">
-              <div class="total-changes">
-                <span class="changes-number">{{ version.changesSinceLastVersion.summary.totalChanges }}</span>
-                <span class="changes-label">total changes</span>
-              </div>
-              <div class="changes-breakdown">
-                <span v-if="version.changesSinceLastVersion.summary.changesByType.NEW > 0" class="change-type new">
-                  +{{ version.changesSinceLastVersion.summary.changesByType.NEW }} new
-                </span>
-                <span v-if="version.changesSinceLastVersion.summary.changesByType.REMOVED > 0" class="change-type removed">
-                  -{{ version.changesSinceLastVersion.summary.changesByType.REMOVED }} removed
-                </span>
-                <span v-if="version.changesSinceLastVersion.summary.changesByType.STATUS_CHANGED > 0" class="change-type status">
-                  {{ version.changesSinceLastVersion.summary.changesByType.STATUS_CHANGED }} status changes
-                </span>
-                <span v-if="version.changesSinceLastVersion.summary.changesByType.MODIFIED > 0" class="change-type modified">
-                  {{ version.changesSinceLastVersion.summary.changesByType.MODIFIED }} modified
-                </span>
-              </div>
-            </div>
-            <div v-else class="no-changes">
-              <span class="no-changes-icon">✅</span>
-              <span class="no-changes-text">No changes detected</span>
+            <div class="expand-icon" :class="{ expanded: expandedVersions.has(version._id) }">
+              {{ expandedVersions.has(version._id) ? '▼' : '▶' }}
             </div>
           </div>
 
-          <!-- Expanded Details -->
+          <!-- Expanded Version Details -->
           <div v-if="expandedVersions.has(version._id)" class="version-details">
+            <div v-if="!version.changesSinceLastVersion?.hasChanges" class="no-changes">
+              <p>No changes detected in this version.</p>
+            </div>
             
-            <!-- Detailed Changes by Domain/Website -->
-            <div v-if="version.changesSinceLastVersion && version.changesSinceLastVersion.hasChanges" class="detailed-changes">
-              <h4>📝 Detailed Changes by Website</h4>
-              
-              <!-- New Experiments -->
-              <div v-if="version.changesSinceLastVersion.changeDetails.newExperiments?.length > 0" class="change-section">
-                <h5 class="change-section-title new">
-                  ✨ New Experiments ({{ version.changesSinceLastVersion.changeDetails.newExperiments.length }})
-                </h5>
-                
-                <div class="experiments-by-domain">
-                  <div v-for="(domainExperiments, domain) in groupExperimentsByDomain(version.changesSinceLastVersion.changeDetails.newExperiments)" 
-                       :key="domain" class="domain-experiments">
-                    <div class="domain-header">
-                      <span class="domain-name">🌐 {{ domain }}</span>
-                      <span class="experiment-count">({{ domainExperiments.length }} new)</span>
-                    </div>
-                    
-                    <div class="experiments-list">
-                      <div v-for="experiment in domainExperiments" :key="experiment.experimentId" class="experiment-detail new">
-                        <div class="experiment-header">
-                          <span class="experiment-name">{{ experiment.experimentName || 'Unnamed Experiment' }}</span>
-                          <span class="experiment-id">ID: {{ experiment.experimentId }}</span>
-                          <span :class="['experiment-status', experiment.status?.toLowerCase()]">
-                            {{ experiment.status }}
-                          </span>
-                        </div>
-                        <div class="experiment-meta">
-                          <span class="url">{{ experiment.url }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+            <div v-else class="statistics-view">
+              <!-- Sort Controls -->
+              <div class="sort-controls">
+                <label for="sortBy">Sort by:</label>
+                <select id="sortBy" v-model="sortBy" @change="applySorting">
+                  <option value="totalChanges-asc">🎯 Total Changes (Low to High) - Shows Potential Clients First</option>
+                  <option value="totalChanges-desc">📈 Total Changes (High to Low) - Shows Most Active First</option>
+                  <option value="domain">📝 Domain Name (A-Z)</option>
+                  <option value="activity-desc">⚡ Activity Level (High to Low)</option>
+                  <option value="activity-asc">💤 Activity Level (Low to High)</option>
+                </select>
               </div>
 
-              <!-- Removed Experiments -->
-              <div v-if="version.changesSinceLastVersion.changeDetails.removedExperiments?.length > 0" class="change-section">
-                <h5 class="change-section-title removed">
-                  🗑️ Removed Experiments ({{ version.changesSinceLastVersion.changeDetails.removedExperiments.length }})
-                </h5>
-                
-                <div class="experiments-by-domain">
-                  <div v-for="(domainExperiments, domain) in groupExperimentsByDomain(version.changesSinceLastVersion.changeDetails.removedExperiments)" 
-                       :key="domain" class="domain-experiments">
-                    <div class="domain-header">
-                      <span class="domain-name">🌐 {{ domain }}</span>
-                      <span class="experiment-count">({{ domainExperiments.length }} removed)</span>
-                    </div>
-                    
-                    <div class="experiments-list">
-                      <div v-for="experiment in domainExperiments" :key="experiment.experimentId" class="experiment-detail removed">
-                        <div class="experiment-header">
-                          <span class="experiment-name">{{ experiment.experimentName || 'Unnamed Experiment' }}</span>
-                          <span class="experiment-id">ID: {{ experiment.experimentId }}</span>
-                          <span :class="['experiment-status', experiment.previousStatus?.toLowerCase()]">
-                            Was: {{ experiment.previousStatus }}
-                          </span>
+              <!-- Domain Statistics Table -->
+              <div class="domain-statistics-table">
+                <table class="stats-table">
+                  <thead>
+                    <tr>
+                      <th>Domain</th>
+                      <th>New Experiments</th>
+                      <th>Removed</th>
+                      <th>Modified</th>
+                      <th>Status Changes</th>
+                      <th>Total Changes</th>
+                      <th>Activity Level</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(stats, domain, index) in getSortedDomainStatistics(version)" :key="domain" 
+                        class="stats-row" :class="{ 'potential-client': stats.isPotentialClient }">
+                      <td class="domain-cell">
+                        <span class="domain-number">{{ index + 1 }}.</span>
+                        <strong class="domain-name">{{ domain }}</strong>
+                      </td>
+                      <td class="stat-cell new-cell">
+                        <div class="stat-value">
+                          <span class="stat-number added">+{{ stats.new }}</span>
+                          <span class="stat-description">{{ stats.new === 1 ? 'experiment' : 'experiments' }} added</span>
                         </div>
-                        <div class="experiment-meta">
-                          <span class="url">{{ experiment.url }}</span>
+                      </td>
+                      <td class="stat-cell removed-cell">
+                        <div class="stat-value">
+                          <span class="stat-number removed">-{{ stats.removed }}</span>
+                          <span class="stat-description">{{ stats.removed === 1 ? 'experiment' : 'experiments' }} removed</span>
                         </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Status Changes -->
-              <div v-if="version.changesSinceLastVersion.changeDetails.statusChanges?.length > 0" class="change-section">
-                <h5 class="change-section-title status">
-                  🔄 Status Changes ({{ version.changesSinceLastVersion.changeDetails.statusChanges.length }})
-                </h5>
-                
-                <div class="experiments-by-domain">
-                  <div v-for="(domainExperiments, domain) in groupExperimentsByDomain(version.changesSinceLastVersion.changeDetails.statusChanges)" 
-                       :key="domain" class="domain-experiments">
-                    <div class="domain-header">
-                      <span class="domain-name">🌐 {{ domain }}</span>
-                      <span class="experiment-count">({{ domainExperiments.length }} status changes)</span>
-                    </div>
-                    
-                    <div class="experiments-list">
-                      <div v-for="experiment in domainExperiments" :key="experiment.experimentId" class="experiment-detail status-change">
-                        <div class="experiment-header">
-                          <span class="experiment-name">{{ experiment.experimentName || 'Unnamed Experiment' }}</span>
-                          <span class="experiment-id">ID: {{ experiment.experimentId }}</span>
+                      </td>
+                      <td class="stat-cell modified-cell">
+                        <div class="stat-value">
+                          <span class="stat-number modified">{{ stats.modified }}</span>
+                          <span class="stat-description">{{ stats.modified === 1 ? 'experiment' : 'experiments' }} modified</span>
                         </div>
-                        <div class="status-change-detail">
-                          <span :class="['old-status', experiment.previousStatus?.toLowerCase()]">
-                            {{ experiment.previousStatus }}
-                          </span>
-                          <span class="arrow">→</span>
-                          <span :class="['new-status', experiment.newStatus?.toLowerCase()]">
-                            {{ experiment.newStatus }}
-                          </span>
+                      </td>
+                      <td class="stat-cell status-cell">
+                        <div class="stat-value">
+                          <span class="stat-number status">{{ stats.statusChanged }}</span>
+                          <span class="stat-description">status {{ stats.statusChanged === 1 ? 'change' : 'changes' }}</span>
                         </div>
-                        <div class="experiment-meta">
-                          <span class="url">{{ experiment.url }}</span>
+                      </td>
+                      <td class="stat-cell total-cell">
+                        <div class="stat-value">
+                          <span class="stat-number total">{{ stats.totalChanges }}</span>
+                          <span class="stat-description">total {{ stats.totalChanges === 1 ? 'change' : 'changes' }}</span>
                         </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Modified Experiments -->
-              <div v-if="version.changesSinceLastVersion.changeDetails.modifiedExperiments?.length > 0" class="change-section">
-                <h5 class="change-section-title modified">
-                  ✏️ Modified Experiments ({{ version.changesSinceLastVersion.changeDetails.modifiedExperiments.length }})
-                </h5>
-                
-                <div class="experiments-by-domain">
-                  <div v-for="(domainExperiments, domain) in groupExperimentsByDomain(version.changesSinceLastVersion.changeDetails.modifiedExperiments)" 
-                       :key="domain" class="domain-experiments">
-                    <div class="domain-header">
-                      <span class="domain-name">🌐 {{ domain }}</span>
-                      <span class="experiment-count">({{ domainExperiments.length }} modified)</span>
-                    </div>
-                    
-                    <div class="experiments-list">
-                      <div v-for="experiment in domainExperiments" :key="experiment.experimentId" class="experiment-detail modified">
-                        <div class="experiment-header">
-                          <span class="experiment-name">{{ experiment.experimentName || 'Unnamed Experiment' }}</span>
-                          <span class="experiment-id">ID: {{ experiment.experimentId }}</span>
+                      </td>
+                      <td class="activity-cell">
+                        <div class="activity-indicator" :class="stats.activityClass">
+                          <span class="activity-level">{{ stats.activityLevel }}</span>
+                          <span class="activity-description">{{ stats.activityDescription }}</span>
                         </div>
-                        <div class="modifications">
-                          <span class="modified-fields">
-                            Modified: 
-                            <span v-for="(field, index) in experiment.modifiedFields" :key="field" class="modified-field">
-                              {{ field }}{{ index < experiment.modifiedFields.length - 1 ? ', ' : '' }}
-                            </span>
-                          </span>
-                        </div>
-                        <div class="experiment-meta">
-                          <span class="url">{{ experiment.url }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Experiments Snapshot -->
-            <div class="experiments-snapshot">
-              <h4>📊 Experiments Snapshot</h4>
-              <div class="snapshot-stats">
-                <div class="snapshot-stat">
-                  <span class="stat-label">Total Experiments:</span>
-                  <span class="stat-value">{{ version.experimentsSnapshot?.totalExperiments || 0 }}</span>
-                </div>
-                <div class="snapshot-stat">
-                  <span class="stat-label">Active Experiments:</span>
-                  <span class="stat-value">{{ version.experimentsSnapshot?.activeExperiments || 0 }}</span>
-                </div>
-                <div class="snapshot-stat">
-                  <span class="stat-label">Total Domains:</span>
-                  <span class="stat-value">{{ version.experimentsSnapshot?.totalDomains || 0 }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Affected Domains -->
-            <div v-if="version.changesSinceLastVersion?.summary?.affectedDomains?.length > 0" class="affected-domains">
-              <h4>🎯 Affected Domains ({{ version.changesSinceLastVersion.summary.affectedDomains.length }})</h4>
-              <div class="domains-list">
-                <span v-for="domain in version.changesSinceLastVersion.summary.affectedDomains.slice(0, 10)" :key="domain" class="domain-tag">
-                  {{ domain }}
-                </span>
-                <span v-if="version.changesSinceLastVersion.summary.affectedDomains.length > 10" class="more-domains">
-                  +{{ version.changesSinceLastVersion.summary.affectedDomains.length - 10 }} more
-                </span>
-              </div>
-            </div>
-
-            <!-- Processing Stats -->
-            <div v-if="version.processingStats" class="processing-stats">
-              <h4>📈 Processing Statistics</h4>
-              <div class="processing-grid">
-                <div class="processing-stat">
-                  <span class="stat-label">URLs Processed:</span>
-                  <span class="stat-value">{{ version.processingStats.totalUrlsProcessed || 0 }}</span>
-                </div>
-                <div class="processing-stat">
-                  <span class="stat-label">Successful Scans:</span>
-                  <span class="stat-value">{{ version.processingStats.successfulScans || 0 }}</span>
-                </div>
-                <div class="processing-stat">
-                  <span class="stat-label">Failed Scans:</span>
-                  <span class="stat-value">{{ version.processingStats.failedScans || 0 }}</span>
-                </div>
-                <div class="processing-stat">
-                  <span class="stat-label">Optimizely Detected:</span>
-                  <span class="stat-value">{{ version.processingStats.domainsWithOptimizely || 0 }}</span>
-                </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -375,6 +249,7 @@ export default {
       refreshing: false,
       error: null,
       expandedVersions: new Set(),
+      sortBy: 'totalChanges-asc',
       filters: {
         triggerType: '',
         dateRange: ''
@@ -514,11 +389,11 @@ export default {
       }
     },
 
-    toggleVersionDetails(version) {
-      if (this.expandedVersions.has(version._id)) {
-        this.expandedVersions.delete(version._id)
+    toggleVersionExpansion(versionId) {
+      if (this.expandedVersions.has(versionId)) {
+        this.expandedVersions.delete(versionId)
       } else {
-        this.expandedVersions.add(version._id)
+        this.expandedVersions.add(versionId)
       }
     },
 
@@ -604,6 +479,303 @@ export default {
         })
       
       return sortedGrouped
+    },
+
+    getDomainsWithChanges(version) {
+      if (!version.changesSinceLastVersion?.changeDetails) return []
+      
+      const domainStats = {}
+      const details = version.changesSinceLastVersion.changeDetails
+      
+      // Count changes by domain for each change type
+      const processExperiments = (experiments, changeType) => {
+        if (!experiments) return
+        experiments.forEach(exp => {
+          const domain = exp.domain || 'Unknown Domain'
+          if (!domainStats[domain]) {
+            domainStats[domain] = { domain, new: 0, removed: 0, statusChanged: 0, modified: 0, totalChanges: 0 }
+          }
+          domainStats[domain][changeType]++
+          domainStats[domain].totalChanges++
+        })
+      }
+      
+      processExperiments(details.newExperiments, 'new')
+      processExperiments(details.removedExperiments, 'removed')
+      processExperiments(details.statusChanges, 'statusChanged')
+      processExperiments(details.modifiedExperiments, 'modified')
+      
+      // Convert to array and sort by total changes desc
+      return Object.values(domainStats)
+        .sort((a, b) => b.totalChanges - a.totalChanges)
+    },
+
+    getUniqueDomainsForChangeType(version, changeType) {
+      if (!version.changesSinceLastVersion?.changeDetails) return []
+      
+      const experiments = {
+        'NEW': version.changesSinceLastVersion.changeDetails.newExperiments,
+        'REMOVED': version.changesSinceLastVersion.changeDetails.removedExperiments,
+        'STATUS_CHANGED': version.changesSinceLastVersion.changeDetails.statusChanges,
+        'MODIFIED': version.changesSinceLastVersion.changeDetails.modifiedExperiments
+      }[changeType]
+      
+      if (!experiments) return []
+      
+      const uniqueDomains = new Set()
+      experiments.forEach(exp => {
+        uniqueDomains.add(exp.domain || 'Unknown Domain')
+      })
+      
+      return Array.from(uniqueDomains)
+    },
+
+    getDomainCount(version) {
+      if (!version.changesSinceLastVersion?.changeDetails) return 0
+      const domains = new Set()
+      const details = version.changesSinceLastVersion.changeDetails
+      
+      if (details.newExperiments) details.newExperiments.forEach(exp => domains.add(exp.domain))
+      if (details.removedExperiments) details.removedExperiments.forEach(exp => domains.add(exp.domain))
+      if (details.statusChanges) details.statusChanges.forEach(exp => domains.add(exp.domain))
+      if (details.modifiedExperiments) details.modifiedExperiments.forEach(exp => domains.add(exp.domain))
+      
+      return domains.size
+    },
+
+    getDomainTrend(version) {
+      const count = this.getDomainCount(version)
+      if (count === 0) return 'No activity'
+      if (count <= 2) return 'Low activity'
+      if (count <= 5) return 'Moderate activity'
+      return 'High activity'
+    },
+
+    getDomainTrendClass(version) {
+      const count = this.getDomainCount(version)
+      if (count === 0) return 'trend-none'
+      if (count <= 2) return 'trend-low'
+      if (count <= 5) return 'trend-moderate'
+      return 'trend-high'
+    },
+
+    getExperimentActivity(version) {
+      if (!version.changesSinceLastVersion?.hasChanges) return 0
+      const total = version.changesSinceLastVersion.summary.totalChanges || 0
+      const domains = this.getDomainCount(version)
+      if (domains === 0) return 0
+      
+      // Calculate activity percentage based on changes per domain
+      const avgChangesPerDomain = total / domains
+      return Math.min(100, Math.round(avgChangesPerDomain * 10))
+    },
+
+    getActivityInsight(version) {
+      const activity = this.getExperimentActivity(version)
+      if (activity === 0) return 'Inactive'
+      if (activity < 30) return 'Low engagement'
+      if (activity < 70) return 'Good activity'
+      return 'Very active'
+    },
+
+    getOptimizationScore(version) {
+      if (!version.changesSinceLastVersion?.hasChanges) return 'F'
+      
+      const summary = version.changesSinceLastVersion.summary.changesByType || {}
+      const newExps = summary.NEW || 0
+      const modifications = summary.MODIFIED || 0
+      const statusChanges = summary.STATUS_CHANGED || 0
+      const total = version.changesSinceLastVersion.summary.totalChanges || 1
+      
+      // Score based on optimization activity vs just adding/removing
+      const optimizationActivity = (modifications + statusChanges) / total
+      
+      if (optimizationActivity >= 0.7) return 'A+'
+      if (optimizationActivity >= 0.5) return 'A'
+      if (optimizationActivity >= 0.3) return 'B'
+      if (optimizationActivity >= 0.1) return 'C'
+      return 'D'
+    },
+
+    getScoreRating(version) {
+      const score = this.getOptimizationScore(version)
+      const ratings = {
+        'A+': 'Excellent optimization',
+        'A': 'Great optimization',
+        'B': 'Good optimization',
+        'C': 'Some optimization',
+        'D': 'Minimal optimization',
+        'F': 'No optimization'
+      }
+      return ratings[score] || 'No data'
+    },
+
+    getDomainStatistics(version) {
+      const domainStats = {}
+      
+      // Get all domains from current snapshot (including those with zero changes)
+      if (version.experimentsSnapshot?.experimentsByDomain) {
+        version.experimentsSnapshot.experimentsByDomain.forEach(domainData => {
+          const domain = domainData.domain || domainData.url || 'Unknown Domain'
+          domainStats[domain] = {
+            new: 0,
+            removed: 0,
+            modified: 0,
+            statusChanged: 0,
+            totalChanges: 0,
+            efficiencyClass: 'none',
+            efficiencyLabel: 'Potential Client',
+            activityClass: 'activity-none',
+            activityLevel: 'None',
+            activityDescription: 'No optimization activity - High sales potential',
+            isPotentialClient: true
+          }
+        })
+      }
+      
+      // Process actual changes if they exist
+      if (version.changesSinceLastVersion?.changeDetails) {
+        const details = version.changesSinceLastVersion.changeDetails
+
+        const processStats = (experiments, changeType) => {
+          if (!experiments) return
+          experiments.forEach(exp => {
+            const domain = exp.domain || 'Unknown Domain'
+            if (!domainStats[domain]) {
+              domainStats[domain] = {
+                new: 0,
+                removed: 0,
+                modified: 0,
+                statusChanged: 0,
+                totalChanges: 0,
+                efficiencyClass: 'low',
+                efficiencyLabel: 'Needs Optimization',
+                activityClass: 'activity-low',
+                activityLevel: 'Low',
+                activityDescription: 'Minimal activity',
+                isPotentialClient: false
+              }
+            }
+            
+            domainStats[domain].isPotentialClient = false
+            if (changeType === 'NEW') domainStats[domain].new++
+            else if (changeType === 'REMOVED') domainStats[domain].removed++
+            else if (changeType === 'MODIFIED') domainStats[domain].modified++
+            else if (changeType === 'STATUS_CHANGED') domainStats[domain].statusChanged++
+          })
+        }
+
+        processStats(details.newExperiments, 'NEW')
+        processStats(details.removedExperiments, 'REMOVED')
+        processStats(details.statusChanges, 'STATUS_CHANGED')
+        processStats(details.modifiedExperiments, 'MODIFIED')
+      }
+
+      // Calculate insights for each domain
+      Object.keys(domainStats).forEach(domain => {
+        const stats = domainStats[domain]
+        const total = stats.new + stats.removed + stats.modified + stats.statusChanged
+        stats.totalChanges = total
+        
+        // Skip calculation for potential clients (zero activity)
+        if (stats.isPotentialClient) return
+        
+        // Calculate optimization efficiency
+        const optimizationActions = stats.modified + stats.statusChanged
+        const efficiency = total > 0 ? optimizationActions / total : 0
+        
+        // Efficiency classification
+        if (efficiency >= 0.7) {
+          stats.efficiencyClass = 'high'
+          stats.efficiencyLabel = 'Highly Optimized'
+        } else if (efficiency >= 0.4) {
+          stats.efficiencyClass = 'medium'
+          stats.efficiencyLabel = 'Moderately Optimized'
+        } else if (total > 0) {
+          stats.efficiencyClass = 'low'
+          stats.efficiencyLabel = 'Needs Optimization'
+        }
+
+        // Activity level classification
+        if (total >= 10) {
+          stats.activityClass = 'activity-very-high'
+          stats.activityLevel = 'Very High'
+          stats.activityDescription = 'Extremely active optimization'
+        } else if (total >= 5) {
+          stats.activityClass = 'activity-high'
+          stats.activityLevel = 'High'
+          stats.activityDescription = 'Active optimization efforts'
+        } else if (total >= 2) {
+          stats.activityClass = 'activity-medium'
+          stats.activityLevel = 'Medium'
+          stats.activityDescription = 'Some optimization activity'
+        } else if (total > 0) {
+          stats.activityClass = 'activity-low'
+          stats.activityLevel = 'Low'
+          stats.activityDescription = 'Limited optimization activity'
+        }
+      })
+
+      return domainStats
+    },
+
+    getSortedDomainStatistics(version) {
+      const domainStats = this.getDomainStatistics(version)
+      const entries = Object.entries(domainStats)
+      
+      entries.sort((a, b) => {
+        const [domainA, statsA] = a
+        const [domainB, statsB] = b
+        
+        switch (this.sortBy) {
+          case 'domain':
+            return domainA.localeCompare(domainB)
+          case 'totalChanges-desc':
+            return statsB.totalChanges - statsA.totalChanges
+          case 'totalChanges-asc':
+            return statsA.totalChanges - statsB.totalChanges
+          case 'activity-desc':
+            return this.getActivityScore(statsB) - this.getActivityScore(statsA)
+          case 'activity-asc':
+            return this.getActivityScore(statsA) - this.getActivityScore(statsB)
+          default:
+            return statsA.totalChanges - statsB.totalChanges
+        }
+      })
+      
+      return Object.fromEntries(entries)
+    },
+
+    getActivityScore(stats) {
+      const activityMap = {
+        'activity-very-high': 4,
+        'activity-high': 3,
+        'activity-medium': 2,
+        'activity-low': 1,
+        'activity-none': 0
+      }
+      return activityMap[stats.activityClass] || 0
+    },
+
+    applySorting() {
+      // Force reactivity update
+      this.$forceUpdate()
+    },
+
+    formatChangeType(changeType) {
+      const types = {
+        'NEW': '✅ Added',
+        'REMOVED': '❌ Removed',
+        'MODIFIED': '✏️ Modified',
+        'STATUS_CHANGED': '🔄 Status Changed'
+      }
+      return types[changeType] || changeType
+    },
+
+    viewExperimentDetails(change) {
+      // You can implement this to show more detailed change information
+      console.log('View experiment details:', change)
+      // For now, just log the details - you can implement a modal or navigation
     }
   }
 }
@@ -773,7 +945,8 @@ export default {
   color: #999;
 }
 
-.versions-list {
+/* Version Cards Styles */
+.versions-container {
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -783,437 +956,431 @@ export default {
   background: white;
   border: 1px solid #eee;
   border-radius: 12px;
-  padding: 25px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  overflow: hidden;
 }
 
 .version-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
+  align-items: center;
+  padding: 20px;
+  cursor: pointer;
+  background: #f8f9fa;
+  border-bottom: 1px solid #eee;
+  transition: background-color 0.2s;
 }
 
-.version-info h3 {
-  margin: 0 0 10px 0;
-  color: #333;
+.version-header:hover {
+  background: #e9ecef;
+}
+
+.version-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.version-main {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.version-summary {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.change-counts {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.expand-icon {
+  font-size: 1.2rem;
+  color: #666;
+  transition: transform 0.2s;
+  user-select: none;
+}
+
+.expand-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.version-details {
+  padding: 0 20px 20px;
+  background: white;
+}
+
+.no-changes {
+  text-align: center;
+  color: #666;
+  padding: 40px;
+  font-style: italic;
+}
+
+.statistics-view {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.sort-controls {
+  background: linear-gradient(45deg, #f8f9fa, #e9ecef);
+  padding: 15px 20px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 2px solid #667eea;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+}
+
+.sort-controls label {
+  font-weight: 600;
+  color: #495057;
+  font-size: 0.9rem;
+}
+
+.sort-controls select {
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  background: white;
+  font-size: 0.9rem;
+  color: #495057;
+  min-width: 200px;
+}
+
+.sort-controls select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+
+.domain-statistics-table {
+  background: white;
+  border: 1px solid #e9ecef;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow-x: auto;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 700px;
+}
+
+.stats-table thead {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.stats-table th {
+  padding: 15px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.stats-table th:last-child {
+  border-right: none;
+}
+
+.stats-row {
+  border-bottom: 1px solid #f1f3f4;
+  transition: background-color 0.2s;
+}
+
+.stats-row:hover {
+  background: #f8f9fa;
+}
+
+.stats-row:last-child {
+  border-bottom: none;
+}
+
+.stats-table td {
+  padding: 15px 12px;
+  vertical-align: middle;
+  border-right: 1px solid #f1f3f4;
+}
+
+.stats-table td:last-child {
+  border-right: none;
+}
+
+.domain-cell {
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.domain-number {
+  background: #667eea;
+  color: white;
+  font-size: 0.8rem;
+  font-weight: bold;
+  padding: 4px 8px;
+  border-radius: 12px;
+  min-width: 30px;
+  text-align: center;
+  display: inline-block;
+}
+
+.domain-name {
+  flex: 1;
+}
+
+/* Removed efficiency-related styles */
+
+.stats-row.potential-client {
+  background: #fff5f5;
+  border-left: 4px solid #ff6b6b;
+}
+
+.stats-row.potential-client:hover {
+  background: #ffe5e5;
+}
+
+.stats-row.potential-client .domain-number {
+  background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.stat-cell {
+  text-align: center;
+}
+
+.stat-value {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-number {
+  font-size: 1.5rem;
+  font-weight: bold;
+  display: block;
+}
+
+.stat-number.added {
+  color: #27ae60;
+}
+
+.stat-number.removed {
+  color: #e74c3c;
+}
+
+.stat-number.modified {
+  color: #3498db;
+}
+
+.stat-number.status {
+  color: #f39c12;
+}
+
+.stat-number.total {
+  color: #2c3e50;
+  background: #f8f9fa;
+  padding: 4px 8px;
+  border-radius: 6px;
   font-size: 1.3rem;
 }
 
-.version-meta {
-  display: flex;
-  gap: 15px;
-  flex-wrap: wrap;
-  align-items: center;
+.stat-description {
+  font-size: 0.75rem;
+  color: #666;
+  font-weight: 500;
+  line-height: 1.2;
 }
 
-.trigger-type {
-  font-size: 0.8rem;
-  font-weight: 600;
+.activity-cell {
+  text-align: center;
+}
+
+.activity-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.activity-level {
+  font-weight: bold;
+  font-size: 0.9rem;
   padding: 4px 8px;
   border-radius: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
-.trigger-type.manual {
+.activity-description {
+  font-size: 0.75rem;
+  color: #666;
+  line-height: 1.2;
+}
+
+.activity-very-high .activity-level {
+  background: #d4edda;
+  color: #155724;
+}
+
+.activity-high .activity-level {
+  background: #cce7ff;
+  color: #0066cc;
+}
+
+.activity-medium .activity-level {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.activity-low .activity-level {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.activity-none .activity-level {
+  background: #e9ecef;
+  color: #6c757d;
+}
+
+/* Removed old styles - now using table layout */
+
+.version-number {
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 1.1rem;
+}
+
+.version-date {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.date-time {
+  font-size: 0.85rem;
+  color: #666;
+  white-space: nowrap;
+}
+
+.trigger-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.trigger-badge.manual {
   background: #e3f2fd;
   color: #1976d2;
 }
 
-.trigger-type.cron {
+.trigger-badge.cron {
   background: #f3e5f5;
   color: #7b1fa2;
 }
 
-.run-date, .duration {
-  font-size: 0.9rem;
-  color: #666;
-}
-
-.version-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.details-btn, .view-btn {
-  padding: 8px 12px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
+.duration {
   font-size: 0.85rem;
-  font-weight: 500;
+  color: #666;
+  white-space: nowrap;
 }
 
-.details-btn {
-  background: #f8f9fa;
-  color: #495057;
-  border: 1px solid #dee2e6;
+.changes-count {
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 8px;
+  display: inline-block;
+  min-width: 30px;
+  text-align: center;
 }
 
-.details-btn:hover {
-  background: #e9ecef;
+.changes-count.total {
+  background: #e8f5e8;
+  color: #27ae60;
+  font-size: 1rem;
+  font-weight: bold;
+}
+
+.changes-count.added {
+  background: #d4edda;
+  color: #155724;
+}
+
+.changes-count.removed {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.changes-count.modified {
+  background: #cce7ff;
+  color: #0066cc;
+}
+
+.changes-count.status {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.zero-count {
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.no-changes-badge {
+  color: #999;
+  font-size: 0.85rem;
 }
 
 .view-btn {
   background: #3498db;
   color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .view-btn:hover {
   background: #2980b9;
 }
 
-.changes-summary {
-  padding: 20px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  margin-bottom: 15px;
-}
+/* Removed old changes summary styles - now using table format */
 
-.changes-stats {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+/* Removed version-details styles as expanded view is no longer used */
 
-.total-changes {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
+/* Removed detailed-changes styles as they're no longer used */
 
-.changes-number {
-  font-size: 2rem;
-  font-weight: bold;
-  color: #2c3e50;
-}
-
-.changes-label {
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.changes-breakdown {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.change-type {
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.change-type.new {
-  background: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
-}
-
-.change-type.removed {
-  background: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
-}
-
-.change-type.status {
-  background: #fff3cd;
-  color: #856404;
-  border: 1px solid #faeeba;
-}
-
-.change-type.modified {
-  background: #cce7ff;
-  color: #0066cc;
-  border: 1px solid #99d6ff;
-}
-
-.no-changes {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #666;
-}
-
-.no-changes-icon {
-  font-size: 1.2rem;
-}
-
-.version-details {
-  border-top: 1px solid #eee;
-  padding-top: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 25px;
-}
-
-.detailed-changes {
-  background: #f8f9fa;
-  border-radius: 8px;
-  padding: 20px;
-  border-left: 4px solid #3498db;
-}
-
-.detailed-changes h4 {
-  margin: 0 0 20px 0;
-  color: #333;
-  font-size: 1.2rem;
-  font-weight: 600;
-}
-
-.change-section {
-  margin-bottom: 25px;
-}
-
-.change-section:last-child {
-  margin-bottom: 0;
-}
-
-.change-section-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin: 0 0 15px 0;
-  padding: 8px 12px;
-  border-radius: 6px;
-  display: inline-block;
-}
-
-.change-section-title.new {
-  background: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
-}
-
-.change-section-title.removed {
-  background: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
-}
-
-.change-section-title.status {
-  background: #fff3cd;
-  color: #856404;
-  border: 1px solid #faeeba;
-}
-
-.change-section-title.modified {
-  background: #cce7ff;
-  color: #0066cc;
-  border: 1px solid #99d6ff;
-}
-
-.experiments-by-domain {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.domain-experiments {
-  background: white;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-  overflow: hidden;
-}
-
-.domain-header {
-  background: #f1f3f4;
-  padding: 12px 16px;
-  border-bottom: 1px solid #e9ecef;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.domain-name {
-  font-weight: 600;
-  color: #333;
-  font-size: 1rem;
-}
-
-.experiment-count {
-  background: #3498db;
-  color: white;
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-size: 0.8rem;
-  font-weight: 500;
-}
-
-.experiments-list {
-  padding: 0;
-}
-
-.experiment-detail {
-  padding: 16px;
-  border-bottom: 1px solid #f1f3f4;
-  transition: background-color 0.2s ease;
-}
-
-.experiment-detail:last-child {
-  border-bottom: none;
-}
-
-.experiment-detail:hover {
-  background: #f8f9fa;
-}
-
-.experiment-detail.new {
-  border-left: 4px solid #28a745;
-}
-
-.experiment-detail.removed {
-  border-left: 4px solid #dc3545;
-}
-
-.experiment-detail.status-change {
-  border-left: 4px solid #ffc107;
-}
-
-.experiment-detail.modified {
-  border-left: 4px solid #17a2b8;
-}
-
-.experiment-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.experiment-name {
-  font-weight: 600;
-  color: #333;
-  font-size: 1rem;
-  flex: 1;
-  min-width: 200px;
-}
-
-.experiment-id {
-  font-family: monospace;
-  background: #f8f9fa;
-  color: #666;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  border: 1px solid #e9ecef;
-}
-
-.experiment-status {
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.experiment-status.running {
-  background: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
-}
-
-.experiment-status.paused {
-  background: #fff3cd;
-  color: #856404;
-  border: 1px solid #faeeba;
-}
-
-.experiment-status.not_started {
-  background: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
-}
-
-.experiment-status.archived {
-  background: #e2e3e5;
-  color: #495057;
-  border: 1px solid #ced4da;
-}
-
-.status-change-detail {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 0;
-  flex-wrap: wrap;
-}
-
-.old-status, .new-status {
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.old-status.running, .new-status.running {
-  background: #d4edda;
-  color: #155724;
-}
-
-.old-status.paused, .new-status.paused {
-  background: #fff3cd;
-  color: #856404;
-}
-
-.old-status.not_started, .new-status.not_started {
-  background: #f8d7da;
-  color: #721c24;
-}
-
-.old-status.archived, .new-status.archived {
-  background: #e2e3e5;
-  color: #495057;
-}
-
-.arrow {
-  font-weight: bold;
-  color: #666;
-  font-size: 1rem;
-}
-
-.modifications {
-  margin: 8px 0;
-}
-
-.modified-fields {
-  font-size: 0.9rem;
-  color: #666;
-}
-
-.modified-field {
-  font-weight: 500;
-  color: #333;
-  background: #e3f2fd;
-  padding: 2px 6px;
-  border-radius: 4px;
-  margin-left: 4px;
-}
-
-.experiment-meta {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #f1f3f4;
-}
-
-.experiment-meta .url {
-  font-size: 0.85rem;
-  color: #666;
-  word-break: break-all;
-  font-family: monospace;
-  background: #f8f9fa;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
+/* Removed experiment detail styles as they're no longer used in table view */
 
 .version-details h4 {
   margin: 0 0 12px 0;
@@ -1247,6 +1414,8 @@ export default {
   color: #333;
   font-size: 0.9rem;
 }
+
+/* Removed statistical summary styles as they're no longer used */
 
 .domains-list {
   display: flex;
@@ -1322,19 +1491,6 @@ export default {
     justify-content: space-between;
   }
   
-  .version-header {
-    flex-direction: column;
-    gap: 15px;
-  }
-  
-  .version-actions {
-    justify-content: flex-start;
-  }
-  
-  .changes-breakdown {
-    justify-content: flex-start;
-  }
-  
   .pagination {
     flex-direction: column;
     gap: 15px;
@@ -1344,43 +1500,71 @@ export default {
     grid-template-columns: 1fr;
   }
 
-  .domain-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-
-  .experiment-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-
-  .experiment-name {
-    min-width: auto;
-  }
-
-  .status-change-detail {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-  }
-
-  .detailed-changes {
+  /* Version cards responsive styles */
+  .version-header {
     padding: 15px;
   }
-
-  .change-section-title {
-    font-size: 1rem;
-    padding: 6px 10px;
+  
+  .version-main {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
   }
-
-  .domain-experiments {
-    margin-bottom: 15px;
+  
+  .version-summary {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
   }
-
-  .experiment-detail {
-    padding: 12px;
+  
+  .change-counts {
+    flex-direction: column;
+    gap: 5px;
   }
+  
+  .version-details {
+    padding: 0 15px 15px;
+  }
+  
+  .sort-controls {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .sort-controls select {
+    min-width: 100%;
+  }
+  
+  .domain-statistics-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .stats-table {
+    min-width: 800px;
+  }
+  
+  .stats-table th,
+  .stats-table td {
+    padding: 10px 8px;
+    font-size: 0.8rem;
+  }
+  
+  .stat-number {
+    font-size: 1.2rem;
+  }
+  
+  .stat-description,
+  .activity-description {
+    font-size: 0.7rem;
+  }
+  
+  .activity-level {
+    font-size: 0.8rem;
+    padding: 3px 6px;
+  }
+  
+  /* Removed efficiency badge responsive styles */
 }
 </style>
