@@ -1,37 +1,27 @@
 <template>
   <div>
     <h4 class="heading">File Data Dashboard</h4>
-    
+    <v-col class="type-select" v-if="!selectedToolType">      
+      <h5 class="sub-heading">Please select a testing tool</h5>
+      <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely']"  variant="solo"></v-select>
+    </v-col>
     <!-- File Upload Section -->
-    <v-card class="upload-card" elevation="2">
+    <v-card class="upload-card" elevation="2" v-else>
       <v-card-title class="card-title">
         <v-icon color="primary" class="title-icon">mdi-file-upload</v-icon>
         <span>Upload Data File</span>
       </v-card-title>
       <v-card-text>
-        <div class="upload-zone" 
-             :class="{ 'drag-over': dragOver }"
-             @dragover.prevent="dragOver = true"
-             @dragleave.prevent="dragOver = false"
-             @drop.prevent="handleFileDrop">
-          <input
-            ref="fileInput"
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            @change="handleFileSelect"
-            style="display: none"
-          />
-          
+        <div class="upload-zone" :class="{ 'drag-over': dragOver }" @dragover.prevent="dragOver = true"
+          @dragleave.prevent="dragOver = false" @drop.prevent="handleFileDrop">
+          <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" @change="handleFileSelect"
+            style="display: none" />
+
           <div v-if="!selectedFile" class="upload-content">
             <v-icon size="64" color="primary" class="upload-icon">mdi-cloud-upload</v-icon>
             <h3 class="upload-title">Drop your file here or click to browse</h3>
             <p class="upload-subtitle">Supports XLSX, XLS, and CSV files</p>
-            <v-btn
-              color="primary"
-              variant="outlined"
-              size="large"
-              @click="$refs.fileInput.click()"
-            >
+            <v-btn color="primary" variant="outlined" size="large" @click="$refs.fileInput.click()">
               <v-icon start>mdi-file-plus</v-icon>
               Choose File
             </v-btn>
@@ -46,21 +36,11 @@
               <p class="file-details">{{ formatFileSize(selectedFile.size) }} • {{ getFileType(selectedFile.type) }}</p>
             </div>
             <div class="file-actions">
-              <v-btn
-                color="success"
-                variant="elevated"
-                @click="processFile"
-                :loading="processing"
-              >
+              <v-btn color="success" variant="elevated" @click="processFile" :loading="processing">
                 <v-icon start>mdi-play</v-icon>
                 Process File
               </v-btn>
-              <v-btn
-                color="error"
-                variant="outlined"
-                @click="clearFile"
-                :disabled="processing"
-              >
+              <v-btn color="error" variant="outlined" @click="clearFile" :disabled="processing">
                 <v-icon start>mdi-delete</v-icon>
                 Remove
               </v-btn>
@@ -72,31 +52,17 @@
 
     <!-- Processing State -->
     <div v-if="processing" class="loading-container">
-      <v-progress-circular
-        indeterminate
-        color="primary"
-        size="64"
-      ></v-progress-circular>
+      <v-progress-circular indeterminate color="primary" size="64"></v-progress-circular>
       <p class="loading-text">Processing file...</p>
     </div>
 
     <!-- Error State -->
     <div v-if="error" class="error-container">
-      <v-alert
-        type="error"
-        variant="tonal"
-        prominent
-        border="start"
-      >
+      <v-alert type="error" variant="tonal" prominent border="start">
         <v-alert-title>Error Processing File</v-alert-title>
         {{ error }}
       </v-alert>
-      <v-btn
-        @click="error = null"
-        color="primary"
-        variant="outlined"
-        class="retry-btn"
-      >
+      <v-btn @click="error = null" color="primary" variant="outlined" class="retry-btn">
         <v-icon start>mdi-close</v-icon>
         Dismiss
       </v-btn>
@@ -117,12 +83,7 @@
                 <v-icon color="blue" class="info-icon">mdi-file-document</v-icon>
                 <strong>File Name:</strong>
               </div>
-              <v-chip
-                color="blue"
-                variant="outlined"
-                size="small"
-                class="file-chip"
-              >
+              <v-chip color="blue" variant="outlined" size="small" class="file-chip">
                 {{ data.fileName }}
               </v-chip>
             </v-col>
@@ -198,34 +159,22 @@
             <span>Data Preview</span>
           </div>
           <div class="data-controls">
-            <v-select
-              v-if="data.sheets && data.sheets.length > 1"
-              v-model="selectedSheet"
-              :items="data.sheets"
-              item-title="name"
-              item-value="name"
-              label="Select Sheet"
-              density="compact"
-              variant="outlined"
-              style="min-width: 200px; margin-right: 16px;"
-            ></v-select>
+            <v-select v-if="data.sheets && data.sheets.length > 1" v-model="selectedSheet" :items="data.sheets"
+              item-title="name" item-value="name" label="Select Sheet" density="compact" variant="outlined"
+              style="min-width: 200px; margin-right: 16px;"></v-select>
             <v-chip color="primary" variant="outlined">
               {{ getCurrentSheetData().rows.length }} rows
             </v-chip>
           </div>
         </v-card-title>
-        
+
         <v-card-text>
           <div class="table-container">
             <v-table density="compact" class="data-table">
               <thead>
                 <tr>
                   <th class="row-number">#</th>
-                  <th 
-                    v-for="(column, index) in getCurrentSheetData().columns" 
-                    :key="index"
-                    class="data-header-cell"
-                  >
+                  <th v-for="(column, index) in getCurrentSheetData().columns" :key="index" class="data-header-cell">
                     <div class="column-info">
                       <span class="column-name">{{ column }}</span>
                       <!-- <v-chip size="x-small" color="grey" variant="outlined">
@@ -236,17 +185,10 @@
                 </tr>
               </thead>
               <tbody>
-                <tr 
-                  v-for="(row, rowIndex) in getCurrentSheetData().rows.slice(0, displayLimit)" 
-                  :key="rowIndex"
-                  class="data-row"
-                >
+                <tr v-for="(row, rowIndex) in getCurrentSheetData().rows.slice(0, displayLimit)" :key="rowIndex"
+                  class="data-row">
                   <td class="row-number">{{ rowIndex + 1 }}</td>
-                  <td 
-                    v-for="(cell, cellIndex) in row" 
-                    :key="cellIndex"
-                    class="data-cell"
-                  >
+                  <td v-for="(cell, cellIndex) in row" :key="cellIndex" class="data-cell">
                     <span class="cell-content">{{ formatCellValue(cell) }}</span>
                   </td>
                 </tr>
@@ -255,12 +197,7 @@
           </div>
 
           <div v-if="getCurrentSheetData().rows.length > displayLimit" class="show-more-container">
-            <v-btn
-              @click="displayLimit += 20"
-              color="primary"
-              variant="outlined"
-              block
-            >
+            <v-btn @click="displayLimit += 20" color="primary" variant="outlined" block>
               Show More Rows ({{ getCurrentSheetData().rows.length - displayLimit }} remaining)
               <v-icon end>mdi-chevron-down</v-icon>
             </v-btn>
@@ -277,59 +214,31 @@
         <v-card-text>
           <v-row>
             <v-col cols="12" md="6">
-              <v-text-field
-                v-model="saveOptions.name"
-                label="Dataset Name"
-                variant="outlined"
-                density="compact"
-                placeholder="e.g., Optimizely Target List"
-                :rules="[v => !!v || 'Name is required']"
-              ></v-text-field>
+              <v-text-field v-model="saveOptions.name" label="Dataset Name" variant="outlined" density="compact"
+                placeholder="e.g., Optimizely Target List" :rules="[v => !!v || 'Name is required']"></v-text-field>
             </v-col>
             <v-col cols="12" md="6">
-              <v-text-field
-                v-model="saveOptions.version"
-                label="Version"
-                variant="outlined"
-                density="compact"
-                placeholder="e.g., v1.0, 2024-Q1"
-              ></v-text-field>
+              <v-text-field v-model="saveOptions.version" label="Version" variant="outlined" density="compact"
+                placeholder="e.g., v1.0, 2024-Q1"></v-text-field>
             </v-col>
           </v-row>
           <v-row>
             <v-col cols="12">
-              <v-textarea
-                v-model="saveOptions.description"
-                label="Description (Optional)"
-                variant="outlined"
-                density="compact"
-                rows="2"
-                placeholder="Brief description of this dataset or changes made..."
-              ></v-textarea>
+              <v-textarea v-model="saveOptions.description" label="Description (Optional)" variant="outlined"
+                density="compact" rows="2"
+                placeholder="Brief description of this dataset or changes made..."></v-textarea>
             </v-col>
           </v-row>
           <v-row>
             <v-col cols="12" sm="6">
-              <v-btn
-                @click="saveToDatabase"
-                color="primary"
-                variant="elevated"
-                block
-                :loading="saving"
-                :disabled="!saveOptions.name || !data"
-              >
+              <v-btn @click="saveToDatabase" color="primary" variant="elevated" block :loading="saving"
+                :disabled="!saveOptions.name || !data">
                 <v-icon start>mdi-database-plus</v-icon>
                 Save to Database
               </v-btn>
             </v-col>
             <v-col cols="12" sm="6">
-              <v-btn
-                @click="loadDatasets"
-                color="info"
-                variant="outlined"
-                block
-                :loading="loadingDatasets"
-              >
+              <v-btn @click="loadDatasets" color="info" variant="outlined" block :loading="loadingDatasets">
                 <v-icon start>mdi-database-search</v-icon>
                 View Saved Datasets
               </v-btn>
@@ -349,38 +258,28 @@
         </v-card-title>
         <v-card-text>
           <v-row>
-            <v-col
-              v-for="dataset in datasets"
-              :key="dataset._id"
-              cols="12"
-              md="6"
-              lg="4"
-            >
+            <v-col v-for="dataset in datasets" :key="dataset._id" cols="12" md="6" lg="4">
               <v-card variant="outlined" hover class="dataset-card">
                 <v-card-title class="dataset-title">
                   <div class="dataset-header">
                     <span class="dataset-name">{{ dataset.name }}</span>
-                    <v-chip
-                      color="primary"
-                      size="small"
-                      variant="flat"
-                    >
+                    <v-chip color="primary" size="small" variant="flat">
                       {{ dataset.version }}
                     </v-chip>
                   </div>
                 </v-card-title>
-                
+
                 <v-card-text>
                   <div class="dataset-info">
                     <v-icon size="small" class="info-icon">mdi-file-document</v-icon>
                     <span class="info-text">{{ dataset.originalFileName }}</span>
                   </div>
-                  
+
                   <div class="dataset-info">
                     <v-icon size="small" class="info-icon">mdi-table-row</v-icon>
-                    <span class="info-text">{{ dataset.totalRows  }} Domains Provided</span>
+                    <span class="info-text">{{ dataset.totalRows }} Domains Provided</span>
                   </div>
-                  
+
                   <div class="dataset-info">
                     <v-icon size="small" class="info-icon">mdi-calendar</v-icon>
                     <span class="info-text">{{ formatDate(dataset.createdAt) }}</span>
@@ -392,24 +291,14 @@
                 </v-card-text>
 
                 <v-card-actions>
-                  <v-btn
-                    size="small"
-                    variant="text"
-                    color="primary"
-                    @click="loadDataset(dataset)"
-                  >
+                  <v-btn size="small" variant="text" color="primary" @click="loadDataset(dataset)">
                     Load Data
                     <v-icon end>mdi-download</v-icon>
                   </v-btn>
-                  
+
                   <v-menu>
                     <template v-slot:activator="{ props }">
-                      <v-btn
-                        size="small"
-                        variant="text"
-                        color="info"
-                        v-bind="props"
-                      >
+                      <v-btn size="small" variant="text" color="info" v-bind="props">
                         Actions
                         <v-icon end>mdi-chevron-down</v-icon>
                       </v-btn>
@@ -509,20 +398,10 @@
     </div>
 
     <!-- Notification Snackbar -->
-    <v-snackbar
-      v-model="showNotification"
-      :color="notificationColor"
-      :timeout="4000"
-      top
-      right
-    >
+    <v-snackbar v-model="showNotification" :color="notificationColor" :timeout="4000" top right>
       {{ notificationMessage }}
       <template v-slot:actions>
-        <v-btn
-          color="white"
-          variant="text"
-          @click="showNotification = false"
-        >
+        <v-btn color="white" variant="text" @click="showNotification = false">
           Close
         </v-btn>
       </template>
@@ -539,25 +418,21 @@
             <v-icon>mdi-close</v-icon>
           </v-btn>
         </v-card-title>
-        
+
         <v-card-text>
           <div v-if="loadingVersions" class="text-center pa-4">
             <v-progress-circular indeterminate color="primary"></v-progress-circular>
             <p class="mt-2">Loading versions...</p>
           </div>
-          
+
           <div v-else-if="datasetVersions.length === 0" class="text-center pa-4">
             <v-icon size="64" color="grey">mdi-history</v-icon>
             <p class="text-grey mt-2">No version history available</p>
           </div>
-          
+
           <v-timeline v-else side="end" align="start">
             <!-- Current Version -->
-            <v-timeline-item
-              dot-color="success"
-              size="small"
-              icon="mdi-star"
-            >
+            <v-timeline-item dot-color="success" size="small" icon="mdi-star">
               <div class="d-flex align-center">
                 <strong>{{ selectedDatasetForVersions?.version }} (Current)</strong>
                 <v-spacer></v-spacer>
@@ -567,12 +442,8 @@
                 {{ formatDate(selectedDatasetForVersions?.createdAt) }}
               </div>
               <div class="mt-2">
-                <v-btn
-                  size="small"
-                  variant="outlined"
-                  color="primary"
-                  @click="downloadDataset(selectedDatasetForVersions)"
-                >
+                <v-btn size="small" variant="outlined" color="primary"
+                  @click="downloadDataset(selectedDatasetForVersions)">
                   <v-icon start>mdi-download</v-icon>
                   Download
                 </v-btn>
@@ -580,13 +451,8 @@
             </v-timeline-item>
 
             <!-- Previous Versions -->
-            <v-timeline-item
-              v-for="(version, index) in datasetVersions"
-              :key="index"
-              dot-color="primary"
-              size="small"
-              icon="mdi-history"
-            >
+            <v-timeline-item v-for="(version, index) in datasetVersions" :key="index" dot-color="primary" size="small"
+              icon="mdi-history">
               <div class="d-flex align-center">
                 <strong>{{ version.versionNumber }}</strong>
                 <v-spacer></v-spacer>
@@ -601,12 +467,8 @@
                 {{ version.changes }}
               </div>
               <div class="mt-2">
-                <v-btn
-                  size="small"
-                  variant="outlined"
-                  color="primary"
-                  @click="downloadDataset(selectedDatasetForVersions, version.versionNumber)"
-                >
+                <v-btn size="small" variant="outlined" color="primary"
+                  @click="downloadDataset(selectedDatasetForVersions, version.versionNumber)">
                   <v-icon start>mdi-download</v-icon>
                   Download
                 </v-btn>
@@ -627,6 +489,7 @@ export default {
   data() {
     return {
       selectedFile: null,
+      selectedToolType: null,
       data: null,
       processing: false,
       error: null,
@@ -1012,6 +875,7 @@ export default {
         // Prepare the payload according to your backend schema
         const payload = {
           name: this.saveOptions.name,
+          toolType: this.selectedToolType,
           version: this.saveOptions.version || 'v1.0',
           description: this.saveOptions.description || '',
           originalFileName: this.data.fileName,
@@ -1648,5 +1512,13 @@ export default {
 .raw-data-textarea {
   font-family: 'Courier New', monospace;
   font-size: 12px;
+}
+.type-select {
+  padding: 0;
+}
+.type-select h5 {
+  margin-bottom: 32px;
+  font-size: 18px;
+  font-weight: 500;
 }
 </style>

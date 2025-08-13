@@ -49,7 +49,12 @@
           @click="viewDataset(dataset._id)"
         >
           <div class="dataset-header">
+            <v-row>
             <h3>{{ dataset.name }}</h3>
+              <v-chip color="blue" variant="outlined" size="small" class="file-chip">
+                {{ dataset.toolType }}
+              </v-chip>
+            </v-row>
             <div class="dataset-meta">
               <span class="dataset-filename">📄 {{ dataset.originalFileName }}</span>
               <span class="dataset-version">{{ dataset.version }}</span>
@@ -212,7 +217,7 @@ export default {
               this.stopAutoRefresh()
             }
           }, 1000) // Small delay to let fetchDatasets complete
-        }, 10000) // 10 seconds
+        }, 60000) // 10 seconds
       } else if (!hasActiveScrapingJobs && this.refreshInterval) {
         // Stop refreshing if no active jobs
         console.log('⏹️ No active jobs found, stopping auto-refresh')
@@ -357,6 +362,11 @@ export default {
   margin-bottom: 20px;
   border-bottom: 1px solid #f1f3f4;
   padding-bottom: 15px;
+}
+.dataset-header > .v-row {
+  margin-bottom: 10px;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .dataset-header h3 {

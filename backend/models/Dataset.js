@@ -9,6 +9,10 @@ const datasetSchema = new mongoose.Schema({
     trim: true,
     maxlength: [255, 'Dataset name cannot exceed 255 characters']
   },
+  toolType: {
+    type: String,
+    required: [true, 'Tool Type name is required'],
+  },
   version: {
     type: String,
     required: true,
