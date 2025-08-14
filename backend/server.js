@@ -16,6 +16,7 @@ const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const datasetRoutes = require('./routes/datasetRoutes');
 const optimizelyRoutes = require('./routes/optimizelyRoutes');
+const abTastyRoutes = require('./routes/abTastyRoutes');
 const changeDetectionRoutes = require('./routes/changeDetectionRoutes');
 const { errorHandler, requestLogger } = require('./middleware/errorHandler');
 const CronJobService = require('./services/cronJobService');
@@ -76,6 +77,9 @@ app.use('/api/datasets', datasetRoutes);
 
 // Optimizely Routes[batch scrape, etc.]
 app.use('/api/optimizely', optimizelyRoutes);
+
+// AbTasty Routes[batch scrape, etc.]
+app.use('/api/abtasty', abTastyRoutes);
 
 // Change Detection Routes
 app.use('/api/change-detection', changeDetectionRoutes);
