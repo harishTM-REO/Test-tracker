@@ -1,4 +1,4 @@
-// services/optimizelyScraperService.js - Enhanced with your working code
+
 
 const chromium = require('@sparticuz/chromium');
 
@@ -9,11 +9,11 @@ try {
 } catch (e) {
   puppeteer = require('puppeteer-core');
 }
-const ExperimentService = require('./experimentService'); // Comment out if not available
-const OptimizelyResult = require('../models/OptimizelyResult');
+// const ExperimentService = require('./experimentService'); // Comment out if not available
+const AbTastyResult = require('../models/AbTastyResult');
 
 const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
-class OptimizelyScraperService {
+class AbTastyScraperService {
   /**
    * function to connect browserless.io
    */
@@ -38,16 +38,16 @@ class OptimizelyScraperService {
   };
 
   /**
-   * Main function to scrape Optimizely experiments from a URL
+   * Main function to scrape AbTasty experiments from a URL
    * @param {string} url - The website URL to scrape
    * @param {Object} res - Express response object (optional)
    * @returns {Object} Scraping results
    */
-  async scrapeOptimizelyExperiments(url, res = null) {
+  async scrapeAbTastyExperiments(url, res = null) {
     const startTime = Date.now();
     let savedData = null;
     try {
-      console.log(`Starting Optimizely scrape for: ${url}`);
+      console.log(`Starting AbTasty scrape for: ${url}`);
 
       // Step 1: Get or create website record (optional if ExperimentService not available)
       let website = null;
@@ -81,7 +81,7 @@ class OptimizelyScraperService {
       return this.formatResponse(url, website, experimentData, savedData, startTime);
 
     } catch (error) {
-      console.error('Error in scrapeOptimizelyExperiments:', error);
+      console.error('Error in scrapeAbTastyExperiments:', error);
       throw error;
     }
   }
@@ -96,7 +96,7 @@ class OptimizelyScraperService {
       const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
       
       let browserOptions = {
-        headless: true,
+        headless: false,
         ignoreHTTPSErrors: true,
         args: [
           '--no-sandbox',
@@ -409,14 +409,14 @@ class OptimizelyScraperService {
   }
 
   /**
-   * Enhanced Optimizely data extraction using your working approach
+   * Enhanced AbTasty data extraction using your working approach
    * @param {Object} page - Puppeteer page instance
    * @returns {Object} Experiment data
    */
-  async extractOptimizelyData(page) {
+  async extractAbTastyData(page) {
     let navigationDetected = false; // Declare at function level
   try {
-    console.log("Extracting Optimizely data with enhanced detection...");
+    console.log("Extracting Abtasty data with enhanced detection...");
     
     // Wait for page to be ready (Puppeteer approach)
     // try {
@@ -435,7 +435,7 @@ class OptimizelyScraperService {
         // Main extraction with timeout protection
         page.evaluate(() => {
           return new Promise((resolve, reject) => {
-            console.log('Starting Optimizely extraction...');
+            console.log('Starting Abtasty extraction...');
             
             // Track if we've already resolved to prevent multiple resolutions
             let hasResolved = false;
@@ -451,45 +451,6 @@ class OptimizelyScraperService {
               if (!hasResolved) {
                 hasResolved = true;
                 reject(error);
-              }
-            }
-
-            function getOptiExperimentDetails() {
-              if (!window.optimizely || typeof window.optimizely.get !== 'function') {
-                return null;
-              }
-
-              try {
-                const data = window.optimizely.get('data');
-                if (!data || typeof data?.experiments !== 'object') {
-                  return null;
-                }
-
-                console.log('Optimizely data found:', Object.keys(data?.experiments).length + ' experiments');
-
-                const experiments = data?.experiments;
-                const experimentArray = [];
-
-                Object.entries(experiments).forEach(([id, exp]) => {
-                  experimentArray.push({
-                    id: id,
-                    name: exp.name || "Unnamed Experiment",
-                    status: exp.status || 'unknown',
-                    variations: exp.variations || [],
-                    audience_ids: exp.audience_ids || [],
-                    metrics: exp.metrics || [],
-                    isActive: exp.status === 'Running' || false,
-                  });
-                });
-
-                return {
-                  experiments: experimentArray,
-                  hasOptimizely: true,
-                  optimizelyData: data
-                };
-              } catch (e) {
-                console.error('Error fetching Optimizely experiment details:', e);
-                return null;
               }
             }
 
@@ -522,64 +483,44 @@ class OptimizelyScraperService {
                   abTastyData: data
                 };
               } catch (e) {
-                console.error('Error fetching Optimizely experiment details:', e);
+                console.error('Error fetching AbTasty experiment details:', e);
                 return null;
               }
             }
 
             let attempts = 0;
             const maxAttempts = 6; // Reduced for faster failure
-            const optimizelyFoundMaxAttempts = 2; // Even fewer attempts if Optimizely is found
+            const optimizelyFoundMaxAttempts = 2; // Even fewer attempts if AbTasty is found
             const checkInterval = 200; // Fixed interval for predictability
 
-            function checkOptimizely() {
+            function checkAbTasty() {
               if (hasResolved) return; // Prevent execution after resolution
               
               attempts++;
-              console.log(`Optimizely check attempt ${attempts}/${maxAttempts}`);
+              console.log(`AbTasty check attempt ${attempts}/${maxAttempts}`);
 
               try {
-                const optimizelyResult = getOptiExperimentDetails();
                 const abTastyResult = getABtastyExperimentDetails();
                 // Success case - found experiments
-                if (optimizelyResult && optimizelyResult?.experiments && optimizelyResult?.experiments.length > 0 || (abTastyResult && abTastyResult?.experiments && abTastyResult?.experiments.length)) {
-                  console.log('Optimizely experiments found:', optimizelyResult?.experiments.length);
+                if (abTastyResult && abTastyResult?.experiments && abTastyResult?.experiments.length) {
+                  console.log('Abtasty experiments found:', abTastyResult?.experiments.length);
                   safeResolve({
-                    optimizely: {
-                      hasOptimizely: !!window.optimizely,
-                      experiments: optimizelyResult?.experiments|| null,
-                      experimentCount: optimizelyResult?.experiments.length|| null,
-                      activeCount: optimizelyResult?.experiments ?optimizelyResult.experiments.filter(e => e.isActive).length: 0,
-                      error: null,
-                      optimizelyData: optimizelyResult?.optimizelyData || null
-                    },
-                    abTasty: {
                       hasAbtasty: !!window.ABTasty|| null,
                       experiments: abTastyResult?.experiments|| null,
                       experimentCount: abTastyResult?.experiments.length|| null,
                       error: null,
                       optimizelyData: abTastyResult?.abTastyData|| null
-                    },
-                  });
+                    });
                   return;
                 }
                 
-                // Check if Optimizely object exists but no experiments
-                if ((window.optimizely && typeof window.optimizely.get === 'function')|| window.ABTasty) {
-                  console.log('Optimizely object found, checking for experiment data...');
+                // Check if AbTasty object exists but no experiments
+                if (window.ABTasty) {
+                  console.log('AbTasty object found, checking for experiment data...');
                   
                   if (attempts >= optimizelyFoundMaxAttempts) {
-                    console.log(`Optimizely found but no experiments after ${optimizelyFoundMaxAttempts} attempts`);
+                    console.log(`AbTasty found but no experiments after ${optimizelyFoundMaxAttempts} attempts`);
                     safeResolve({
-                      optimizely: {
-                        hasOptimizely: !!window.optimizely,
-                        experiments: [],
-                        experimentCount: 0,
-                        activeCount: 0,
-                        error: "Optimizely found but no experiments detected",
-                        optimizelyData: null
-                      },
-                      abTasty: {
                         hasAbtasty: !!window.ABTasty,
                         experiments: [],
                         experimentCount: 0,
@@ -587,26 +528,15 @@ class OptimizelyScraperService {
                         error: "AbTasty found but no experiments detected",
                         optimizelyData: null
                       }
-                    }
                     );
                     return;
                   }
                 }
 
-                // Max attempts reached - no Optimizely found
+                // Max attempts reached - no AbTasty found
                 if (attempts >= maxAttempts) {
-                  console.log('Max attempts reached, no Optimizely found');
-                  safeResolve(
-                    {
-                      optimizely: {
-                        hasOptimizely: false,
-                        experiments: [],
-                        experimentCount: 0,
-                        activeCount: 0,
-                        error: "Optimizely not found on page",
-                        optimizelyData: null
-                      },
-                      abTasty: {
+                  console.log('Max attempts reached, no AbTasty found');
+                  safeResolve({
                         hasAbtasty: false,
                         experiments: [],
                         experimentCount: 0,
@@ -614,26 +544,25 @@ class OptimizelyScraperService {
                         error: "AbTasty not found on page",
                         optimizelyData: null
                       }
-                    }
                   );
                   return;
                 }
 
                 // Continue checking
-                setTimeout(checkOptimizely, checkInterval);
+                setTimeout(checkAbTasty, checkInterval);
                 
               } catch (error) {
-                console.error('Error during Optimizely check:', error);
+                console.error('Error during AbTasty check:', error);
                 safeReject(error);
               }
             }
             
             // Start checking
-            checkOptimizely();
+            checkAbTasty();
 
             // Overall timeout to prevent hanging
             setTimeout(() => {
-              safeReject(new Error('Optimizely extraction timeout after 4 seconds'));
+              safeReject(new Error('AbTasty extraction timeout after 4 seconds'));
             }, 4000);
           });
         }),
@@ -649,7 +578,7 @@ class OptimizelyScraperService {
       // No navigation listener to clean up
       const currentUrl = page.url();
       console.log('extracted data is'+ JSON.stringify(experimentData));
-      console.log(`Optimizely data extracted from ${currentUrl}: ${experimentData.optimizely.experiments?.length || 0} experiments found`);
+      console.log(`AbTasty data extracted from ${currentUrl}: ${experimentData.experiments?.length || 0} experiments found`);
       return experimentData;
 
     } catch (evaluationError) {
@@ -658,7 +587,7 @@ class OptimizelyScraperService {
     }
 
   } catch (error) {
-    console.error('Error extracting Optimizely data:', error);
+    console.error('Error extracting AbTasty data:', error);
     
     // Handle navigation-related errors
     if (error.message.includes('Execution context was destroyed') || 
@@ -676,7 +605,7 @@ class OptimizelyScraperService {
         await page.evaluate(() => document.readyState);
         
         // Attempt simple synchronous extraction
-        return await this.extractOptimizelySync(page);
+        return await this.extractAbTastySync(page);
         
       } catch (recoveryError) {
         console.error('Recovery attempt failed:', recoveryError);
@@ -701,9 +630,9 @@ class OptimizelyScraperService {
 }
 
 // Synchronous fallback extraction for post-navigation scenarios
-async extractOptimizelySync(page) {
+async extractAbTastySync(page) {
   try {
-    console.log('Attempting synchronous Optimizely extraction...');
+    console.log('Attempting synchronous AbTasty extraction...');
     
     const result = await page.evaluate(() => {
       // Immediate synchronous check - no waiting
@@ -713,7 +642,7 @@ async extractOptimizelySync(page) {
           experiments: [],
           experimentCount: 0,
           activeCount: 0,
-          error: "Optimizely not found"
+          error: "AbTasty not found"
         };
       }
 
@@ -725,7 +654,7 @@ async extractOptimizelySync(page) {
             experiments: [],
             experimentCount: 0,
             activeCount: 0,
-            error: "Optimizely found but no experiments"
+            error: "AbTasty found but no experiments"
           };
         }
 
@@ -752,7 +681,7 @@ async extractOptimizelySync(page) {
           experiments: [],
           experimentCount: 0,
           activeCount: 0,
-          error: `Error reading Optimizely data: ${e.message}`
+          error: `Error reading AbTasty data: ${e.message}`
         };
       }
     });
@@ -770,60 +699,6 @@ async extractOptimizelySync(page) {
       error: `Sync extraction failed: ${error.message}`
     };
   }
-}
-
-// Alternative: Extract on specific page events
-async extractOptimizelyOnPageReady(page) {
-  return new Promise((resolve) => {
-    let resolved = false;
-    let timeout;
-    
-    function safeResolve(result) {
-      if (!resolved) {
-        resolved = true;
-        if (timeout) clearTimeout(timeout);
-        resolve(result);
-      }
-    }
-    
-    // Try extraction when DOM is ready
-    page.evaluateOnNewDocument(() => {
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-          console.log('DOM ready, checking for Optimizely...');
-          window.__checkOptimizely = true;
-        });
-      } else {
-        window.__checkOptimizely = true;
-      }
-    });
-    
-    // Check periodically if flag is set
-    const checkInterval = setInterval(async () => {
-      try {
-        const shouldCheck = await page.evaluate(() => window.__checkOptimizely);
-        if (shouldCheck && !resolved) {
-          clearInterval(checkInterval);
-          const result = await extractOptimizelySync(page);
-          safeResolve(result);
-        }
-      } catch (error) {
-        // Page might not be ready, continue checking
-      }
-    }, 300);
-    
-    // Fallback timeout
-    timeout = setTimeout(() => {
-      clearInterval(checkInterval);
-      safeResolve({
-        hasOptimizely: false,
-        experiments: [],
-        experimentCount: 0,
-        activeCount: 0,
-        error: "Timeout waiting for page readiness"
-      });
-    }, 8000);
-  });
 }
 
   /**
@@ -852,8 +727,8 @@ async extractOptimizelyOnPageReady(page) {
       const cookieType = await this.handleCookieConsent(page);
       await new Promise(resolve => setTimeout(resolve, 2000));
       await page.reload({ waitUntil: ['domcontentloaded'] });
-      // Extract Optimizely data with intelligent waiting
-      const experimentData = await this.extractOptimizelyData(page);
+      // Extract AbTasty data with intelligent waiting
+      const experimentData = await this.extractAbTastyData(page);
       
       // Add cookie type to response
       experimentData.cookieType = cookieType;
@@ -880,55 +755,6 @@ async extractOptimizelyOnPageReady(page) {
     }
   }
 
-  /**
-   * Save experiment results to database (optional)
-   * @param {string} url - Website URL
-   * @param {Object} website - Website record
-   * @param {Object} experimentData - Experiment data
-   * @param {number} startTime - Start timestamp
-   * @returns {Object} Saved data or null
-   */
-  async saveExperimentResults(url, website, experimentData, startTime) {
-    const duration = Date.now() - startTime;
-    let savedData = null;
-
-    try {
-      if (experimentData.hasOptimizely && experimentData?.experiments && experimentData?.experiments.length > 0) {
-        // Uncomment if ExperimentService is available
-        // savedData = await ExperimentService.saveExperiments(url, experimentData.experiments);
-        
-        console.log(`✅ Would save ${experimentData?.experiments.length} experiments for ${url}`);
-
-        try {
-        savedData = await ExperimentService.saveExperiments(
-          url,
-          experimentData?.experiments
-        );
-
-        console.log(
-          `✅ Successfully saved ${experimentData.experiments?.length} experiments for ${url}`
-        );
-      } catch (saveError) {
-        console.error("Error saving experiments:", saveError);
-
-        // Log the error
-        await ExperimentService.logMonitoring(
-          url,
-          website._id,
-          "error",
-          duration,
-          experimentData.experiments ? experimentData.experiments.length : 0,
-          saveError.message
-        );
-      }
-      }
-
-      return savedData;
-    } catch (saveError) {
-      console.error("Error saving experiments:", saveError);
-      return null;
-    }
-  }
 
   /**
    * Format the final response
@@ -949,20 +775,12 @@ async extractOptimizelyOnPageReady(page) {
         name: website.name,
         domain: website.domain,
       },
-      optimizely: {
-        detected: experimentData.optimizely?.hasOptimizely,
-        experiments: experimentData.optimizely?.experiments,
-        experimentCount: experimentData.optimizely?.experimentCount || 0,
-        activeCount: experimentData.optimizely?.activeCount || 0,
-        error: experimentData.optimizely?.error,
-        cookieType: experimentData.optimizely?.cookieType || 'unknown', // Added cookie type
-      },
-      abtasty: {
-        detected: experimentData.abTasty?.hasAbtasty,
-        experiments: experimentData.abTasty?.experiments,
-        experimentCount: experimentData.abTasty?.experimentCount || 0,
-        error: experimentData.abTasty?.error,
-        cookieType: experimentData.abTasty?.cookieType || 'unknown', // Added cookie type
+      abTasty: {
+        detected: experimentData?.hasAbtasty,
+        experiments: experimentData?.experiments,
+        experimentCount: experimentData?.experimentCount || 0,
+        error: experimentData?.error,
+        cookieType: experimentData?.cookieType || 'unknown', // Added cookie type
       },
       saved: !!savedData,
       savedId: savedData?._id,
@@ -1182,7 +1000,7 @@ async extractOptimizelyOnPageReady(page) {
           await page.reload({ waitUntil: 'domcontentloaded' });
           await new Promise(resolve => setTimeout(resolve, 1000));
           
-          const experimentData = await this.extractOptimizelyData(page);
+          const experimentData = await this.extractAbTastyData(page);
           
           experimentData.cookieType = cookieType;
           
@@ -1223,7 +1041,7 @@ async extractOptimizelyOnPageReady(page) {
    * @param {string} datasetName - Dataset name
    * @param {Array} results - Scraping results
    * @param {Date} startTime - Scraping start time
-   * @returns {Object} Saved OptimizelyResult document
+   * @returns {Object} Saved AbTastyResult document
    */
   async saveBatchResults(datasetId, datasetName, results, startTime) {
     try {
@@ -1232,10 +1050,10 @@ async extractOptimizelyOnPageReady(page) {
       
       // Process results
       const websiteResults = [];
-      const websitesWithoutOptimizely = [];
+      const websitesWithoutAbTasty = [];
       const failedWebsites = [];
       let successfulScrapes = 0;
-      let optimizelyDetectedCount = 0;
+      let abTastyDetectedCount = 0;
       let totalExperiments = 0;
 
       results.forEach(result => {
@@ -1243,34 +1061,33 @@ async extractOptimizelyOnPageReady(page) {
           successfulScrapes++;
           const domain = this.extractDomain(result.url);
           
-          if (result.data.optimizely?.detected) {
-            // Website has Optimizely - add to websiteResults
+          if (result.data.abTasty?.detected) {
+            // Website has AbTasty - add to websiteResults
             const websiteResult = {
               url: result.url,
               domain: domain,
               success: true,
-              optimizelyDetected: true,
-              experiments: result.data.optimizely?.experiments || [],
-              experimentCount: result.data.optimizely.experimentCount || 0,
-              activeCount: result.data.optimizely.activeCount || 0,
-              cookieType: result.data.optimizely.cookieType || 'unknown',
-              error: result.data.optimizely.error,
+              abTastyDetected: true,
+              experiments: result.data.abTasty?.experiments || [],
+              experimentCount: result.data.abTasty?.experimentCount || 0,
+              cookieType: result.data.abTasty?.cookieType || 'unknown',
+              error: result.data.abTasty?.error,
               scrapedAt: new Date()
             };
 
-            optimizelyDetectedCount++;
+            abTastyDetectedCount++;
             totalExperiments += websiteResult.experimentCount;
             websiteResults.push(websiteResult);
           } else {
-            // Website does not have Optimizely - add to separate field
-            const websiteWithoutOptimizely = {
+            // Website does not have AbTasty - add to separate field
+            const websiteWithoutAbTasty = {
               url: result.url,
               domain: domain,
-              cookieType: result.data.optimizely?.cookieType || 'unknown',
+              cookieType: result.data.abTasty?.cookieType || 'unknown',
               scrapedAt: new Date()
             };
 
-            websitesWithoutOptimizely.push(websiteWithoutOptimizely);
+            websitesWithoutAbTasty.push(websiteWithoutAbTasty);
           }
         } else {
           const domain = this.extractDomain(result.url);
@@ -1285,10 +1102,10 @@ async extractOptimizelyOnPageReady(page) {
 
       const failedScrapes = results.length - successfulScrapes;
       const successRate = `${((successfulScrapes / results.length) * 100).toFixed(1)}%`;
-      const optimizelyRate = `${((optimizelyDetectedCount / results.length) * 100).toFixed(1)}%`;
+      const abTastyRate = `${((abTastyDetectedCount / results.length) * 100).toFixed(1)}%`;
 
-      // Create or update OptimizelyResult document
-      const optimizelyResult = await OptimizelyResult.findOneAndUpdate(
+      // Create or update AbTastyResult document
+      const abTastyResult = await AbTastyResult.findOneAndUpdate(
         { datasetId: datasetId },
         {
           datasetId: datasetId,
@@ -1296,16 +1113,16 @@ async extractOptimizelyOnPageReady(page) {
           totalUrls: results.length,
           successfulScrapes: successfulScrapes,
           failedScrapes: failedScrapes,
-          optimizelyDetectedCount: optimizelyDetectedCount,
+          abTastyDetectedCount: abTastyDetectedCount,
           totalExperiments: totalExperiments,
           websiteResults: websiteResults,
-          websitesWithoutOptimizely: websitesWithoutOptimizely,
+          websitesWithoutAbTasty: websitesWithoutAbTasty,
           failedWebsites: failedWebsites,
           scrapingStats: {
             startedAt: startTime,
             completedAt: endTime,
             duration: duration,
-            optimizelyRate: optimizelyRate,
+            abTastyRate: abTastyRate,
             successRate: successRate
           }
         },
@@ -1317,12 +1134,12 @@ async extractOptimizelyOnPageReady(page) {
       );
 
       // Create initial version 1 in change detection system
-      await this.createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutOptimizely, endTime);
+      await this.createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutAbTasty, endTime);
 
       console.log(`✅ Saved batch results to database for dataset ${datasetId}`);
-      console.log(`📊 Summary: ${successfulScrapes}/${results.length} successful, ${optimizelyDetectedCount} with Optimizely, ${websitesWithoutOptimizely.length} without Optimizely, ${totalExperiments} total experiments`);
+      console.log(`📊 Summary: ${successfulScrapes}/${results.length} successful, ${abTastyDetectedCount} with AbTasty, ${websitesWithoutAbTasty.length} without AbTasty, ${totalExperiments} total experiments`);
       
-      return optimizelyResult;
+      return abTastyResult;
     } catch (error) {
       console.error('Error saving batch results:', error);
       throw error;
@@ -1332,11 +1149,11 @@ async extractOptimizelyOnPageReady(page) {
   /**
    * Get scraping results for a dataset
    * @param {string} datasetId - Dataset ID
-   * @returns {Object} OptimizelyResult document
+   * @returns {Object} AbTastyResult document
    */
   async getDatasetResults(datasetId) {
     try {
-      const results = await OptimizelyResult.findOne({ datasetId: datasetId });
+      const results = await AbTastyResult.findOne({ datasetId: datasetId });
       return results;
     } catch (error) {
       console.error('Error getting dataset results:', error);
@@ -1345,35 +1162,35 @@ async extractOptimizelyOnPageReady(page) {
   }
 
   /**
-   * Get all websites with Optimizely experiments for a dataset
+   * Get all websites with AbTasty experiments for a dataset
    * @param {string} datasetId - Dataset ID
    * @returns {Array} Websites with experiments
    */
-  async getWebsitesWithOptimizely(datasetId) {
+  async getWebsitesWithAbTasty(datasetId) {
     try {
-      const results = await OptimizelyResult.findOne({ datasetId: datasetId });
+      const results = await AbTastyResult.findOne({ datasetId: datasetId });
       if (!results) return [];
       
-      return results.websiteResults.filter(site => site.optimizelyDetected && site.experiments.length > 0);
+      return results.websiteResults.filter(site => site.abTastyDetected && site.experiments.length > 0);
     } catch (error) {
-      console.error('Error getting websites with Optimizely:', error);
+      console.error('Error getting websites with AbTasty:', error);
       throw error;
     }
   }
 
   /**
-   * Get all websites without Optimizely for a dataset
+   * Get all websites without AbTasty for a dataset
    * @param {string} datasetId - Dataset ID
-   * @returns {Array} Websites without Optimizely
+   * @returns {Array} Websites without AbTasty
    */
-  async getWebsitesWithoutOptimizely(datasetId) {
+  async getWebsitesWithoutAbTasty(datasetId) {
     try {
-      const results = await OptimizelyResult.findOne({ datasetId: datasetId });
+      const results = await AbTastyResult.findOne({ datasetId: datasetId });
       if (!results) return [];
       
-      return results.websitesWithoutOptimizely;
+      return results.websitesWithoutAbTasty;
     } catch (error) {
-      console.error('Error getting websites without Optimizely:', error);
+      console.error('Error getting websites without AbTasty:', error);
       throw error;
     }
   }
@@ -1385,7 +1202,7 @@ async extractOptimizelyOnPageReady(page) {
    */
   async getFailedWebsites(datasetId) {
     try {
-      const results = await OptimizelyResult.findOne({ datasetId: datasetId });
+      const results = await AbTastyResult.findOne({ datasetId: datasetId });
       if (!results) return [];
       
       return results.failedWebsites;
@@ -1399,11 +1216,11 @@ async extractOptimizelyOnPageReady(page) {
    * Create initial version 1 in change detection system after first scraping
    * @param {string} datasetId - Dataset ID
    * @param {string} datasetName - Dataset name  
-   * @param {Array} websiteResults - Websites with Optimizely
-   * @param {Array} websitesWithoutOptimizely - Websites without Optimizely
+   * @param {Array} websiteResults - Websites with AbTasty
+   * @param {Array} websitesWithoutAbTasty - Websites without AbTasty
    * @param {Date} scrapingCompletedAt - When scraping completed
    */
-  async createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutOptimizely, scrapingCompletedAt) {
+  async createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutAbTasty, scrapingCompletedAt) {
     try {
       const ChangeDetectionVersion = require('../models/ChangeDetectionVersion');
       
@@ -1427,7 +1244,7 @@ async extractOptimizelyOnPageReady(page) {
       let activeExperiments = 0;
       const domainMap = new Map();
       
-      // Process websites with Optimizely
+      // Process websites with AbTasty
       websiteResults.forEach(site => {
         if (site.experiments && site.experiments.length > 0) {
           site.experiments.forEach(experiment => {
@@ -1435,9 +1252,6 @@ async extractOptimizelyOnPageReady(page) {
               id: experiment.id,
               name: experiment.name || 'Unnamed Experiment',
               status: experiment.status || 'unknown',
-              variations: experiment.variations || [],
-              audience_ids: experiment.audience_ids || [],
-              metrics: experiment.metrics || [],
               isActive: experiment.status === 'Running' || experiment.status === 'running',
               domain: site.domain,
               url: site.url
@@ -1519,10 +1333,10 @@ async extractOptimizelyOnPageReady(page) {
         },
         
         processingStats: {
-          totalUrlsProcessed: websiteResults.length + websitesWithoutOptimizely.length,
-          successfulScans: websiteResults.length + websitesWithoutOptimizely.length,
+          totalUrlsProcessed: websiteResults.length + websitesWithoutAbTasty.length,
+          successfulScans: websiteResults.length + websitesWithoutAbTasty.length,
           failedScans: 0,
-          domainsWithOptimizely: domainMap.size,
+          domainsWithAbTasty: domainMap.size,
           processingErrors: []
         }
       });
@@ -1543,4 +1357,4 @@ async extractOptimizelyOnPageReady(page) {
   }
 }
 
-module.exports = new OptimizelyScraperService();
+module.exports = new AbTastyScraperService();

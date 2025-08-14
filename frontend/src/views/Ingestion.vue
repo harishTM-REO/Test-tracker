@@ -1,12 +1,12 @@
 <template>
   <div>
     <h4 class="heading">File Data Dashboard</h4>
-    <v-col class="type-select" v-if="!selectedToolType">      
+    <v-col class="type-select">      
       <h5 class="sub-heading">Please select a testing tool</h5>
       <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely']"  variant="solo"></v-select>
     </v-col>
     <!-- File Upload Section -->
-    <v-card class="upload-card" elevation="2" v-else>
+    <v-card class="upload-card" elevation="2" v-if="selectedToolType">
       <v-card-title class="card-title">
         <v-icon color="primary" class="title-icon">mdi-file-upload</v-icon>
         <span>Upload Data File</span>

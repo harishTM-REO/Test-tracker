@@ -138,8 +138,9 @@ class BackgroundScrapingService {
   /**
    * Batch scrape with progress updates
    */
-  static async batchScrapeWithProgress(urls, options = {}, progressCallback) {
+  static async batchScrapeWithProgress(urls, toolType, options = {}, progressCallback) {
     const OptimizelyScraperService = require('./optimizelyScraperService');
+    const AbTastyScraperService = require('./abTastyScraperService');
     const jobQueue = require('./jobQueue');
     
     // Get adaptive options based on current system load
@@ -163,7 +164,12 @@ class BackgroundScrapingService {
       try {
         // Process batch concurrently
         const batchResults = await Promise.allSettled(
-          batch.map(url => OptimizelyScraperService.scrapeOptimizelyExperiments(url))
+          batch.map(url => {
+            if(toolType ==='Optimizely')
+            return OptimizelyScraperService.scrapeOptimizelyExperiments(url);
+            if(toolType ==='AbTasty')
+            return AbTastyScraperService.scrapeAbTastyExperiments(url);
+          })
         );
         
         // Process results
@@ -280,9 +286,10 @@ class BackgroundScrapingService {
       
       // Import the OptimizelyScraperService
       const OptimizelyScraperService = require('./optimizelyScraperService');
+      const AbTastyyScraperService = require('./abTastyScraperService');
       
       // Perform batch scraping with progress updates
-      const results = await this.batchScrapeWithProgress(urls, {
+      const results = await this.batchScrapeWithProgress(urls,dataset.toolType, {
         concurrent: 2,
         delay: 1000
       }, (progress, partialResult) => {
@@ -290,22 +297,37 @@ class BackgroundScrapingService {
       });
       
       // Save results to database
-      const savedResults = await OptimizelyScraperService.saveBatchResults(
+      let savedResults=null;
+      if(dataset.toolType ==='Optimizely'){
+      savedResults = await OptimizelyScraperService.saveBatchResults(
         datasetId, 
         dataset.name, 
         results, 
         startTime
       );
+      }
+      if(dataset.toolType ==='AbTasty'){
+      savedResults = await AbTastyyScraperService.saveBatchResults(
+        datasetId, 
+        dataset.name, 
+        results, 
+        startTime
+      );
+      }
       
       // Calculate final statistics
       const successful = results.filter(r => r.success);
+      console.log('Results are ::::::::::');
+      console.log(JSON.stringify(results));
       const withOptimizely = successful.filter(r => r.data?.optimizely?.detected);
+      const withAbTasty = successful.filter(r => r.data?.abTasty?.detected);
       
       const stats = {
         totalUrls: urls.length,
         successfulScans: successful.length,
         failedScans: results.length - successful.length,
         optimizelyDetected: withOptimizely.length,
+        abTastyDetected: withAbTasty.length,
         totalExperiments: savedResults.totalExperiments
       };
 
