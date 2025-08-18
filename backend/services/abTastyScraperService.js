@@ -116,7 +116,7 @@ class AbTastyScraperService {
       // Use chromium for production/serverless, regular puppeteer for local
       if (!isLocal) {
         browserOptions.executablePath = await chromium.executablePath();
-        browserOptions.headless = chromium.headless;
+        // browserOptions.headless = chromium.headless;
       }
 
       const browser = await puppeteer.launch(browserOptions);
