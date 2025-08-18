@@ -99,17 +99,24 @@ class OptimizelyScraperService {
         headless: true,
         ignoreHTTPSErrors: true,
         args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-gpu',
-          '--disable-dev-shm-usage',
-          '--window-size=800,600',
-          "--disable-accelerated-2d-canvas",
-          "--no-first-run",
-          "--no-zygote",
-          "--disable-background-timer-throttling",
-          "--disable-backgrounding-occluded-windows",
-          "--disable-renderer-backgrounding"
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--window-size=1366,768', // Larger viewport for better cookie detection
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        
+        // CRITICAL: These flags help with cookie consent detection in headless
+        '--disable-blink-features=AutomationControlled', // Hide automation detection
+        '--disable-web-security',
+        '--allow-running-insecure-content',
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', // Real user agent
+      
         ],
       };
 
@@ -257,7 +264,7 @@ class OptimizelyScraperService {
           ];
 
           let attempts = 0;
-          const maxAttempts = 200;
+          const maxAttempts = 50;
 
           let interval = setInterval(() => {
             attempts++;
@@ -461,13 +468,13 @@ class OptimizelyScraperService {
 
               try {
                 const data = window.optimizely.get('data');
-                if (!data || typeof data?.experiments !== 'object') {
+                if (!data || typeof data.experiments !== 'object') {
                   return null;
                 }
 
-                console.log('Optimizely data found:', Object.keys(data?.experiments).length + ' experiments');
+                console.log('Optimizely data found:', Object.keys(data.experiments).length + ' experiments');
 
-                const experiments = data?.experiments;
+                const experiments = data.experiments;
                 const experimentArray = [];
 
                 Object.entries(experiments).forEach(([id, exp]) => {
@@ -493,40 +500,6 @@ class OptimizelyScraperService {
               }
             }
 
-            function getABtastyExperimentDetails() {
-              if (!window.ABTasty) {
-                return null;
-              }
-
-              try {
-                const data = window.ABTasty.accountData;
-                if (!data || typeof data.tests !== 'object') {
-                  return null;
-                }
-
-                console.log('Abtasty data found:', Object.keys(data.tests).length + ' experiments');
-
-                const experiments = data.tests;
-                const experimentArray = [];
-
-                Object.entries(experiments).forEach(([id, exp]) => {
-                  experimentArray.push({
-                    id: id,
-                    name: exp.name || "Unnamed Experiment",
-                  });
-                });
-
-                return {
-                  experiments: experimentArray,
-                  hasAbTasty: true,
-                  abTastyData: data
-                };
-              } catch (e) {
-                console.error('Error fetching Optimizely experiment details:', e);
-                return null;
-              }
-            }
-
             let attempts = 0;
             const maxAttempts = 6; // Reduced for faster failure
             const optimizelyFoundMaxAttempts = 2; // Even fewer attempts if Optimizely is found
@@ -539,56 +512,36 @@ class OptimizelyScraperService {
               console.log(`Optimizely check attempt ${attempts}/${maxAttempts}`);
 
               try {
-                const optimizelyResult = getOptiExperimentDetails();
-                const abTastyResult = getABtastyExperimentDetails();
+                const result = getOptiExperimentDetails();
+
                 // Success case - found experiments
-                if (optimizelyResult && optimizelyResult?.experiments && optimizelyResult?.experiments.length > 0 || (abTastyResult && abTastyResult?.experiments && abTastyResult?.experiments.length)) {
-                  console.log('Optimizely experiments found:', optimizelyResult?.experiments.length);
+                if (result && result.experiments && result.experiments.length > 0) {
+                  console.log('Optimizely experiments found:', result.experiments.length);
                   safeResolve({
-                    optimizely: {
-                      hasOptimizely: !!window.optimizely,
-                      experiments: optimizelyResult?.experiments|| null,
-                      experimentCount: optimizelyResult?.experiments.length|| null,
-                      activeCount: optimizelyResult?.experiments ?optimizelyResult.experiments.filter(e => e.isActive).length: 0,
-                      error: null,
-                      optimizelyData: optimizelyResult?.optimizelyData || null
-                    },
-                    abTasty: {
-                      hasAbtasty: !!window.ABTasty|| null,
-                      experiments: abTastyResult?.experiments|| null,
-                      experimentCount: abTastyResult?.experiments.length|| null,
-                      error: null,
-                      optimizelyData: abTastyResult?.abTastyData|| null
-                    },
+                    hasOptimizely: true,
+                    experiments: result.experiments,
+                    experimentCount: result.experiments.length,
+                    activeCount: result.experiments.filter(e => e.isActive).length,
+                    error: null,
+                    optimizelyData: result.optimizelyData
                   });
                   return;
                 }
                 
                 // Check if Optimizely object exists but no experiments
-                if ((window.optimizely && typeof window.optimizely.get === 'function')|| window.ABTasty) {
+                if (window.optimizely && typeof window.optimizely.get === 'function') {
                   console.log('Optimizely object found, checking for experiment data...');
                   
                   if (attempts >= optimizelyFoundMaxAttempts) {
                     console.log(`Optimizely found but no experiments after ${optimizelyFoundMaxAttempts} attempts`);
                     safeResolve({
-                      optimizely: {
-                        hasOptimizely: !!window.optimizely,
-                        experiments: [],
-                        experimentCount: 0,
-                        activeCount: 0,
-                        error: "Optimizely found but no experiments detected",
-                        optimizelyData: null
-                      },
-                      abTasty: {
-                        hasAbtasty: !!window.ABTasty,
-                        experiments: [],
-                        experimentCount: 0,
-                        activeCount: 0,
-                        error: "AbTasty found but no experiments detected",
-                        optimizelyData: null
-                      }
-                    }
-                    );
+                      hasOptimizely: true,
+                      experiments: [],
+                      experimentCount: 0,
+                      activeCount: 0,
+                      error: "Optimizely found but no experiments detected",
+                      optimizelyData: null
+                    });
                     return;
                   }
                 }
@@ -596,26 +549,14 @@ class OptimizelyScraperService {
                 // Max attempts reached - no Optimizely found
                 if (attempts >= maxAttempts) {
                   console.log('Max attempts reached, no Optimizely found');
-                  safeResolve(
-                    {
-                      optimizely: {
-                        hasOptimizely: false,
-                        experiments: [],
-                        experimentCount: 0,
-                        activeCount: 0,
-                        error: "Optimizely not found on page",
-                        optimizelyData: null
-                      },
-                      abTasty: {
-                        hasAbtasty: false,
-                        experiments: [],
-                        experimentCount: 0,
-                        activeCount: 0,
-                        error: "AbTasty not found on page",
-                        optimizelyData: null
-                      }
-                    }
-                  );
+                  safeResolve({
+                    hasOptimizely: false,
+                    experiments: [],
+                    experimentCount: 0,
+                    activeCount: 0,
+                    error: "Optimizely not found on page",
+                    optimizelyData: null
+                  });
                   return;
                 }
 
@@ -648,8 +589,7 @@ class OptimizelyScraperService {
 
       // No navigation listener to clean up
       const currentUrl = page.url();
-      console.log('extracted data is'+ JSON.stringify(experimentData));
-      console.log(`Optimizely data extracted from ${currentUrl}: ${experimentData.optimizely.experiments?.length || 0} experiments found`);
+      console.log(`Optimizely data extracted from ${currentUrl}: ${experimentData.experiments?.length || 0} experiments found`);
       return experimentData;
 
     } catch (evaluationError) {
@@ -893,20 +833,20 @@ async extractOptimizelyOnPageReady(page) {
     let savedData = null;
 
     try {
-      if (experimentData.hasOptimizely && experimentData?.experiments && experimentData?.experiments.length > 0) {
+      if (experimentData.hasOptimizely && experimentData.experiments && experimentData.experiments.length > 0) {
         // Uncomment if ExperimentService is available
         // savedData = await ExperimentService.saveExperiments(url, experimentData.experiments);
         
-        console.log(`✅ Would save ${experimentData?.experiments.length} experiments for ${url}`);
+        console.log(`✅ Would save ${experimentData.experiments.length} experiments for ${url}`);
 
         try {
         savedData = await ExperimentService.saveExperiments(
           url,
-          experimentData?.experiments
+          experimentData.experiments
         );
 
         console.log(
-          `✅ Successfully saved ${experimentData.experiments?.length} experiments for ${url}`
+          `✅ Successfully saved ${experimentData.experiments.length} experiments for ${url}`
         );
       } catch (saveError) {
         console.error("Error saving experiments:", saveError);
@@ -950,19 +890,12 @@ async extractOptimizelyOnPageReady(page) {
         domain: website.domain,
       },
       optimizely: {
-        detected: experimentData.optimizely?.hasOptimizely,
-        experiments: experimentData.optimizely?.experiments,
-        experimentCount: experimentData.optimizely?.experimentCount || 0,
-        activeCount: experimentData.optimizely?.activeCount || 0,
-        error: experimentData.optimizely?.error,
-        cookieType: experimentData.optimizely?.cookieType || 'unknown', // Added cookie type
-      },
-      abtasty: {
-        detected: experimentData.abTasty?.hasAbtasty,
-        experiments: experimentData.abTasty?.experiments,
-        experimentCount: experimentData.abTasty?.experimentCount || 0,
-        error: experimentData.abTasty?.error,
-        cookieType: experimentData.abTasty?.cookieType || 'unknown', // Added cookie type
+        detected: experimentData.hasOptimizely,
+        experiments: experimentData.experiments,
+        experimentCount: experimentData.experimentCount || 0,
+        activeCount: experimentData.activeCount || 0,
+        error: experimentData.error,
+        cookieType: experimentData.cookieType || 'unknown', // Added cookie type
       },
       saved: !!savedData,
       savedId: savedData?._id,
@@ -1250,7 +1183,7 @@ async extractOptimizelyOnPageReady(page) {
               domain: domain,
               success: true,
               optimizelyDetected: true,
-              experiments: result.data.optimizely?.experiments || [],
+              experiments: result.data.optimizely.experiments || [],
               experimentCount: result.data.optimizely.experimentCount || 0,
               activeCount: result.data.optimizely.activeCount || 0,
               cookieType: result.data.optimizely.cookieType || 'unknown',
