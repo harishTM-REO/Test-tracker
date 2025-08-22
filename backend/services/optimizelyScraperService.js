@@ -87,53 +87,88 @@ class OptimizelyScraperService {
   }
 
   /**
-   * Launch browser with your optimized settings
+   * Launch browser with your optimized settings and HTTP/2 error handling
+   * @param {Object} fallbackOptions - Optional fallback options for retry attempts
    * @returns {Object} Puppeteer browser instance
    */
-  async launchBrowser() {
-    try {
-      // Check if we're in a serverless environment or local development
-      const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
-      
-      let browserOptions = {
-        headless: true,
-        ignoreHTTPSErrors: true,
-        args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--window-size=1366,768', // Larger viewport for better cookie detection
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
+  async launchBrowser(fallbackOptions = {}) {
+    const maxRetries = 2;
+    let lastError;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Launching browser (attempt ${attempt}/${maxRetries})`);
         
-        // CRITICAL: These flags help with cookie consent detection in headless
-        '--disable-blink-features=AutomationControlled', // Hide automation detection
-        '--disable-web-security',
-        '--allow-running-insecure-content',
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', // Real user agent
-      
-        ],
-      };
+        // Check if we're in a serverless environment or local development
+        const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
+        
+        let browserOptions = {
+          headless: true,
+          ignoreHTTPSErrors: true,
+          args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-gpu',
+          '--disable-dev-shm-usage',
+          '--window-size=1366,768', // Larger viewport for better cookie detection
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          
+          // CRITICAL: These flags help with cookie consent detection in headless
+          '--disable-blink-features=AutomationControlled', // Hide automation detection
+          '--disable-web-security',
+          '--allow-running-insecure-content',
+          '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', // Real user agent
+          
+          // HTTP/2 protocol error fixes
+          '--disable-http2',
+          '--disable-features=VizServiceDisplay',
+          '--force-device-scale-factor=1',
+          '--disable-extensions',
+          '--disable-plugins',
+          
+          // Additional stability flags for retry attempts
+          ...(attempt > 1 ? [
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection',
+            '--disable-renderer-backgrounding',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-features=Translate'
+          ] : [])
+        
+          ],
+          
+          // Apply any fallback options
+          ...fallbackOptions
+        };
 
-      // Use chromium for production/serverless, regular puppeteer for local
-      if (!isLocal) {
-        browserOptions.executablePath = await chromium.executablePath();
-        browserOptions.headless = chromium.headless;
+        // Use chromium for production/serverless, regular puppeteer for local
+        if (!isLocal) {
+          browserOptions.executablePath = await chromium.executablePath();
+          browserOptions.headless = chromium.headless;
+        }
+
+        const browser = await puppeteer.launch(browserOptions);
+
+        console.log('Browser launched successfully');
+        return browser;
+      } catch (error) {
+        lastError = error;
+        console.error(`Browser launch attempt ${attempt} failed:`, error.message);
+        
+        if (attempt < maxRetries) {
+          console.log('Retrying browser launch with fallback options...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       }
-
-      const browser = await puppeteer.launch(browserOptions);
-
-      console.log('Browser launched successfully');
-      return browser;
-    } catch (error) {
-      console.error('Error launching browser:', error);
-      throw new Error(`Failed to launch browser: ${error.message}`);
     }
+    
+    console.error('All browser launch attempts failed');
+    throw new Error(`Failed to launch browser after ${maxRetries} attempts: ${lastError.message}`);
   }
 
   /**
@@ -168,23 +203,184 @@ class OptimizelyScraperService {
   }
 
   /**
-   * Navigate to URL and wait for page load
+   * Navigate to URL and wait for page load with comprehensive error handling
    * @param {Object} page - Puppeteer page instance
    * @param {string} url - URL to navigate to
    */
   async navigateToPage(page, url) {
-    try {
-      console.log(`Navigating to: ${url}`);
-      
-      await page.goto(url, { 
-        waitUntil: 'domcontentloaded',
-        timeout: process.env.TIME_OUT_TIME || 2700000, // 45 minutes timeout
-      });
+    const maxRetries = 3;
+    let lastError;
+    
+    // Validate and normalize URL first
+    const normalizedUrl = await this.validateAndNormalizeUrl(url);
+    if (!normalizedUrl) {
+      throw new Error(`Invalid or unreachable URL: ${url}`);
+    }
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Navigating to: ${normalizedUrl} (attempt ${attempt}/${maxRetries})`);
+        
+        await page.goto(normalizedUrl, { 
+          waitUntil: 'domcontentloaded',
+          timeout: process.env.TIME_OUT_TIME || 30000, // 30 seconds timeout
+        });
 
-      console.log("Page loaded successfully");
+        console.log("Page loaded successfully");
+        return;
+      } catch (error) {
+        lastError = error;
+        console.error(`Navigation attempt ${attempt} failed:`, error.message);
+        
+        // Handle different types of network errors
+        if (error.message.includes('ERR_NAME_NOT_RESOLVED')) {
+          console.log('DNS resolution error detected, trying alternative approaches...');
+          
+          if (attempt < maxRetries) {
+            // Try alternative URL formats
+            const alternativeUrl = await this.tryAlternativeUrl(normalizedUrl, attempt);
+            if (alternativeUrl && alternativeUrl !== normalizedUrl) {
+              console.log(`Trying alternative URL: ${alternativeUrl}`);
+              try {
+                await page.goto(alternativeUrl, { 
+                  waitUntil: 'domcontentloaded',
+                  timeout: 30000
+                });
+                console.log("Page loaded successfully with alternative URL");
+                return;
+              } catch (altError) {
+                console.error(`Alternative URL also failed: ${altError.message}`);
+              }
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            continue;
+          }
+        } else if (error.message.includes('ERR_HTTP2_PROTOCOL_ERROR') || 
+                   error.message.includes('Protocol error') ||
+                   error.message.includes('net::ERR_HTTP2')) {
+          
+          console.log('HTTP/2 protocol error detected, implementing workaround...');
+          
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            try {
+              await page.setExtraHTTPHeaders({
+                'Connection': 'close',
+                'Cache-Control': 'no-cache'
+              });
+              continue;
+            } catch (headerError) {
+              console.warn('Failed to set headers:', headerError.message);
+            }
+          }
+        } else if (error.message.includes('ERR_CONNECTION_REFUSED') ||
+                   error.message.includes('ERR_CONNECTION_TIMED_OUT') ||
+                   error.message.includes('ERR_NETWORK_CHANGED')) {
+          
+          console.log('Network connectivity error detected, retrying...');
+          
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            continue;
+          }
+        } else {
+          // For other errors, break after first attempt unless it's the last retry
+          if (attempt >= maxRetries) break;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    }
+    
+    console.error('All navigation attempts failed');
+    throw new Error(`Failed to navigate to ${url} after ${maxRetries} attempts: ${lastError.message}`);
+  }
+
+  /**
+   * Validate and normalize URL
+   * @param {string} url - URL to validate
+   * @returns {string|null} Normalized URL or null if invalid
+   */
+  async validateAndNormalizeUrl(url) {
+    try {
+      // Basic URL validation
+      const urlObj = new URL(url);
+      
+      // Ensure protocol is present
+      if (!urlObj.protocol) {
+        urlObj.protocol = 'https:';
+      }
+      
+      // Basic domain validation
+      if (!urlObj.hostname || urlObj.hostname.length < 3) {
+        console.error(`Invalid hostname: ${urlObj.hostname}`);
+        return null;
+      }
+      
+      return urlObj.toString();
     } catch (error) {
-      console.error('Error navigating to page:', error);
-      throw new Error(`Failed to navigate to ${url}: ${error.message}`);
+      console.error(`URL validation failed for ${url}:`, error.message);
+      
+      // Try to fix common URL issues
+      try {
+        let fixedUrl = url;
+        
+        // Add protocol if missing
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          fixedUrl = 'https://' + url;
+        }
+        
+        const fixedUrlObj = new URL(fixedUrl);
+        console.log(`Fixed URL: ${fixedUrl}`);
+        return fixedUrlObj.toString();
+      } catch (fixError) {
+        console.error(`Could not fix URL ${url}:`, fixError.message);
+        return null;
+      }
+    }
+  }
+
+  /**
+   * Try alternative URL formats for DNS resolution issues
+   * @param {string} url - Original URL
+   * @param {number} attempt - Current attempt number
+   * @returns {string|null} Alternative URL or null
+   */
+  async tryAlternativeUrl(url, attempt) {
+    try {
+      const urlObj = new URL(url);
+      
+      switch (attempt) {
+        case 1:
+          // Try without www prefix
+          if (urlObj.hostname.startsWith('www.')) {
+            urlObj.hostname = urlObj.hostname.substring(4);
+            return urlObj.toString();
+          }
+          // Try with www prefix
+          else if (!urlObj.hostname.startsWith('www.')) {
+            urlObj.hostname = 'www.' + urlObj.hostname;
+            return urlObj.toString();
+          }
+          break;
+          
+        case 2:
+          // Try HTTP instead of HTTPS
+          if (urlObj.protocol === 'https:') {
+            urlObj.protocol = 'http:';
+            return urlObj.toString();
+          }
+          break;
+          
+        default:
+          return null;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error(`Error creating alternative URL:`, error.message);
+      return null;
     }
   }
 
