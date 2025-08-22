@@ -423,7 +423,9 @@ class AbTastyScraperService {
   async extractAbTastyData(page) {
     let navigationDetected = false; // Declare at function level
   try {
+    await new Promise(resolve => setTimeout(resolve, 2000));
     console.log("Extracting Abtasty data with enhanced detection...");
+    
     
     // Wait for page to be ready (Puppeteer approach)
     // try {
