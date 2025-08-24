@@ -987,8 +987,7 @@ async extractOptimizelyOnPageReady(page) {
       // Handle cookie consent with detection
       const cookieType = await this.handleCookieConsent(page);
       await new Promise(resolve => setTimeout(resolve, 2000));
-      // await page.reload({ waitUntil: ['domcontentloaded'] });
-        await page.goto(page.url());
+      await page.reload({ waitUntil: 'domcontentloaded' });
       // Extract Optimizely data with intelligent waiting
       const experimentData = await this.extractOptimizelyData(page);
       
