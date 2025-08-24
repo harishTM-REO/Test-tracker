@@ -110,7 +110,7 @@ class OptimizelyScraperService {
           '--disable-setuid-sandbox',
           '--disable-gpu',
           '--disable-dev-shm-usage',
-          '--window-size=1366,768', // Larger viewport for better cookie detection
+          // '--window-size=1366,768', // Larger viewport for better cookie detection
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
           '--no-zygote',
@@ -181,7 +181,7 @@ class OptimizelyScraperService {
       const page = await browser.newPage();
       
       // Set smaller viewport as in your working code
-      await page.setViewport({ width: 800, height: 600 });
+      await page.setViewport({ width: 1080, height: 1024 });
       
       // Your optimized request interception
       await page.setRequestInterception(true);
@@ -987,7 +987,8 @@ async extractOptimizelyOnPageReady(page) {
       // Handle cookie consent with detection
       const cookieType = await this.handleCookieConsent(page);
       await new Promise(resolve => setTimeout(resolve, 2000));
-      await page.reload({ waitUntil: ['domcontentloaded'] });
+      // await page.reload({ waitUntil: ['domcontentloaded'] });
+        await page.goto(page.url());
       // Extract Optimizely data with intelligent waiting
       const experimentData = await this.extractOptimizelyData(page);
       
