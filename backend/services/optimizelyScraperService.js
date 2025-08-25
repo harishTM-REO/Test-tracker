@@ -148,8 +148,8 @@ class OptimizelyScraperService {
 
         // Use chromium for production/serverless, regular puppeteer for local
         if (!isLocal) {
-          browserOptions.executablePath = await chromium.executablePath();
-          browserOptions.headless = chromium.headless;
+            browserOptions.executablePath = '/usr/bin/chromium';
+            browserOptions.headless = 'new';
         }
 
         const browser = await puppeteer.launch(browserOptions);
@@ -484,23 +484,6 @@ class OptimizelyScraperService {
                 '[data-testid*="consent"] button',
                 '[class="piano-bbc-close-button"]'
               ];
-
-              // for (const selector of specificCookieSelectors) {
-              //   if (found) break;
-              //   const elements = document.querySelectorAll(selector);
-              //   for (const element of elements) {
-              //     if (isCookieConsentElement(element)) {
-              //       const text = element.textContent?.toLowerCase() || '';
-              //       if (['accept', 'allow', 'agree', 'ok'].some(keyword => text.includes(keyword))) {
-              //         cookieType = 'generic';
-              //         found = true;
-              //         element.click();
-              //         console.log(`Layer 1 - Clicked validated consent: ${text}`);
-              //         break;
-              //       }
-              //     }
-              //   }
-              // }
 
               // Layer 2: Look for common button patterns in potential cookie areas
               if (!found) {
