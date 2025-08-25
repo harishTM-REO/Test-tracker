@@ -43,6 +43,71 @@
         </div>
       </div>
 
+      <!-- Enhanced Quarantine Statistics -->
+      <div v-if="dataset.quarantineStats && hasQuarantineData(dataset)" class="quarantine-stats-section">
+        <div class="section-header">
+          <h2>Quality Assurance Results</h2>
+          <span class="info-badge">Enhanced Detection System</span>
+        </div>
+        
+        <div class="quarantine-stats-grid">
+          <div class="quarantine-stat-card success">
+            <div class="stat-icon">✅</div>
+            <div class="stat-content">
+              <span class="stat-number">{{ dataset.optimizelyDetectedCount || 0 }}</span>
+              <span class="stat-label">Confirmed Optimizely Sites</span>
+              <span class="stat-description">High confidence detections</span>
+            </div>
+          </div>
+          
+          <div v-if="dataset.quarantineStats.uncertainRemovals > 0" class="quarantine-stat-card warning">
+            <div class="stat-icon">⚠️</div>
+            <div class="stat-content">
+              <span class="stat-number">{{ dataset.quarantineStats.uncertainRemovals }}</span>
+              <span class="stat-label">Need Manual Review</span>
+              <span class="stat-description">Previously had Optimizely - uncertain status</span>
+            </div>
+          </div>
+          
+          <div v-if="dataset.quarantineStats.confirmedRemovals > 0" class="quarantine-stat-card critical">
+            <div class="stat-icon">❌</div>
+            <div class="stat-content">
+              <span class="stat-number">{{ dataset.quarantineStats.confirmedRemovals }}</span>
+              <span class="stat-label">Confirmed Removals</span>
+              <span class="stat-description">High confidence Optimizely removed</span>
+            </div>
+          </div>
+          
+          <div v-if="dataset.quarantineStats.scrapingFailures > 0" class="quarantine-stat-card info">
+            <div class="stat-icon">🔧</div>
+            <div class="stat-content">
+              <span class="stat-number">{{ dataset.quarantineStats.scrapingFailures }}</span>
+              <span class="stat-label">Technical Issues</span>
+              <span class="stat-description">Scraping failures - not actual removals</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Alert Summary -->
+        <div v-if="dataset.alertLevels && hasAlerts(dataset.alertLevels)" class="alert-summary">
+          <h4>Alert Summary</h4>
+          <div class="alert-items">
+            <div v-if="dataset.alertLevels.critical > 0" class="alert-item critical">
+              <span class="alert-count">{{ dataset.alertLevels.critical }}</span>
+              <span class="alert-text">Critical: Confirmed removals requiring immediate attention</span>
+            </div>
+            <div v-if="dataset.alertLevels.warning > 0" class="alert-item warning">
+              <span class="alert-count">{{ dataset.alertLevels.warning }}</span>
+              <span class="alert-text">Warning: Uncertain changes requiring manual review</span>
+            </div>
+            <div v-if="dataset.alertLevels.info > 0" class="alert-item info">
+              <span class="alert-count">{{ dataset.alertLevels.info }}</span>
+              <span class="alert-text">Info: Technical issues during scraping</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Dataset Info -->
       <div class="dataset-info">
         <h2>Dataset Information</h2>
@@ -165,9 +230,14 @@
             <div class="company-header">
               <h4>{{ company.companyName }}</h4>
               <div v-if="company.optimizely" class="optimizely-badge-container">
-                <span :class="['optimizely-badge', company.optimizely.hasOptimizely ? 'has-optimizely' : 'no-optimizely']">
-                  {{ company.optimizely.hasOptimizely ? '✓ Optimizely' : '✗ No Optimizely' }}
+                <span :class="['optimizely-badge', getOptimizelyBadgeClass(company.optimizely)]">
+                  {{ getOptimizelyBadgeText(company.optimizely) }}
                 </span>
+                <div v-if="company.optimizely.confidence" class="confidence-indicator">
+                  <span :class="['confidence-badge', 'confidence-' + company.optimizely.confidence?.toLowerCase()]">
+                    {{ company.optimizely.confidence }} Confidence
+                  </span>
+                </div>
               </div>
             </div>
             <div class="company-details">
@@ -178,8 +248,8 @@
                 <span class="domain">{{ extractDomain(company.companyURL) }}</span>
               </div>
               
-              <!-- Optimizely Details -->
-              <div v-if="company.optimizely && company.optimizely.hasOptimizely" class="optimizely-details">
+              <!-- Enhanced Optimizely Details -->
+              <div v-if="company.optimizely && (company.optimizely.hasOptimizely || company.optimizely.status)" class="optimizely-details">
                 <div class="optimizely-stats">
                   <div class="stat-item">
                     <span class="stat-label">Experiments:</span>
@@ -435,6 +505,76 @@ export default {
       } catch (e) {
         return url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]
       }
+    },
+
+    // Enhanced methods for new backend data structure
+    getOptimizelyBadgeClass(optimizelyData) {
+      // Handle both old and new data structures for backward compatibility
+      if (optimizelyData.hasOptimizely) {
+        return 'has-optimizely'
+      } else if (optimizelyData.status) {
+        // New enhanced structure
+        switch (optimizelyData.status) {
+          case 'SCRAPING_SUCCESS_OPTIMIZELY_FOUND':
+            return 'has-optimizely'
+          case 'SCRAPING_SUCCESS_NO_OPTIMIZELY':
+            return 'no-optimizely'
+          case 'OPTIMIZELY_UNCERTAIN':
+            return 'uncertain-optimizely'
+          case 'SCRAPING_FAILED_BOT_DETECTED':
+          case 'SCRAPING_FAILED_NETWORK_ERROR':
+          case 'SCRAPING_FAILED_TIMEOUT':
+          case 'SCRAPING_FAILED_NAVIGATION':
+            return 'scraping-failed'
+          default:
+            return 'no-optimizely'
+        }
+      }
+      return 'no-optimizely'
+    },
+
+    getOptimizelyBadgeText(optimizelyData) {
+      // Handle both old and new data structures
+      if (optimizelyData.hasOptimizely) {
+        return '✓ Optimizely'
+      } else if (optimizelyData.status) {
+        // New enhanced structure
+        switch (optimizelyData.status) {
+          case 'SCRAPING_SUCCESS_OPTIMIZELY_FOUND':
+            return '✓ Optimizely'
+          case 'SCRAPING_SUCCESS_NO_OPTIMIZELY':
+            return '✗ No Optimizely'
+          case 'OPTIMIZELY_UNCERTAIN':
+            return '? Uncertain'
+          case 'SCRAPING_FAILED_BOT_DETECTED':
+            return '🚫 Bot Detected'
+          case 'SCRAPING_FAILED_NETWORK_ERROR':
+            return '📶 Network Error'
+          case 'SCRAPING_FAILED_TIMEOUT':
+            return '⏱️ Timeout'
+          case 'SCRAPING_FAILED_NAVIGATION':
+            return '🔄 Navigation Error'
+          default:
+            return '✗ No Optimizely'
+        }
+      }
+      return '✗ No Optimizely'
+    },
+
+    hasQuarantineData(dataset) {
+      return dataset.quarantineStats && (
+        dataset.quarantineStats.uncertainRemovals > 0 ||
+        dataset.quarantineStats.confirmedRemovals > 0 ||
+        dataset.quarantineStats.scrapingFailures > 0
+      )
+    },
+
+    hasAlerts(alertLevels) {
+      return alertLevels && (
+        alertLevels.critical > 0 ||
+        alertLevels.warning > 0 ||
+        alertLevels.info > 0
+      )
     }
   }
 }
@@ -999,6 +1139,208 @@ export default {
   padding: 8px;
 }
 
+/* Enhanced Optimizely Badge Styles */
+.optimizely-badge.uncertain-optimizely {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #faeeba;
+}
+
+.optimizely-badge.scraping-failed {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.confidence-indicator {
+  margin-top: 5px;
+}
+
+.confidence-badge {
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.confidence-high {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.confidence-medium {
+  background: #cce7ff;
+  color: #0066cc;
+  border: 1px solid #99d6ff;
+}
+
+.confidence-low {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #faeeba;
+}
+
+.confidence-uncertain {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+/* Quarantine Statistics Styles */
+.quarantine-stats-section {
+  background: white;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 25px;
+  margin-bottom: 30px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.info-badge {
+  background: #667eea;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.quarantine-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.quarantine-stat-card {
+  display: flex;
+  align-items: center;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.quarantine-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.quarantine-stat-card.success {
+  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+  border-left: 4px solid #28a745;
+}
+
+.quarantine-stat-card.warning {
+  background: linear-gradient(135deg, #fff3cd 0%, #faeeba 100%);
+  border-left: 4px solid #ffc107;
+}
+
+.quarantine-stat-card.critical {
+  background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+  border-left: 4px solid #dc3545;
+}
+
+.quarantine-stat-card.info {
+  background: linear-gradient(135deg, #cce7ff 0%, #99d6ff 100%);
+  border-left: 4px solid #007bff;
+}
+
+.stat-icon {
+  font-size: 2rem;
+  margin-right: 15px;
+  opacity: 0.8;
+}
+
+.stat-content {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.quarantine-stat-card .stat-number {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #2c3e50;
+  margin-bottom: 5px;
+}
+
+.quarantine-stat-card .stat-label {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #495057;
+  margin-bottom: 3px;
+}
+
+.stat-description {
+  font-size: 0.85rem;
+  color: #6c757d;
+  line-height: 1.3;
+}
+
+/* Alert Summary Styles */
+.alert-summary {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  border-left: 4px solid #667eea;
+}
+
+.alert-summary h4 {
+  margin: 0 0 15px 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.alert-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.alert-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 15px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.alert-item.critical {
+  background: #f8d7da;
+  border: 1px solid #f5c6cb;
+}
+
+.alert-item.warning {
+  background: #fff3cd;
+  border: 1px solid #faeeba;
+}
+
+.alert-item.info {
+  background: #cce7ff;
+  border: 1px solid #99d6ff;
+}
+
+.alert-count {
+  background: #fff;
+  color: #333;
+  font-weight: bold;
+  padding: 4px 8px;
+  border-radius: 50%;
+  min-width: 24px;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.alert-text {
+  flex: 1;
+  color: #495057;
+  font-weight: 500;
+}
 
 @media (max-width: 768px) {
   .header {
