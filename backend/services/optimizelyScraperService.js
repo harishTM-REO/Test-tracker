@@ -14,6 +14,136 @@ const OptimizelyResult = require('../models/OptimizelyResult');
 
 const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
 class OptimizelyScraperService {
+  constructor() {
+    // Enhanced result classification constants
+    this.RESULT_STATUS = {
+      SCRAPING_SUCCESS_OPTIMIZELY_FOUND: 'SCRAPING_SUCCESS_OPTIMIZELY_FOUND',
+      SCRAPING_SUCCESS_NO_OPTIMIZELY: 'SCRAPING_SUCCESS_NO_OPTIMIZELY',
+      SCRAPING_FAILED_NETWORK_ERROR: 'SCRAPING_FAILED_NETWORK_ERROR',
+      SCRAPING_FAILED_BOT_DETECTED: 'SCRAPING_FAILED_BOT_DETECTED',
+      SCRAPING_FAILED_TIMEOUT: 'SCRAPING_FAILED_TIMEOUT',
+      OPTIMIZELY_UNCERTAIN: 'OPTIMIZELY_UNCERTAIN',
+      SCRAPING_FAILED_NAVIGATION: 'SCRAPING_FAILED_NAVIGATION'
+    };
+
+    this.CONFIDENCE_LEVELS = {
+      HIGH: 'HIGH',
+      MEDIUM: 'MEDIUM', 
+      LOW: 'LOW',
+      UNCERTAIN: 'UNCERTAIN'
+    };
+
+    this.CHANGE_CATEGORIES = {
+      CONFIRMED_REMOVAL: 'CONFIRMED_REMOVAL',
+      UNCERTAIN_REMOVAL: 'UNCERTAIN_REMOVAL',
+      SCRAPING_FAILURE: 'SCRAPING_FAILURE',
+      PENDING_REVIEW: 'PENDING_REVIEW',
+      LIKELY_REMOVAL: 'LIKELY_REMOVAL'
+    };
+  }
+
+  /**
+   * Get historical context for a URL from previous versions
+   * @param {string} url - URL to check
+   * @param {string} datasetId - Dataset ID  
+   * @returns {Object} Historical context
+   */
+  async getHistoricalContext(url, datasetId) {
+    try {
+      const ChangeDetectionVersion = require('../models/ChangeDetectionVersion');
+      
+      // Get the latest version to check historical data
+      const latestVersion = await ChangeDetectionVersion
+        .findOne({ datasetId })
+        .sort({ versionNumber: -1 });
+
+      if (!latestVersion) {
+        return { isNewUrl: true, previouslyHadOptimizely: false, failureCount: 0 };
+      }
+
+      // Check if URL previously had Optimizely
+      const previouslyHadOptimizely = latestVersion.experimentsSnapshot.allExperiments
+        .some(exp => exp.url === url || exp.domain === this.extractDomain(url));
+
+      // Get failure history (this would need to be tracked separately)
+      // For now, we'll return basic historical context
+      return {
+        isNewUrl: false,
+        previouslyHadOptimizely,
+        lastVersion: latestVersion.versionNumber,
+        failureCount: 0 // This would be tracked in a separate failure log
+      };
+    } catch (error) {
+      console.warn('Error getting historical context:', error.message);
+      return { isNewUrl: true, previouslyHadOptimizely: false, failureCount: 0 };
+    }
+  }
+
+  /**
+   * Differential retry strategy for previously successful sites
+   * @param {Object} page - Puppeteer page instance
+   * @param {string} url - URL to retry
+   * @param {Object} historicalContext - Historical context
+   * @param {number} retryCount - Current retry attempt
+   * @returns {Object} Enhanced result
+   */
+  async retryWithDifferentStrategy(page, url, historicalContext, retryCount = 1) {
+    console.log(`Attempting retry ${retryCount} for previously successful site: ${url}`);
+    
+    try {
+      // Different strategies for each retry
+      switch (retryCount) {
+        case 1:
+          // Strategy 1: Longer timeouts, more waiting
+          console.log('Retry strategy 1: Extended timeouts');
+          await new Promise(resolve => setTimeout(resolve, 5000)); // 5s wait
+          break;
+          
+        case 2:
+          // Strategy 2: Navigate fresh without cache
+          console.log('Retry strategy 2: Fresh navigation');
+          await page.setCacheEnabled(false);
+          await page.reload({ waitUntil: 'networkidle0' });
+          await new Promise(resolve => setTimeout(resolve, 8000)); // 8s wait
+          break;
+          
+        case 3:
+          // Strategy 3: Different viewport and extra behavior simulation
+          console.log('Retry strategy 3: Different browser profile');
+          await page.setViewport({ width: 1366, height: 768 });
+          await this.simulateHumanBehavior(page);
+          await new Promise(resolve => setTimeout(resolve, 10000)); // 10s wait
+          break;
+          
+        default:
+          console.log('All retry strategies exhausted');
+          return null;
+      }
+
+      // Try extraction again with enhanced context
+      let context = {
+        networkError: false,
+        timeout: false,
+        navigationError: false,
+        possibleBotDetection: false,
+        isRetry: true,
+        retryAttempt: retryCount
+      };
+
+      const experimentData = await this.extractOptimizelyData(page);
+      return this.calculateConfidenceScore(experimentData, context);
+
+    } catch (error) {
+      console.error(`Retry ${retryCount} failed:`, error.message);
+      
+      if (retryCount < 3) {
+        return await this.retryWithDifferentStrategy(page, url, historicalContext, retryCount + 1);
+      }
+      
+      return null; // All retries failed
+    }
+  }
+
   /**
    * function to connect browserless.io
    */
@@ -595,6 +725,61 @@ class OptimizelyScraperService {
   }
 
   /**
+   * Calculate confidence score for Optimizely detection result
+   * @param {Object} result - Detection result
+   * @param {Object} context - Additional context (page load success, network errors, etc.)
+   * @returns {Object} Enhanced result with confidence and status
+   */
+  calculateConfidenceScore(result, context = {}) {
+    let confidence = this.CONFIDENCE_LEVELS.HIGH;
+    let status = this.RESULT_STATUS.SCRAPING_SUCCESS_NO_OPTIMIZELY;
+    let reasoning = [];
+
+    // Check if Optimizely was found
+    if (result.hasOptimizely && result.experiments.length > 0) {
+      status = this.RESULT_STATUS.SCRAPING_SUCCESS_OPTIMIZELY_FOUND;
+      confidence = this.CONFIDENCE_LEVELS.HIGH;
+      reasoning.push('Optimizely experiments successfully detected');
+    } else if (result.hasOptimizely && result.experiments.length === 0) {
+      status = this.RESULT_STATUS.OPTIMIZELY_UNCERTAIN;
+      confidence = this.CONFIDENCE_LEVELS.MEDIUM;
+      reasoning.push('Optimizely object found but no experiments detected');
+    } else {
+      // Check context for potential issues
+      if (context.networkError) {
+        status = this.RESULT_STATUS.SCRAPING_FAILED_NETWORK_ERROR;
+        confidence = this.CONFIDENCE_LEVELS.UNCERTAIN;
+        reasoning.push('Network errors during scraping');
+      } else if (context.timeout) {
+        status = this.RESULT_STATUS.SCRAPING_FAILED_TIMEOUT;
+        confidence = this.CONFIDENCE_LEVELS.LOW;
+        reasoning.push('Timeout during page load or script execution');
+      } else if (context.navigationError) {
+        status = this.RESULT_STATUS.SCRAPING_FAILED_NAVIGATION;
+        confidence = this.CONFIDENCE_LEVELS.UNCERTAIN;
+        reasoning.push('Navigation failed or context destroyed');
+      } else if (context.possibleBotDetection) {
+        status = this.RESULT_STATUS.SCRAPING_FAILED_BOT_DETECTED;
+        confidence = this.CONFIDENCE_LEVELS.UNCERTAIN;
+        reasoning.push('Possible bot detection preventing proper page load');
+      } else {
+        status = this.RESULT_STATUS.SCRAPING_SUCCESS_NO_OPTIMIZELY;
+        confidence = this.CONFIDENCE_LEVELS.HIGH;
+        reasoning.push('Page loaded successfully, no Optimizely detected');
+      }
+    }
+
+    return {
+      ...result,
+      status,
+      confidence,
+      reasoning,
+      timestamp: new Date(),
+      contextFlags: context
+    };
+  }
+
+  /**
    * Enhanced Optimizely data extraction using your working approach
    * @param {Object} page - Puppeteer page instance
    * @returns {Object} Experiment data
@@ -946,20 +1131,26 @@ async extractOptimizelyOnPageReady(page) {
 }
 
   /**
-   * Main function to scrape experiments from a page
+   * Main function to scrape experiments from a page with historical context
    * @param {string} url - URL to scrape
+   * @param {string} datasetId - Optional dataset ID for historical context
    * @returns {Object} Experiment data including cookie info
    */
-  async scrapeExperimentsFromPage(url) {
+  async scrapeExperimentsFromPage(url, datasetId = null) {
     let browser = null;
     let page = null;
     let navigationDetected = false; // Declare at function level
 
     try {
+      // Get historical context if datasetId provided
+      let historicalContext = { isNewUrl: true, previouslyHadOptimizely: false, failureCount: 0 };
+      if (datasetId) {
+        historicalContext = await this.getHistoricalContext(url, datasetId);
+        console.log(`Historical context for ${url}:`, historicalContext);
+      }
+
       // Launch browser
       browser = await this.launchBrowser();
-
-      // browser = await this.connectWithRetry();
       
       // Create and configure page
       page = await this.createPage(browser);
@@ -971,13 +1162,68 @@ async extractOptimizelyOnPageReady(page) {
       const cookieType = await this.handleCookieConsent(page);
       await new Promise(resolve => setTimeout(resolve, 2000));
       await page.reload({ waitUntil: 'domcontentloaded' });
+      
       // Extract Optimizely data with intelligent waiting
-      const experimentData = await this.extractOptimizelyData(page);
+      let experimentData;
+      let context = {
+        networkError: false,
+        timeout: false,
+        navigationError: false,
+        possibleBotDetection: false
+      };
+
+      try {
+        experimentData = await this.extractOptimizelyData(page);
+      } catch (error) {
+        // Analyze error to determine context
+        if (error.message.includes('timeout') || error.message.includes('Timeout')) {
+          context.timeout = true;
+        } else if (error.message.includes('net::') || error.message.includes('ERR_')) {
+          context.networkError = true;
+        } else if (error.message.includes('Navigation') || error.message.includes('context')) {
+          context.navigationError = true;
+        } else if (error.message.includes('denied') || error.message.includes('blocked')) {
+          context.possibleBotDetection = true;
+        }
+
+        // Return default result structure for failed extraction
+        experimentData = {
+          hasOptimizely: false,
+          experiments: [],
+          experimentCount: 0,
+          activeCount: 0,
+          error: error.message
+        };
+      }
+
+      // Apply confidence scoring
+      let enhancedResult = this.calculateConfidenceScore(experimentData, context);
+
+      // Smart retry logic for previously successful sites
+      if (historicalContext.previouslyHadOptimizely && 
+          !enhancedResult.hasOptimizely && 
+          enhancedResult.confidence !== this.CONFIDENCE_LEVELS.HIGH) {
+        
+        console.log(`🔄 Site previously had Optimizely but now shows negative - attempting enhanced retry`);
+        
+        const retryResult = await this.retryWithDifferentStrategy(page, url, historicalContext);
+        if (retryResult && retryResult.hasOptimizely) {
+          console.log('✅ Retry successful - Optimizely detected');
+          enhancedResult = retryResult;
+        } else {
+          console.log('❌ All retries failed - marking as uncertain removal');
+          enhancedResult.status = this.RESULT_STATUS.OPTIMIZELY_UNCERTAIN;
+          enhancedResult.confidence = this.CONFIDENCE_LEVELS.UNCERTAIN;
+          enhancedResult.reasoning.push('Previously had Optimizely but failed all retry attempts');
+          enhancedResult.changeCategory = this.CHANGE_CATEGORIES.UNCERTAIN_REMOVAL;
+        }
+      }
+
+      // Add historical context and cookie type to response
+      enhancedResult.cookieType = cookieType;
+      enhancedResult.historicalContext = historicalContext;
       
-      // Add cookie type to response
-      experimentData.cookieType = cookieType;
-      
-      return experimentData;
+      return enhancedResult;
 
     } catch (error) {
       console.error('Error scraping experiments from page:', error);
@@ -1342,55 +1588,112 @@ async extractOptimizelyOnPageReady(page) {
       const endTime = new Date();
       const duration = `${endTime - startTime}ms`;
       
-      // Process results
+      // Enhanced result processing with quarantine system
       const websiteResults = [];
       const websitesWithoutOptimizely = [];
       const failedWebsites = [];
+      
+      // New quarantine categories
+      const uncertainRemovals = [];
+      const confirmedRemovals = [];
+      const scrapingFailures = [];
+      const pendingReview = [];
+      
       let successfulScrapes = 0;
       let optimizelyDetectedCount = 0;
       let totalExperiments = 0;
 
       results.forEach(result => {
+        const domain = this.extractDomain(result.url);
+        
         if (result.success && result.data) {
           successfulScrapes++;
-          const domain = this.extractDomain(result.url);
           
-          if (result.data.optimizely?.detected) {
-            // Website has Optimizely - add to websiteResults
+          // Enhanced classification based on status and confidence
+          const data = result.data;
+          const status = data.status || 'UNKNOWN';
+          const confidence = data.confidence || this.CONFIDENCE_LEVELS.UNCERTAIN;
+          const previouslyHadOptimizely = data.historicalContext?.previouslyHadOptimizely || false;
+          
+          if (data.hasOptimizely && data.experiments?.length > 0) {
+            // Website has Optimizely experiments - add to websiteResults
             const websiteResult = {
               url: result.url,
               domain: domain,
               success: true,
               optimizelyDetected: true,
-              experiments: result.data.optimizely.experiments || [],
-              experimentCount: result.data.optimizely.experimentCount || 0,
-              activeCount: result.data.optimizely.activeCount || 0,
-              cookieType: result.data.optimizely.cookieType || 'unknown',
-              error: result.data.optimizely.error,
-              scrapedAt: new Date()
+              experiments: data.experiments || [],
+              experimentCount: data.experimentCount || 0,
+              activeCount: data.activeCount || 0,
+              cookieType: data.cookieType || 'unknown',
+              error: data.error,
+              scrapedAt: new Date(),
+              // Enhanced fields
+              status: status,
+              confidence: confidence,
+              reasoning: data.reasoning || [],
+              historicalContext: data.historicalContext
             };
 
             optimizelyDetectedCount++;
             totalExperiments += websiteResult.experimentCount;
             websiteResults.push(websiteResult);
+            
           } else {
-            // Website does not have Optimizely - add to separate field
-            const websiteWithoutOptimizely = {
+            // No Optimizely detected - categorize based on context
+            const baseResult = {
               url: result.url,
               domain: domain,
-              cookieType: result.data.optimizely?.cookieType || 'unknown',
-              scrapedAt: new Date()
+              cookieType: data.cookieType || 'unknown',
+              scrapedAt: new Date(),
+              status: status,
+              confidence: confidence,
+              reasoning: data.reasoning || [],
+              historicalContext: data.historicalContext,
+              error: data.error
             };
-
-            websitesWithoutOptimizely.push(websiteWithoutOptimizely);
+            
+            if (previouslyHadOptimizely) {
+              // Previously had Optimizely - categorize the removal
+              if (confidence === this.CONFIDENCE_LEVELS.HIGH) {
+                // High confidence removal
+                confirmedRemovals.push({
+                  ...baseResult,
+                  changeCategory: this.CHANGE_CATEGORIES.CONFIRMED_REMOVAL,
+                  removalConfidence: 'HIGH'
+                });
+              } else if (confidence === this.CONFIDENCE_LEVELS.UNCERTAIN || 
+                        status === this.RESULT_STATUS.OPTIMIZELY_UNCERTAIN) {
+                // Uncertain removal - needs review
+                uncertainRemovals.push({
+                  ...baseResult,
+                  changeCategory: this.CHANGE_CATEGORIES.UNCERTAIN_REMOVAL,
+                  removalConfidence: 'UNCERTAIN',
+                  needsManualReview: true
+                });
+              } else {
+                // Technical failure
+                scrapingFailures.push({
+                  ...baseResult,
+                  changeCategory: this.CHANGE_CATEGORIES.SCRAPING_FAILURE,
+                  removalConfidence: 'TECHNICAL_FAILURE'
+                });
+              }
+            } else {
+              // Never had Optimizely or new URL
+              websitesWithoutOptimizely.push(baseResult);
+            }
           }
         } else {
-          const domain = this.extractDomain(result.url);
-          failedWebsites.push({
+          // Complete scraping failure
+          scrapingFailures.push({
             url: result.url,
             domain: domain,
             error: result.error || 'Unknown error',
-            failedAt: new Date()
+            failedAt: new Date(),
+            changeCategory: this.CHANGE_CATEGORIES.SCRAPING_FAILURE,
+            confidence: this.CONFIDENCE_LEVELS.UNCERTAIN,
+            reasoning: ['Complete scraping failure']
           });
         }
       });
@@ -1399,7 +1702,16 @@ async extractOptimizelyOnPageReady(page) {
       const successRate = `${((successfulScrapes / results.length) * 100).toFixed(1)}%`;
       const optimizelyRate = `${((optimizelyDetectedCount / results.length) * 100).toFixed(1)}%`;
 
-      // Create or update OptimizelyResult document
+      // Calculate quarantine statistics
+      const quarantineStats = {
+        confirmedRemovals: confirmedRemovals.length,
+        uncertainRemovals: uncertainRemovals.length,
+        scrapingFailures: scrapingFailures.length,
+        pendingReview: pendingReview.length,
+        needsManualReview: uncertainRemovals.filter(r => r.needsManualReview).length
+      };
+
+      // Create or update OptimizelyResult document with enhanced fields
       const optimizelyResult = await OptimizelyResult.findOneAndUpdate(
         { datasetId: datasetId },
         {
@@ -1410,15 +1722,37 @@ async extractOptimizelyOnPageReady(page) {
           failedScrapes: failedScrapes,
           optimizelyDetectedCount: optimizelyDetectedCount,
           totalExperiments: totalExperiments,
+          
+          // Original categories
           websiteResults: websiteResults,
           websitesWithoutOptimizely: websitesWithoutOptimizely,
-          failedWebsites: failedWebsites,
+          failedWebsites: scrapingFailures, // Map to enhanced failures
+          
+          // Enhanced quarantine categories
+          quarantineResults: {
+            confirmedRemovals: confirmedRemovals,
+            uncertainRemovals: uncertainRemovals,
+            scrapingFailures: scrapingFailures,
+            pendingReview: pendingReview
+          },
+          
+          // Enhanced statistics
           scrapingStats: {
             startedAt: startTime,
             completedAt: endTime,
             duration: duration,
             optimizelyRate: optimizelyRate,
             successRate: successRate
+          },
+          
+          // Quarantine statistics
+          quarantineStats: quarantineStats,
+          
+          // Alert levels for monitoring
+          alertLevels: {
+            critical: confirmedRemovals.length,
+            warning: uncertainRemovals.length,
+            info: scrapingFailures.length
           }
         },
         { 
@@ -1432,7 +1766,17 @@ async extractOptimizelyOnPageReady(page) {
       await this.createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutOptimizely, endTime);
 
       console.log(`✅ Saved batch results to database for dataset ${datasetId}`);
-      console.log(`📊 Summary: ${successfulScrapes}/${results.length} successful, ${optimizelyDetectedCount} with Optimizely, ${websitesWithoutOptimizely.length} without Optimizely, ${totalExperiments} total experiments`);
+      console.log(`📊 Summary: ${successfulScrapes}/${results.length} successful, ${optimizelyDetectedCount} with Optimizely, ${totalExperiments} total experiments`);
+      console.log(`🔍 Enhanced Categories:`);
+      console.log(`   - Websites with Optimizely: ${websiteResults.length}`);
+      console.log(`   - Websites without Optimizely: ${websitesWithoutOptimizely.length}`);
+      console.log(`   - Confirmed removals: ${confirmedRemovals.length}`);
+      console.log(`   - Uncertain removals (need review): ${uncertainRemovals.length}`);
+      console.log(`   - Scraping failures: ${scrapingFailures.length}`);
+      
+      if (uncertainRemovals.length > 0) {
+        console.log(`⚠️  ALERT: ${uncertainRemovals.length} uncertain removals detected - manual review recommended`);
+      }
       
       return optimizelyResult;
     } catch (error) {
