@@ -148,8 +148,8 @@ class OptimizelyScraperService {
 
         // Use chromium for production/serverless, regular puppeteer for local
         if (!isLocal) {
-            browserOptions.executablePath = '/usr/bin/chromium';
-            browserOptions.headless = 'new';
+            browserOptions.executablePath =  await chromium.executablePath();
+            browserOptions.headless =  chromium.headless;
         }
 
         const browser = await puppeteer.launch(browserOptions);
