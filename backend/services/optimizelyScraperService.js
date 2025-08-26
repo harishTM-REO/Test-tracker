@@ -961,7 +961,88 @@ async extractOptimizelyOnPageReady(page) {
     }, 8000);
   });
 }
+/**
+   * Checks for the presence of a captcha on the page.
+   * @param {Object} page - Puppeteer page instance
+   * @returns {Object} An object { detected: boolean, reason: string }
+   */
+  async detectCaptcha(page) {
+    try {
+      console.log("🕵️  Running captcha detection...");
+      const captchaResult = await page.evaluate(() => {
+        const selectors = [
+          '#g-recaptcha',          // Google reCAPTCHA
+          'div.g-recaptcha',
+          '[data-sitekey]',        // Common attribute for captchas
+          '#h-captcha',            // hCaptcha
+          'div.h-captcha',
+          '.cf-turnstile',         // Cloudflare Turnstile
+          '.frc-captcha',          // FunCaptcha / Arkose Labs
+          '#captcha-container',
+          '[class*="captcha"]'
+        ];
 
+        const iframeKeywords = [
+          'recaptcha',
+          'hcaptcha',
+          'challenges.cloudflare.com',
+          'arkoselabs'
+        ];
+
+        const textKeywords = [
+          'verify you are human',
+          'prove you\'re not a robot',
+          'security check',
+          'are you a robot',
+          'just a moment...' // Cloudflare DDoS page
+        ];
+        
+        // 1. Check for specific selectors
+        for (const selector of selectors) {
+          if (document.querySelector(selector)) {
+            return { detected: true, reason: `Found selector: ${selector}` };
+          }
+        }
+
+        // 2. Check iframe sources
+        for (const iframe of document.querySelectorAll('iframe')) {
+          const src = iframe.src || '';
+          if (iframeKeywords.some(keyword => src.includes(keyword))) {
+            return { detected: true, reason: `Found iframe with src: ${src}` };
+          }
+        }
+        
+        // 3. Check for keywords in page text content
+        const bodyText = document.body.innerText.toLowerCase();
+        for (const keyword of textKeywords) {
+          if (bodyText.includes(keyword)) {
+            return { detected: true, reason: `Found text keyword: "${keyword}"` };
+          }
+        }
+        
+        // 4. Check page title
+        const pageTitle = document.title.toLowerCase();
+        if (textKeywords.some(keyword => pageTitle.includes(keyword))) {
+            return { detected: true, reason: `Found keyword in title: "${document.title}"`};
+        }
+
+        return { detected: false, reason: 'No captcha indicators found' };
+      });
+
+      if (captchaResult.detected) {
+        console.warn(`CAPTCHA detected! Reason: ${captchaResult.reason}`);
+      } else {
+        console.log("✅ No captcha detected.");
+      }
+      
+      return captchaResult;
+
+    } catch (error) {
+      console.error('Error during captcha detection:', error.message);
+      // Fail safely, assuming no captcha if the check itself fails
+      return { detected: false, reason: 'Error in detection function' };
+    }
+  }
   /**
    * Main function to scrape experiments from a page
    * @param {string} url - URL to scrape
@@ -983,6 +1064,19 @@ async extractOptimizelyOnPageReady(page) {
       
       // Navigate to URL
       await this.navigateToPage(page, url);
+      // captcha check
+      const captchaCheck = await this.detectCaptcha(page);
+      if (captchaCheck.detected) {
+        // If captcha is found, return early with the specific flag.
+        return { 
+          captchaDetected: true,
+          captchaStatus: 'captcha_blocked',
+          hasOptimizely: false, // AB Tasty status is unknown
+          experiments: [],
+          experimentCount: 0,
+          error: `Scraping blocked by captcha (${captchaCheck.reason})`
+        };
+      }
       
       // Handle cookie consent with detection
       const cookieType = await this.handleCookieConsent(page);
@@ -1086,6 +1180,8 @@ async extractOptimizelyOnPageReady(page) {
         domain: website.domain,
       },
       optimizely: {
+        captchaDetected: experimentData.captchaDetected,
+        captchaStatus: experimentData.captchaStatus,
         detected: experimentData.hasOptimizely,
         experiments: experimentData.experiments,
         experimentCount: experimentData.experimentCount || 0,
