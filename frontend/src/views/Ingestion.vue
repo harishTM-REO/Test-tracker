@@ -1,7 +1,7 @@
 <template>
   <div>
     <h4 class="heading">File Data Dashboard</h4>
-    <v-col class="type-select">      
+    <v-col class="type-select">
       <h5 class="sub-heading">Please select a testing tool</h5>
       <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely']"  variant="solo"></v-select>
     </v-col>
@@ -247,96 +247,96 @@
         </v-card-text>
       </v-card>
 
-      <v-card v-if="datasets.length > 0" class="datasets-card" elevation="2">
-        <v-card-title class="card-title">
-          <v-icon color="success" class="title-icon">mdi-database-check</v-icon>
-          <span>Saved Datasets</span>
-          <v-spacer></v-spacer>
-          <v-chip color="success" variant="outlined">
-            {{ datasets.length }} dataset(s)
-          </v-chip>
-        </v-card-title>
-        <v-card-text>
-          <v-row>
-            <v-col v-for="dataset in datasets" :key="dataset._id" cols="12" md="6" lg="4">
-              <v-card variant="outlined" hover class="dataset-card">
-                <v-card-title class="dataset-title">
-                  <div class="dataset-header">
-                    <span class="dataset-name">{{ dataset.name }}</span>
-                    <v-chip color="primary" size="small" variant="flat">
-                      {{ dataset.version }}
-                    </v-chip>
-                  </div>
-                </v-card-title>
+<!--      <v-card v-if="datasets.length > 0" class="datasets-card" elevation="2">-->
+<!--        <v-card-title class="card-title">-->
+<!--          <v-icon color="success" class="title-icon">mdi-database-check</v-icon>-->
+<!--          <span>Saved Datasets</span>-->
+<!--          <v-spacer></v-spacer>-->
+<!--          <v-chip color="success" variant="outlined">-->
+<!--            {{ datasets.length }} dataset(s)-->
+<!--          </v-chip>-->
+<!--        </v-card-title>-->
+<!--        <v-card-text>-->
+<!--          <v-row>-->
+<!--            <v-col v-for="dataset in datasets" :key="dataset._id" cols="12" md="6" lg="4">-->
+<!--              <v-card variant="outlined" hover class="dataset-card">-->
+<!--                <v-card-title class="dataset-title">-->
+<!--                  <div class="dataset-header">-->
+<!--                    <span class="dataset-name">{{ dataset.name }}</span>-->
+<!--                    <v-chip color="primary" size="small" variant="flat">-->
+<!--                      {{ dataset.version }}-->
+<!--                    </v-chip>-->
+<!--                  </div>-->
+<!--                </v-card-title>-->
 
-                <v-card-text>
-                  <div class="dataset-info">
-                    <v-icon size="small" class="info-icon">mdi-file-document</v-icon>
-                    <span class="info-text">{{ dataset.originalFileName }}</span>
-                  </div>
+<!--                <v-card-text>-->
+<!--                  <div class="dataset-info">-->
+<!--                    <v-icon size="small" class="info-icon">mdi-file-document</v-icon>-->
+<!--                    <span class="info-text">{{ dataset.originalFileName }}</span>-->
+<!--                  </div>-->
 
-                  <div class="dataset-info">
-                    <v-icon size="small" class="info-icon">mdi-table-row</v-icon>
-                    <span class="info-text">{{ dataset.totalRows }} Domains Provided</span>
-                  </div>
+<!--                  <div class="dataset-info">-->
+<!--                    <v-icon size="small" class="info-icon">mdi-table-row</v-icon>-->
+<!--                    <span class="info-text">{{ dataset.totalRows }} Domains Provided</span>-->
+<!--                  </div>-->
 
-                  <div class="dataset-info">
-                    <v-icon size="small" class="info-icon">mdi-calendar</v-icon>
-                    <span class="info-text">{{ formatDate(dataset.createdAt) }}</span>
-                  </div>
+<!--                  <div class="dataset-info">-->
+<!--                    <v-icon size="small" class="info-icon">mdi-calendar</v-icon>-->
+<!--                    <span class="info-text">{{ formatDate(dataset.createdAt) }}</span>-->
+<!--                  </div>-->
 
-                  <div v-if="dataset.description" class="dataset-description">
-                    {{ dataset.description }}
-                  </div>
-                </v-card-text>
+<!--                  <div v-if="dataset.description" class="dataset-description">-->
+<!--                    {{ dataset.description }}-->
+<!--                  </div>-->
+<!--                </v-card-text>-->
 
-                <v-card-actions>
-                  <v-btn size="small" variant="text" color="primary" @click="loadDataset(dataset)">
-                    Load Data
-                    <v-icon end>mdi-download</v-icon>
-                  </v-btn>
+<!--                <v-card-actions>-->
+<!--                  <v-btn size="small" variant="text" color="primary" @click="loadDataset(dataset)">-->
+<!--                    Load Data-->
+<!--                    <v-icon end>mdi-download</v-icon>-->
+<!--                  </v-btn>-->
 
-                  <v-menu>
-                    <template v-slot:activator="{ props }">
-                      <v-btn size="small" variant="text" color="info" v-bind="props">
-                        Actions
-                        <v-icon end>mdi-chevron-down</v-icon>
-                      </v-btn>
-                    </template>
-                    <v-list>
-                      <v-list-item @click="downloadDataset(dataset)">
-                        <v-list-item-title>
-                          <v-icon start>mdi-download</v-icon>
-                          Download File
-                        </v-list-item-title>
-                      </v-list-item>
-                      <!-- <v-list-item @click="duplicateDataset(dataset)">
-                        <v-list-item-title>
-                          <v-icon start>mdi-content-copy</v-icon>
-                          Duplicate
-                        </v-list-item-title>
-                      </v-list-item> -->
-                      <!-- <v-list-item @click="viewVersions(dataset)">
-                        <v-list-item-title>
-                          <v-icon start>mdi-history</v-icon>
-                          View Versions
-                        </v-list-item-title>
-                      </v-list-item> -->
-                      <v-divider></v-divider>
-                      <v-list-item @click="deleteDataset(dataset._id)" class="text-error">
-                        <v-list-item-title>
-                          <v-icon start>mdi-delete</v-icon>
-                          Delete
-                        </v-list-item-title>
-                      </v-list-item>
-                    </v-list>
-                  </v-menu>
-                </v-card-actions>
-              </v-card>
-            </v-col>
-          </v-row>
-        </v-card-text>
-      </v-card>
+<!--                  <v-menu>-->
+<!--                    <template v-slot:activator="{ props }">-->
+<!--                      <v-btn size="small" variant="text" color="info" v-bind="props">-->
+<!--                        Actions-->
+<!--                        <v-icon end>mdi-chevron-down</v-icon>-->
+<!--                      </v-btn>-->
+<!--                    </template>-->
+<!--                    <v-list>-->
+<!--                      <v-list-item @click="downloadDataset(dataset)">-->
+<!--                        <v-list-item-title>-->
+<!--                          <v-icon start>mdi-download</v-icon>-->
+<!--                          Download File-->
+<!--                        </v-list-item-title>-->
+<!--                      </v-list-item>-->
+<!--                      &lt;!&ndash; <v-list-item @click="duplicateDataset(dataset)">-->
+<!--                        <v-list-item-title>-->
+<!--                          <v-icon start>mdi-content-copy</v-icon>-->
+<!--                          Duplicate-->
+<!--                        </v-list-item-title>-->
+<!--                      </v-list-item> &ndash;&gt;-->
+<!--                      &lt;!&ndash; <v-list-item @click="viewVersions(dataset)">-->
+<!--                        <v-list-item-title>-->
+<!--                          <v-icon start>mdi-history</v-icon>-->
+<!--                          View Versions-->
+<!--                        </v-list-item-title>-->
+<!--                      </v-list-item> &ndash;&gt;-->
+<!--                      <v-divider></v-divider>-->
+<!--                      <v-list-item @click="deleteDataset(dataset._id)" class="text-error">-->
+<!--                        <v-list-item-title>-->
+<!--                          <v-icon start>mdi-delete</v-icon>-->
+<!--                          Delete-->
+<!--                        </v-list-item-title>-->
+<!--                      </v-list-item>-->
+<!--                    </v-list>-->
+<!--                  </v-menu>-->
+<!--                </v-card-actions>-->
+<!--              </v-card>-->
+<!--            </v-col>-->
+<!--          </v-row>-->
+<!--        </v-card-text>-->
+<!--      </v-card>-->
 
       <!-- Export Options -->
       <!-- <v-card class="export-card" variant="tonal" color="grey-lighten-4">
@@ -557,7 +557,7 @@ export default {
 
       try {
         const fileType = this.getFileType(this.selectedFile.type);
-        
+
         if (fileType === 'CSV') {
           await this.processCSV();
         } else if (fileType === 'Excel') {
@@ -581,7 +581,7 @@ export default {
           try {
             const csvText = e.target.result;
             const lines = csvText.split('\n').filter(line => line.trim());
-            
+
             if (lines.length === 0) {
               throw new Error('Empty CSV file');
             }
@@ -590,7 +590,7 @@ export default {
               const result = [];
               let current = '';
               let inQuotes = false;
-              
+
               for (let i = 0; i < line.length; i++) {
                 const char = line[i];
                 if (char === '"') {
@@ -656,8 +656,8 @@ export default {
 
             workbook.SheetNames.forEach(sheetName => {
               const worksheet = workbook.Sheets[sheetName];
-              
-              const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+
+              const jsonData = XLSX.utils.sheet_to_json(worksheet, {
                 header: 1,
                 defval: '',
                 raw: false
@@ -666,8 +666,8 @@ export default {
               if (jsonData.length > 0) {
                 const columns = jsonData[0] || [];
                 const rows = jsonData.slice(1);
-                
-                const filteredRows = rows.filter(row => 
+
+                const filteredRows = rows.filter(row =>
                   row.some(cell => cell !== null && cell !== undefined && cell !== '')
                 );
 
@@ -735,11 +735,11 @@ export default {
 
     getCurrentSheetData() {
       if (!this.data || !this.data.sheets) return { columns: [], rows: [] };
-      
+
       if (this.data.sheets.length === 1) {
         return this.data.sheets[0];
       }
-      
+
       return this.data.sheets.find(sheet => sheet.name === this.selectedSheet) || this.data.sheets[0];
     },
 
@@ -797,32 +797,32 @@ export default {
     getColumnType(columnName) {
       const name = columnName.toLowerCase();
       const currentData = this.getCurrentSheetData();
-      
+
       if (currentData.rows.length > 0) {
         const columnIndex = currentData.columns.indexOf(columnName);
         if (columnIndex !== -1) {
           const sampleValues = currentData.rows.slice(0, 10).map(row => row[columnIndex]).filter(val => val && val.toString().trim());
-          
+
           if (sampleValues.length > 0) {
             if (sampleValues.some(val => val.toString().match(/^https?:\/\//))) {
               return 'URL';
             }
-            
+
             if (sampleValues.some(val => val.toString().match(/\S+@\S+\.\S+/))) {
               return 'Email';
             }
-            
+
             if (sampleValues.every(val => !isNaN(parseFloat(val)) && isFinite(val))) {
               return 'Number';
             }
-            
+
             if (sampleValues.some(val => !isNaN(Date.parse(val)))) {
               return 'Date';
             }
           }
         }
       }
-      
+
       if (name.includes('id')) return 'ID';
       if (name.includes('email')) return 'Email';
       if (name.includes('url') || name.includes('website') || name.includes('link')) return 'URL';
@@ -831,7 +831,7 @@ export default {
       if (name.includes('phone') || name.includes('mobile')) return 'Phone';
       if (name.includes('address')) return 'Address';
       if (name.includes('name') || name.includes('title')) return 'Name';
-      
+
       return 'Text';
     },
 
@@ -912,14 +912,14 @@ export default {
         }
 
         const result = await response.json();
-        
+
         // Show success notification
         this.$emit('show-notification', {
           type: 'success',
           message: result.message || 'Dataset saved successfully',
           isNewVersion: result.isNewVersion
         });
-        
+
         // Reset form
         this.saveOptions = {
           name: '',
@@ -945,18 +945,18 @@ export default {
 
     async loadDatasets() {
       this.loadingDatasets = true;
-      
+
       try {
         const response = await fetch(`${this.apiBaseUrl}/api/datasets?limit=50&sortBy=createdAt&sortOrder=desc`);
-        
+
         if (!response.ok) {
           const errorData = await response.json();
           throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
-        
+
         const result = await response.json();
         this.datasets = result.data || [];
-        
+
         this.loadingDatasets = false;
       } catch (err) {
         this.error = `Failed to load datasets: ${err.message}`;
@@ -969,12 +969,12 @@ export default {
       try {
         // Fetch full dataset with row data
         const response = await fetch(`${this.apiBaseUrl}/api/datasets/${dataset._id}?includeRows=true`);
-        
+
         if (!response.ok) {
           const errorData = await response.json();
           throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
-        
+
         const result = await response.json();
         const fullDataset = result.data;
 
@@ -993,7 +993,7 @@ export default {
 
         // Set the first sheet as selected
         this.selectedSheet = fullDataset.sheets[0]?.name;
-        
+
         // Clear current file selection
         this.selectedFile = null;
         if (this.$refs.fileInput) {
@@ -1005,7 +1005,7 @@ export default {
           type: 'success',
           message: `Dataset "${fullDataset.name}" loaded successfully`
         });
-        
+
       } catch (err) {
         this.error = `Failed to load dataset: ${err.message}`;
         console.error('Error loading dataset:', err);
@@ -1036,7 +1036,7 @@ export default {
           type: 'success',
           message: result.message || 'Dataset deleted successfully'
         });
-        
+
       } catch (err) {
         this.error = `Failed to delete dataset: ${err.message}`;
         console.error('Error deleting dataset:', err);
@@ -1045,17 +1045,17 @@ export default {
 
     async downloadDataset(dataset, version = null) {
       try {
-        const url = version 
+        const url = version
           ? `${this.apiBaseUrl}/api/datasets/${dataset._id}/download?version=${version}`
           : `${this.apiBaseUrl}/api/datasets/${dataset._id}/download`;
 
         // Create a temporary link and click it
         const link = document.createElement('a');
         link.href = url;
-        link.download = version 
+        link.download = version
           ? `${dataset.name}_${version}_${dataset.originalFileName}`
           : dataset.originalFileName;
-        
+
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -1116,15 +1116,15 @@ export default {
 
       try {
         const response = await fetch(`${this.apiBaseUrl}/api/datasets/${dataset._id}/versions`);
-        
+
         if (!response.ok) {
           const errorData = await response.json();
           throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
-        
+
         const result = await response.json();
         this.datasetVersions = result.data.versions || [];
-        
+
       } catch (err) {
         this.showNotificationMessage('Failed to load version history: ' + err.message, 'error');
         console.error('Error loading versions:', err);
@@ -1147,16 +1147,16 @@ export default {
     // Extract companies from current data
     extractCompaniesFromData() {
       if (!this.data || !this.data.sheets) return [];
-      
+
       const companies = [];
-      
+
       this.data.sheets.forEach(sheet => {
         if (sheet.columns && sheet.rows && sheet.columns.length >= 2) {
           // Find company name and URL columns
-          const nameColumnIndex = sheet.columns.findIndex(col => 
+          const nameColumnIndex = sheet.columns.findIndex(col =>
             col.toLowerCase().includes('company') || col.toLowerCase().includes('name')
           );
-          const urlColumnIndex = sheet.columns.findIndex(col => 
+          const urlColumnIndex = sheet.columns.findIndex(col =>
             col.toLowerCase().includes('url') || col.toLowerCase().includes('website') || col.toLowerCase().includes('link')
           );
 
@@ -1165,17 +1165,17 @@ export default {
             sheet.rows.forEach(row => {
               const companyName = row[nameColumnIndex];
               const companyURL = row[urlColumnIndex];
-              
-              if (companyName && companyURL && 
-                  typeof companyName === 'string' && 
+
+              if (companyName && companyURL &&
+                  typeof companyName === 'string' &&
                   typeof companyURL === 'string' &&
-                  companyName.trim() && 
+                  companyName.trim() &&
                   companyURL.trim()) {
-                
+
                 // Basic URL validation and cleanup
                 const cleanURL = companyURL.trim();
                 const validURL = cleanURL.startsWith('http') ? cleanURL : `https://${cleanURL}`;
-                
+
                 companies.push({
                   companyName: companyName.trim(),
                   companyURL: validURL
@@ -1187,7 +1187,7 @@ export default {
       });
 
       // Remove duplicates based on company name
-      const uniqueCompanies = companies.filter((company, index, self) => 
+      const uniqueCompanies = companies.filter((company, index, self) =>
         index === self.findIndex(c => c.companyName.toLowerCase() === company.companyName.toLowerCase())
       );
 
