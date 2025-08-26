@@ -261,6 +261,10 @@ class AbTastyScraperService {
               cookieType: 'bbc',
               cookieSelector: '.piano-bbc-close-button',
             },
+              {
+                  cookieType: 'howden',
+                  cookieSelector: '.iubenda-cs-accept-btn',
+              }
           ];
 
           let attempts = 0;
