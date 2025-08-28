@@ -152,7 +152,7 @@ class AbTastyScraperService {
       await page.setRequestInterception(true);
       page.on('request', (req) => {
         const resourceType = req.resourceType();
-        if (['image', 'stylesheet', 'font'].includes(resourceType)) {
+        if (['image', 'font'].includes(resourceType)) {
           req.abort();
         } else {
           req.continue();
@@ -264,7 +264,10 @@ class AbTastyScraperService {
               {
                   cookieType: 'howden',
                   cookieSelector: '.iubenda-cs-accept-btn',
-              }
+              },
+              {   cookieType: 'cky',
+                  cookieSelector: '.cky-btn-accept',
+              },
           ];
 
           let attempts = 0;
