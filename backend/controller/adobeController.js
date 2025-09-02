@@ -47,7 +47,6 @@ async function scrapeExperiments(req, res) {
 
         // Scrape the website using enhanced service
         const result = await adobeScraperService.scrapeAdobeTargetExperiments(url, res);
-        console.log('controller response->', result)
         // Enhanced success response with more details
         res.status(200).json({
             success: true,

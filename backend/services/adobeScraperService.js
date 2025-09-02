@@ -94,13 +94,11 @@ class AdobeScraperService {
             // Handle cookie consent with detection
             const cookieType = handleCookieConsent(page);
             await new Promise(resolve => setTimeout(resolve, 2000));
-            await page.reload({waitUntil: 'domcontentloaded'});
             console.log('avinash - the scrapping reached here');
             // Extract adobeTarget data with intelligent waiting
             // TODO
             const experimentData = await this.extractAdobeTargetData(page);
             // experimentData.cookieType = cookieType;
-            console.log('the response->', experimentData);
             return experimentData;
 
         } catch (error) {
@@ -128,20 +126,73 @@ class AdobeScraperService {
         try {
             console.log("Extracting Optimizely data with enhanced detection...");
 
-            // Wait for page to be ready (Puppeteer approach)
-            // try {
-            //   await page.waitForFunction(() => document.readyState === 'complete', { timeout: 3000 });
-            //   // Additional wait for potential dynamic content
-            //   await new Promise(resolve => setTimeout(resolve, 500));
-            // } catch (error) {
-            //   console.log('Page ready timeout, proceeding anyway...');
-            // }
-
-            // Skip navigation detection to avoid false positives from intentional reloads
-            // navigationDetected already declared at function level
+            await page.reload({waitUntil: 'domcontentloaded'});
 
             try {
                 console.log('About to start Promise.race for Adobe Target extraction...');
+                
+                // Set up network response listener outside page.evaluate
+                let mboxResponseData = null;
+                page.on('response', async (response) => {
+                    console.log('the condition-->', response.url())
+                    if (response.url().includes('/mbox/json?mbox=target-global-mbox')) {
+                        console.log(`Found mbox response: ${response.url()}`);
+                        if (response.ok()) {
+                            try {
+                                const fullResponse = await response.json();
+                                
+                                // Collect all activity names from offers
+                                const activityNames = [];
+                                if (fullResponse.offers && Array.isArray(fullResponse.offers)) {
+                                    fullResponse.offers.forEach(offer => {
+                                        if (offer.responseTokens && offer.responseTokens['activity.name']) {
+                                            activityNames.push(offer.responseTokens['activity.name']);
+                                        }
+                                    });
+                                }
+                                
+                                console.log('Activity Names found:', activityNames);
+                                console.log('Captured mbox JSON data:', JSON.stringify(fullResponse, null, 2));
+                                
+                                // Store the full response with activity names
+                                mboxResponseData = fullResponse;
+                                mboxResponseData.activityNames = activityNames;
+                            } catch (error) {
+                                console.error(`Failed to parse mbox JSON: ${error.message}`);
+                                mboxResponseData = await response.text();
+                                console.log('Captured mbox text data:', mboxResponseData);
+                            }
+                        }
+                    }
+                    if(response.url().includes('/v1/delivery')){
+                        if (response.ok()) {
+                            try {
+                                const fullResponse = await response.json();
+
+                                const activityNames = [];
+                                if (fullResponse.offers && Array.isArray(fullResponse.offers)) {
+                                    fullResponse.offers.forEach(offer => {
+                                        if (offer.responseTokens && offer.responseTokens['activity.name']) {
+                                            activityNames.push(offer.responseTokens['activity.name']);
+                                        }
+                                    });
+                                }
+
+                                console.log('https://www.vuse.com/gb/en/', activityNames);
+                                console.log('Captured mbox JSON data:', JSON.stringify(fullResponse, null, 2));
+
+                                // Store the full response with activity names
+                                mboxResponseData = fullResponse;
+                                mboxResponseData.activityNames = activityNames;
+                            } catch (error) {
+                                console.error(`Failed to parse mbox JSON: ${error.message}`);
+                                mboxResponseData = await response.text();
+                                console.log('Captured mbox text data:', mboxResponseData);
+                            }
+                        }
+                    }
+                });
+                
                 const experimentData = await Promise.race([
                     // Main extraction with timeout protection
                     page.evaluate(() => {
@@ -177,12 +228,18 @@ class AdobeScraperService {
                                 }
 
                                 try {
-                                    const version = window.adobe.target.VERSION;
+                                    const version = parseInt(window.adobe.target.target['version']);
                                     console.log('Adobe Target VERSION:', version);
                                     
+                                    if (version === 1) {
+                                        console.log('Adobe Target version 1 detected - mbox response listener set up');
+                                    } else if (version === 2) {
+                                        console.log('Adobe Target version 2 detected');
+                                    }
+
                                     // Log the entire adobe.target object to see what's available
                                     console.log('Adobe Target object:', window.adobe.target);
-                                    
+
                                     // Return Adobe Target data
                                     return {
                                         experiments: [], // Will be populated based on actual Adobe Target data
@@ -287,9 +344,18 @@ class AdobeScraperService {
                     })
                 ]);
 
-                // No navigation listener to clean up
+                // Add mbox data to experiment data if captured
+                if (mboxResponseData) {
+                    experimentData.mboxData = mboxResponseData;
+                    console.log('Added mbox response data to experiment data');
+                    console.log(experimentData.mboxData)
+                }
+                
+                // Clean up response listener
+                page.removeAllListeners('response');
+                
                 const currentUrl = page.url();
-                console.log(`Optimizely data extracted from ${currentUrl}: ${experimentData.experiments?.length || 0} experiments found`);
+                console.log(`Adobe Target data extracted from ${currentUrl}: ${experimentData.experiments?.length || 0} experiments found`);
 
                 return experimentData;
 
@@ -370,6 +436,8 @@ class AdobeScraperService {
                 activeCount: experimentData.activeCount || 0,
                 error: experimentData.error,
                 adobeTargetObject: experimentData.adobeTargetObject,
+                activityNames: experimentData.mboxData?.activityNames || [],
+                mboxData: experimentData.mboxData,
                 cookieType: experimentData.cookieType || 'unknown',
             },
             saved: !!savedData,
