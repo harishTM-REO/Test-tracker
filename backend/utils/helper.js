@@ -177,18 +177,18 @@ const createPage = async (browser) => {
         const page = await browser.newPage();
 
         // Set smaller viewport as in your working code
-        await page.setViewport({width: 1080, height: 1024});
+        await page.setViewport({width: 1440, height: 1024});
 
         // Your optimized request interception
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            const resourceType = req.resourceType();
-            if (['image',  'font'].includes(resourceType)) {
-                req.abort();
-            } else {
-                req.continue();
-            }
-        });
+        // await page.setRequestInterception(true);
+        // page.on('request', (req) => {
+        //     const resourceType = req.resourceType();
+        //     if (['image',  'font'].includes(resourceType)) {
+        //         req.abort();
+        //     } else {
+        //         req.continue();
+        //     }
+        // });
 
         console.log('Page configured successfully');
         return page;

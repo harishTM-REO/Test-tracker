@@ -92,7 +92,7 @@ class AdobeScraperService {
 
             // Handle cookie consent with detection
             const cookieType = handleCookieConsent(page);
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 4000));
             console.log('avinash - the scrapping reached here');
             // Extract adobeTarget data with intelligent waiting
             // TODO
