@@ -104,7 +104,7 @@ const launchBrowser = async (fallbackOptions = {}) => {
             const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
 
             let browserOptions = {
-                headless: false,
+                headless: true,
                 ignoreHTTPSErrors: true,
                 args: [
                     '--no-sandbox',
@@ -670,7 +670,7 @@ const handleCookieConsent= async(page)=> {
 const closeBrowser = async(browser)=> {
     try {
         if (browser) {
-            // await browser.close();
+            await browser.close();
             console.log('Browser closed successfully');
         }
     } catch (error) {

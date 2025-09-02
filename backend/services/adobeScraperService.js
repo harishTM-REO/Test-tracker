@@ -17,7 +17,7 @@ try {
 class AdobeScraperService {
 
     /**
-     * Main function to scrape Optimizely experiments from a URL
+     * Main function to scrape Adobe Target experiments from a URL
      * @param {string} url - The website URL to scrape
      * @param {Object} res - Express response object (optional)
      * @returns {Object} Scraping results
@@ -27,7 +27,7 @@ class AdobeScraperService {
         const startTime = Date.now();
         let savedData = null;
         try {
-            console.log(`Starting Optimizely scrape for: ${url}`);
+            console.log(`Starting Adobe Target scrape for: ${url}`);
 
             // Step 1: Get or create website record (optional if ExperimentService not available)
             let website = null;
@@ -108,7 +108,7 @@ class AdobeScraperService {
             if (page) {
                 try {
                     // TODO
-                    // await page.close();
+                    await page.close();
                 } catch (e) {
                     console.warn('Error closing page:', e.message);
                 }
@@ -124,7 +124,7 @@ class AdobeScraperService {
         let navigationDetected = false;
         let mboxResponseData = null;
         try {
-            console.log("Extracting Optimizely data with enhanced detection...");
+            console.log("Extracting Adobe Target data with enhanced detection...");
 
             await page.reload({waitUntil: 'domcontentloaded'});
 
@@ -279,7 +279,7 @@ class AdobeScraperService {
                                     adobeTargetObject: window.adobe.target
                                 };
                             } catch (e) {
-                                console.error('Error fetching Optimizely experiment details:', e);
+                                console.error('Error fetching Adobe Target experiment details:', e);
                                 return null;
                             }
                         }
@@ -291,7 +291,7 @@ class AdobeScraperService {
 
                         function checkOptimizely() {
                             attempts++;
-                            console.log(`Optimizely check attempt ${attempts}/${maxAttempts}`);
+                            console.log(`Adobe Target check attempt ${attempts}/${maxAttempts}`);
 
                             try {
                                 const result = getOptiExperimentDetails();
@@ -331,15 +331,15 @@ class AdobeScraperService {
                                     }
                                 }
 
-                                // Max attempts reached - no Optimizely found
+                                // Max attempts reached - no Adobe Target found
                                 if (attempts >= maxAttempts) {
-                                    console.log('Max attempts reached, no Optimizely found');
+                                    console.log('Max attempts reached, no Adobe Target found');
                                     resolve({
                                         hasOptimizely: false,
                                         experiments: [],
                                         experimentCount: 0,
                                         activeCount: 0,
-                                        error: "Optimizely not found on page",
+                                        error: "Adobe Target not found on page",
                                         optimizelyData: null
                                     });
                                     return;
@@ -349,7 +349,7 @@ class AdobeScraperService {
                                 setTimeout(checkOptimizely, checkInterval);
 
                             } catch (error) {
-                                console.error('Error during Optimizely check:', error);
+                                console.error('Error during Adobe Target check:', error);
                                 reject(error);
                             }
                         }
@@ -360,7 +360,7 @@ class AdobeScraperService {
 
                         // Overall timeout to prevent hanging
                         setTimeout(() => {
-                            reject(new Error('Optimizely extraction timeout after 4 seconds'));
+                            reject(new Error('Adobe Target extraction timeout after 4 seconds'));
                         }, 4000);
                     });
                 });
@@ -388,7 +388,7 @@ class AdobeScraperService {
             }
 
         } catch (error) {
-            console.error('Error extracting Optimizely data:', error);
+            console.error('Error extracting Adobe Target data:', error);
 
             // Handle navigation-related errors
             if (error.message.includes('Execution context was destroyed') ||
