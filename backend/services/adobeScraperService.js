@@ -68,10 +68,6 @@ class AdobeScraperService {
         try {
             // Launch browser
             browser = await launchBrowser();
-
-            // browser = await this.connectWithRetry();
-
-            // Create and configure page
             page = await createPage(browser);
 
             // Navigate to URL
