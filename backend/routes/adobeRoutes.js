@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const {
     scrapeExperiments,
+    crawlPages
 } = require('../controller/adobeController');
 
 /**
@@ -14,5 +15,7 @@ const {
  * @features Enhanced cookie consent handling, better adobeTarget detection
  */
 router.get('/scrape', scrapeExperiments);
+
+router.get('/pageCrawl', crawlPages);
 
 module.exports = router;

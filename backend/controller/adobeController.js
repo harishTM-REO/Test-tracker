@@ -66,6 +66,56 @@ async function scrapeExperiments(req, res) {
     }
 }
 
+/**
+ * GET /api/adobeTarget/pageCrawl?url=example.com
+ * Crawl website to find PLP, PDP, Cart, and Checkout page URLs with Adobe experiments detection
+ */
+async function crawlPages(req, res) {
+    try {
+        const { url, maxPages = 50, depth = 3 } = req.query;
+        console.log(`Received crawl request for URL: ${url}`);
+
+        // Validate URL parameter
+        if (!url) {
+            return res.status(400).json({
+                success: false,
+                message: 'URL parameter is required',
+                example: '/api/adobeTarget/pageCrawl?url=https://example.com&maxPages=50&depth=3'
+            });
+        }
+
+        // Validate URL format
+        if (!isValidUrl(url)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid URL format',
+                provided: url
+            });
+        }
+
+        console.log(`🕷️ Starting enhanced web crawl with Adobe detection for: ${url}`);
+
+        // Use the service to crawl pages with Adobe experiments detection
+        const crawlResult = await adobeScraperService.crawlEcommercePages(url, 10, depth);
+
+        res.status(200).json({
+            success: true,
+            message: 'Enhanced web crawling with Adobe experiments detection completed successfully',
+            ...crawlResult
+        });
+
+    } catch (error) {
+        console.error('Error in crawlPages controller:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to crawl website pages with Adobe experiments detection',
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+}
+
 module.exports = {
-    scrapeExperiments
+    scrapeExperiments,
+    crawlPages
 };
