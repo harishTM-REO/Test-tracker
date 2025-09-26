@@ -87,8 +87,8 @@ class AdobeScraperService {
             }
 
             // Handle cookie consent with detection
-            const cookieType = handleCookieConsent(page);
-            await new Promise(resolve => setTimeout(resolve, 4000));
+            // const cookieType = handleCookieConsent(page);
+            // await new Promise(resolve => setTimeout(resolve, 4000));
             console.log('avinash - the scrapping reached here');
             // Extract adobeTarget data with intelligent waiting
             // TODO
@@ -235,9 +235,11 @@ class AdobeScraperService {
                     });
                 });
 
+                // Reload the page to trigger Adobe Target requests AFTER listener is set up
+                await page.reload({waitUntil: 'domcontentloaded'});
+
                 // Wait for mbox data (with timeout)
                 mboxResponseData = await mboxDataPromise;
-
                 // Now run the page evaluation to check for Adobe Target
                 const experimentData = await page.evaluate(() => {
                     console.log('Inside page.evaluate - starting extraction...');
@@ -255,7 +257,7 @@ class AdobeScraperService {
                             }
 
                             try {
-                                const version = parseInt(window.adobe.target['version']);
+                                const version = parseInt(window.adobe.target['VERSION']);
                                 console.log('Adobe Target VERSION:', version);
 
                                 if (version === 1) {
@@ -833,7 +835,62 @@ class AdobeScraperService {
     categorizeEcommerceUrl(url, pageContent = '') {
         const urlLower = url.toLowerCase();
         const contentLower = pageContent.toLowerCase();
-        
+
+        // FAQ/Help/Support page patterns (check first to avoid false positives)
+        const helpPagePatterns = [
+            /\/help/i,
+            /\/faq/i,
+            /\/support/i,
+            /\/customer-service/i,
+            /\/contact/i,
+            /\/about/i,
+            /\/guide/i,
+            /\/tutorial/i,
+            /\/instructions/i,
+            /\/how-to/i,
+            /\/terms/i,
+            /\/privacy/i,
+            /\/policy/i,
+            /\/legal/i,
+            /\/warranty/i,
+            /\/return/i,
+            /\/exchange/i,
+            /\/refund/i,
+            /\/shipping/i,
+            /\/delivery/i,
+            /\/store-pickup/i,
+            /\/help-topics/i,
+            /\/customer-care/i,
+            /\/service-center/i
+        ];
+
+        // Check for help/FAQ pages first
+        if (helpPagePatterns.some(pattern => pattern.test(urlLower))) {
+            return 'other';
+        }
+
+        // Deal/Sale/Promotion page patterns (check before cart/checkout to avoid false positives)
+        const dealPagePatterns = [
+            /\/deals/i,
+            /\/sale/i,
+            /\/sales/i,
+            /\/promotions/i,
+            /\/offers/i,
+            /\/discounts/i,
+            /\/clearance/i,
+            /\/special-offers/i,
+            /\/top-deals/i,
+            /\/daily-deals/i,
+            /\/flash-sale/i,
+            /\/outlet/i,
+            /\/bargains/i
+        ];
+
+        // Check for deal/sale pages
+        if (dealPagePatterns.some(pattern => pattern.test(urlLower))) {
+            return 'plp'; // Treat deals as PLP since they're product listing pages
+        }
+
         // Product Listing Page (PLP) patterns - Enhanced with GameStop and better specificity
         const plpPatterns = [
             // GameStop-style category patterns (must come before PDP patterns)
@@ -1089,9 +1146,9 @@ class AdobeScraperService {
     getCategoryLimit(category) {
         const limits = {
             plp: 3,       // Product Listing Pages
-            pdp: 3,       // Product Detail Pages  
+            pdp: 3,       // Product Detail Pages
             cart: 1,      // Cart Pages (only 1 needed - websites typically have 1 cart)
-            checkout: 3,  // Checkout Pages (can have multiple steps)
+            checkout: 1,  // Checkout Pages (only 1 needed - websites typically have 1 main checkout flow)
             other: 3      // Other pages
         };
         return limits[category] || 3;
@@ -1383,7 +1440,11 @@ class AdobeScraperService {
                                     usefulLinks.push({ url: link, category });
                                 } else {
                                     // Skip links for categories that are already full
-                                    console.log(`🚫 Skipping ${category} link: ${link} - category full`);
+                                    if (category === 'cart' || category === 'checkout') {
+                                        console.log(`🚫 Skipping ${category} link: ${link} - already found ${category} page`);
+                                    } else {
+                                        console.log(`🚫 Skipping ${category} link: ${link} - category full`);
+                                    }
                                 }
                             }
                         });
@@ -1437,6 +1498,13 @@ class AdobeScraperService {
                     }
 
                     processedCount++;
+
+                    // Check if critical ecommerce pages (cart and checkout) are found
+                    const hasCartAndCheckout = foundPages.cart.length >= 1 && foundPages.checkout.length >= 1;
+                    if (hasCartAndCheckout) {
+                        console.log(`🎯 Found both cart and checkout pages. Stopping crawl early to focus on other important pages.`);
+                        // Continue crawling but stop looking for more cart/checkout pages
+                    }
 
                     // Check if all categories have reached their limit
                     const allCategoriesFull = Object.keys(foundPages).every(category => {
