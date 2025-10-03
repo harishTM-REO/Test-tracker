@@ -15,13 +15,14 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const datasetRoutes = require('./routes/datasetRoutes');
-const optimizelyRoutes = require('./routes/optimizelyRoutes');
-const abTastyRoutes = require('./routes/abTastyRoutes');
 const changeDetectionRoutes = require('./routes/changeDetectionRoutes');
 const { errorHandler, requestLogger } = require('./middleware/errorHandler');
 const CronJobService = require('./services/cronJobService');
 const BackgroundScrapingService = require('./services/backgroundScrapingService');
 
+const optimizelyRoutes = require('./routes/optimizelyRoutes');
+const abTastyRoutes = require('./routes/abTastyRoutes');
+const adobeTargetRoutes = require('./routes/adobeRoutes');
 // Trust proxy for rate limiting (needed when behind reverse proxy/load balancer)
 app.set('trust proxy', 1);
 
@@ -80,6 +81,9 @@ app.use('/api/optimizely', optimizelyRoutes);
 
 // AbTasty Routes[batch scrape, etc.]
 app.use('/api/abtasty', abTastyRoutes);
+
+// Adobe Target Routes[batch, scrape, etc..]
+app.use('/api/adobetarget', adobeTargetRoutes);
 
 // Change Detection Routes
 app.use('/api/change-detection', changeDetectionRoutes);
