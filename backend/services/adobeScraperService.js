@@ -830,6 +830,281 @@ class AdobeScraperService {
     }
 
     /**
+     * Discover PDP pages from PLP pages when no PDPs were found during regular crawling
+     * @param {Object} page - Puppeteer page object
+     * @param {Array} plpPages - Array of PLP page objects
+     * @param {number} remainingPages - Number of pages we can still process
+     * @param {number} pdpLimit - Maximum PDPs we want to find
+     * @param {string} baseUrl - Base URL of the website
+     * @param {Set} visitedUrls - Set of already visited URLs
+     * @returns {Object} Discovery results
+     */
+    async discoverPDPFromPLP(page, plpPages, remainingPages, pdpLimit, baseUrl, visitedUrls) {
+        const results = {
+            pdpPages: [],
+            processedCount: 0,
+            plpProcessed: 0
+        };
+
+        // Limit how many PLPs we'll check based on remaining page budget
+        const maxPlpsToCheck = Math.min(plpPages.length, Math.ceil(remainingPages / 3)); // Reserve some budget per PLP
+        
+        for (let i = 0; i < maxPlpsToCheck && results.pdpPages.length < pdpLimit && results.processedCount < remainingPages; i++) {
+            const plpUrl = plpPages[i].url;
+            results.plpProcessed++;
+            
+            try {
+                console.log(`🔍 Analyzing PLP for product links: ${plpUrl}`);
+                
+                // Navigate to PLP page
+                await navigateToPage(page, plpUrl);
+                
+                // Extract product links from the PLP page with enhanced targeting
+                const linkData = await page.evaluate((baseUrl) => {
+                    const links = Array.from(document.querySelectorAll('a[href]'));
+                    const productSelectors = [
+                        'a[href*="/product"]',
+                        'a[href*="/item"]', 
+                        'a[href*="/p/"]',
+                        '.product-item a',
+                        '.product-card a',
+                        '.item a',
+                        '[class*="product"] a',
+                        '[class*="item"] a'
+                    ];
+                    
+                    // Get all links and product-specific links
+                    const allLinks = links.map(link => {
+                        try {
+                            const href = link.getAttribute('href');
+                            if (!href) return null;
+                            
+                            // Convert relative URLs to absolute
+                            const absoluteUrl = href.startsWith('http') 
+                                ? href 
+                                : new URL(href, baseUrl).href;
+                            
+                            return {
+                                url: absoluteUrl,
+                                text: link.textContent?.trim() || '',
+                                classes: link.className || ''
+                            };
+                        } catch (e) {
+                            return null;
+                        }
+                    }).filter(item => item && item.url.startsWith(baseUrl))
+                      .filter(item => !item.url.includes('#') && !item.url.includes('mailto:') && !item.url.includes('tel:'));
+
+                    // Also try product-specific selectors
+                    const productLinks = [];
+                    productSelectors.forEach(selector => {
+                        try {
+                            const productElements = document.querySelectorAll(selector);
+                            productElements.forEach(el => {
+                                const href = el.getAttribute('href');
+                                if (href) {
+                                    try {
+                                        const absoluteUrl = href.startsWith('http') 
+                                            ? href 
+                                            : new URL(href, baseUrl).href;
+                                        productLinks.push({
+                                            url: absoluteUrl,
+                                            text: el.textContent?.trim() || '',
+                                            classes: el.className || '',
+                                            selector: selector
+                                        });
+                                    } catch (e) {}
+                                }
+                            });
+                        } catch (e) {}
+                    });
+
+                    return {
+                        allLinks: allLinks,
+                        productLinks: productLinks,
+                        totalLinks: allLinks.length
+                    };
+                }, baseUrl);
+
+                console.log(`📋 Extracted ${linkData.totalLinks} total links, ${linkData.productLinks.length} product-specific links from PLP: ${plpUrl}`);
+
+                // Combine and deduplicate links
+                const allPotentialLinks = [...linkData.allLinks, ...linkData.productLinks];
+                const uniqueLinks = [...new Map(allPotentialLinks.map(item => [item.url, item])).values()];
+
+                // Filter links that look like PDPs and haven't been visited
+                const potentialPDPs = [];
+                const categoryDebug = [];
+                
+                uniqueLinks.forEach(linkItem => {
+                    if (visitedUrls.has(linkItem.url)) return;
+                    
+                    const category = this.categorizeEcommerceUrl(linkItem.url);
+                    categoryDebug.push({ url: linkItem.url, category, text: linkItem.text });
+                    
+                    if (category === 'pdp') {
+                        potentialPDPs.push(linkItem.url);
+                    }
+                });
+
+                console.log(`📋 Link categorization sample:`, categoryDebug.slice(0, 10));
+                console.log(`📋 Found ${potentialPDPs.length} potential PDP links on PLP: ${plpUrl}`);
+
+                // If no PDPs found through URL patterns, try fallback with promising links
+                let pdpsToCheck = potentialPDPs.slice(0, Math.min(3, pdpLimit - results.pdpPages.length));
+                
+                if (pdpsToCheck.length === 0) {
+                    console.log(`🔄 No PDPs found via URL patterns, trying fallback with promising links...`);
+                    
+                    // Look for links that might be products but weren't categorized as such
+                    const fallbackCandidates = uniqueLinks
+                        .filter(linkItem => !visitedUrls.has(linkItem.url))
+                        .filter(linkItem => {
+                            const url = linkItem.url.toLowerCase();
+                            const text = linkItem.text.toLowerCase();
+                            
+                            // Exclude obvious non-product links
+                            const excludePatterns = [
+                                'login', 'register', 'account', 'wishlist', 'compare', 'search',
+                                'filter', 'sort', 'page', 'category', 'brand', 'sale', 'clearance',
+                                'help', 'contact', 'about', 'terms', 'privacy', 'shipping',
+                                'return', 'policy', 'faq', 'support', 'newsletter', 'subscribe'
+                            ];
+                            
+                            const isExcluded = excludePatterns.some(pattern => 
+                                url.includes(pattern) || text.includes(pattern)
+                            );
+                            
+                            if (isExcluded) return false;
+                            
+                            // Look for promising indicators
+                            const productIndicators = [
+                                linkItem.text.length > 10, // Reasonable product name length
+                                url.includes('item') || url.includes('product') || url.includes('/p/'),
+                                linkItem.classes.includes('product') || linkItem.classes.includes('item'),
+                                /\d/.test(url) // Has numbers which many product URLs have
+                            ];
+                            
+                            return productIndicators.filter(Boolean).length >= 1;
+                        })
+                        .slice(0, 3); // Try max 3 fallback candidates
+                    
+                    console.log(`🔄 Found ${fallbackCandidates.length} fallback candidates`);
+                    pdpsToCheck = fallbackCandidates.map(item => item.url);
+                }
+
+                const maxPDPsPerPLP = Math.min(3, pdpLimit - results.pdpPages.length);
+                pdpsToCheck = pdpsToCheck.slice(0, maxPDPsPerPLP);
+
+                for (const pdpUrl of pdpsToCheck) {
+                    if (results.processedCount >= remainingPages) break;
+                    
+                    try {
+                        console.log(`🛍️ Validating potential PDP: ${pdpUrl}`);
+                        
+                        // Navigate to potential PDP
+                        await navigateToPage(page, pdpUrl);
+                        results.processedCount++;
+                        visitedUrls.add(pdpUrl);
+
+                        // Get page content for validation
+                        const pageContent = await page.evaluate(() => {
+                            return document.body ? document.body.innerText : '';
+                        });
+
+                        // Double-check categorization with content
+                        const confirmedCategory = this.categorizeEcommerceUrl(pdpUrl, pageContent);
+                        
+                        // Enhanced validation with more flexible criteria
+                        const pdpIndicators = await page.evaluate(() => {
+                            const content = document.body ? document.body.innerText.toLowerCase() : '';
+                            
+                            // Enhanced cart detection
+                            const cartKeywords = ['add to cart', 'add to bag', 'buy now', 'add to basket', 'purchase', 'add item', 'shop now'];
+                            const hasAddToCart = cartKeywords.some(keyword => content.includes(keyword));
+                            
+                            // Enhanced product details detection
+                            const detailKeywords = ['size', 'color', 'quantity', 'sku', 'model', 'variant', 'available', 'stock', 'specification'];
+                            const hasProductDetails = detailKeywords.some(keyword => content.includes(keyword));
+                            
+                            // Enhanced price detection
+                            const priceSelectors = [
+                                '[class*="price"]', '[id*="price"]', '.currency', '[class*="cost"]',
+                                '[class*="amount"]', '[data-price]', '.money', '[class*="dollar"]',
+                                '[class*="euro"]', '[class*="pound"]', '[class*="yen"]'
+                            ];
+                            const hasPrice = priceSelectors.some(selector => document.querySelector(selector));
+                            
+                            // Check for product image galleries
+                            const imageGallerySelectors = [
+                                '[class*="gallery"]', '[class*="slider"]', '[class*="carousel"]',
+                                '[class*="zoom"]', '.product-images', '.item-images'
+                            ];
+                            const hasImageGallery = imageGallerySelectors.some(selector => document.querySelector(selector));
+                            
+                            // Check for review/rating elements
+                            const reviewSelectors = [
+                                '[class*="review"]', '[class*="rating"]', '[class*="star"]', 
+                                '[class*="feedback"]', '.reviews'
+                            ];
+                            const hasReviews = reviewSelectors.some(selector => document.querySelector(selector));
+                            
+                            return {
+                                hasAddToCart,
+                                hasProductDetails,
+                                hasPrice,
+                                hasImageGallery,
+                                hasReviews,
+                                contentLength: content.length
+                            };
+                        });
+
+                        console.log(`🔍 PDP validation for ${pdpUrl}:`, pdpIndicators);
+
+                        // More flexible validation: Accept if categorized as PDP OR has strong indicators
+                        const indicatorCount = Object.values(pdpIndicators).filter(Boolean).length;
+                        const isStrongPDP = indicatorCount >= 2; // Lowered from 2 to 1
+                        const isCategorizedAsPDP = confirmedCategory === 'pdp';
+                        
+                        if (isCategorizedAsPDP || isStrongPDP) {
+                            const pdpPageData = {
+                                url: pdpUrl,
+                                title: await page.title(),
+                                depth: 'plp-discovery',
+                                discoveredFrom: plpUrl,
+                                validated: true,
+                                pdpIndicators: pdpIndicators,
+                                confirmedCategory: confirmedCategory,
+                                validationMethod: isCategorizedAsPDP ? 'url-pattern' : 'content-indicators'
+                            };
+
+                            results.pdpPages.push(pdpPageData);
+                            console.log(`✅ Confirmed PDP from PLP discovery: ${pdpUrl} (${results.pdpPages.length}/${pdpLimit}) - Method: ${pdpPageData.validationMethod}`);
+                        } else {
+                            console.log(`❌ PDP validation failed - Category: ${confirmedCategory}, Indicators: ${indicatorCount}/5, URL: ${pdpUrl}`);
+                        }
+
+                    } catch (pdpError) {
+                        console.error(`Error validating PDP ${pdpUrl}:`, pdpError.message);
+                        results.processedCount++; // Still count it as processed
+                    }
+
+                    // Small delay between PDP checks
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+
+            } catch (plpError) {
+                console.error(`Error analyzing PLP ${plpUrl}:`, plpError.message);
+            }
+
+            // Small delay between PLP checks
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        return results;
+    }
+
+    /**
      * Helper function to categorize URLs based on ecommerce patterns
      */
     categorizeEcommerceUrl(url, pageContent = '') {
@@ -861,7 +1136,13 @@ class AdobeScraperService {
             /\/store-pickup/i,
             /\/help-topics/i,
             /\/customer-care/i,
-            /\/service-center/i
+            /\/service-center/i,
+            /\/download/i,
+            /\/news/i,
+            /\/blog/i,
+            /\/articles/i,
+            /\/press/i,
+            /\/media/i
         ];
 
         // Check for help/FAQ pages first
@@ -909,6 +1190,8 @@ class AdobeScraperService {
             /\/catalog\//i,
             /\/browse\//i,
             /\/search\?/i,
+            /\/designers\/[\w-]+\/\d+$/i,       // Azafashions-style: /designers/designer-name/numeric-id
+            /\/aza-curates\/[\w-]+\/\d+$/i,     // Azafashions-style: /aza-curates/collection-name/numeric-id
             
             // Platform/Console specific (GameStop style)
             /\/playstation-[45]$/i,
@@ -1004,10 +1287,13 @@ class AdobeScraperService {
             /\/item\/[\w-]+\/\d+/i,
             /\/product\/\d+$/i,
             /\/item\/\d+$/i,
+            /\/products\/[\w-]+-\d+$/i,        // Dressland-style: /products/product-name-number
+            /\/products\/[\w-]+\/\d+$/i,       // Azafashions-style: /products/product-name/numeric-id
+            /\/[\w-]+\/[\w-]+\/[\w-]+\/\d+\/buy$/i,  // Myntra-style: /category/brand/product-name/numeric-id/buy
             
             // Long product URLs with numeric IDs (Overstock style without product.html) 
-            // But NOT brand pages - exclude URLs containing /brand/
-            /\/[\w-]+\/(?!.*\/brand\/)[\w\s\-%.()]+\/\d+$/i,
+            // But NOT brand/designers/aza-curates pages - exclude URLs containing /brand/, /designers/, or /aza-curates/
+            /\/[\w-]+\/(?!.*\/brand\/)(?!.*\/designers\/)(?!.*\/aza-curates\/)[\w\s\-%.()]+\/\d+$/i,
             
             // SKU and model patterns (specific)
             /\/sku-\d+$/i,
@@ -1016,6 +1302,8 @@ class AdobeScraperService {
             // Product with file extensions (common for individual products)
             /\/[\w-]+-\d{4,}\.html?$/i,        // At least 4 digits for product ID
             /\/product-\d+\.html?$/i,
+            /\/[\w-]+\/[A-Z0-9]{6,}\.html?$/i,  // Biba-style: /product-name/ALPHANUMERIC-SKU.html
+            /\/[\w-]+-item-\d+/i,              // Farfetch-style: /product-name-item-XXXXXXXX
             
             // Product with color/variant (specific)
             /\/product\/\d+\/color\/\d+/i,
@@ -1527,6 +1815,28 @@ class AdobeScraperService {
             }
 
             console.log(`✅ Crawling completed. Processed ${processedCount} pages.`);
+
+            // 🔍 PLP-to-PDP Discovery: If few or no PDP pages found but PLP pages exist, try to discover PDPs from PLPs
+            const pdpLimit = this.getCategoryLimit('pdp');
+            const hasInsufficientPDPs = foundPages.pdp.length < Math.min(2, pdpLimit); // Trigger if less than 2 PDPs found
+            if (hasInsufficientPDPs && foundPages.plp.length > 0 && processedCount < maxPages) {
+                console.log(`🔍 Insufficient PDP pages found (${foundPages.pdp.length}/${pdpLimit}), but ${foundPages.plp.length} PLP pages available. Attempting PLP-to-PDP discovery...`);
+                
+                try {
+                    const remainingPages = maxPages - processedCount;
+                    const plpDiscoveryResults = await this.discoverPDPFromPLP(page, foundPages.plp, remainingPages, pdpLimit, baseUrl, visitedUrls);
+                    
+                    if (plpDiscoveryResults.pdpPages.length > 0) {
+                        foundPages.pdp.push(...plpDiscoveryResults.pdpPages);
+                        processedCount += plpDiscoveryResults.processedCount;
+                        console.log(`✅ PLP-to-PDP discovery successful: Found ${plpDiscoveryResults.pdpPages.length} PDP pages from ${plpDiscoveryResults.plpProcessed} PLP pages`);
+                    } else {
+                        console.log(`❌ PLP-to-PDP discovery: No valid PDP pages found in ${plpDiscoveryResults.plpProcessed} PLP pages`);
+                    }
+                } catch (discoveryError) {
+                    console.error('Error during PLP-to-PDP discovery:', discoveryError.message);
+                }
+            }
 
             // Prepare response
             const summary = {

@@ -104,7 +104,7 @@ const launchBrowser = async (fallbackOptions = {}) => {
             const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
 
             let browserOptions = {
-                headless: true,
+                headless: false,
                 ignoreHTTPSErrors: true,
                 args: [
                     '--no-sandbox',
