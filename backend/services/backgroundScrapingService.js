@@ -141,6 +141,7 @@ class BackgroundScrapingService {
   static async batchScrapeWithProgress(urls, toolType, options = {}, progressCallback) {
     const OptimizelyScraperService = require('./optimizelyScraperService');
     const AbTastyScraperService = require('./abTastyScraperService');
+    const AdobeScraperService = require('./adobeScraperService');
     const jobQueue = require('./jobQueue');
     
     // Get adaptive options based on current system load
@@ -169,6 +170,8 @@ class BackgroundScrapingService {
             return OptimizelyScraperService.scrapeOptimizelyExperiments(url);
             if(toolType ==='AbTasty')
             return AbTastyScraperService.scrapeAbTastyExperiments(url);
+            if(toolType ==='Adobe Target')
+            return this.scrapeAdobeTargetWithCrawling(url);
           })
         );
         
@@ -284,9 +287,10 @@ class BackgroundScrapingService {
       
       console.log(`Performing direct scraping for ${urls.length} URLs`);
       
-      // Import the OptimizelyScraperService
+      // Import the scraper services
       const OptimizelyScraperService = require('./optimizelyScraperService');
       const AbTastyyScraperService = require('./abTastyScraperService');
+      const AdobeScraperService = require('./adobeScraperService');
       
       // Perform batch scraping with progress updates
       const results = await this.batchScrapeWithProgress(urls,dataset.toolType, {
@@ -314,6 +318,17 @@ class BackgroundScrapingService {
         startTime
       );
       }
+      if(dataset.toolType ==='Adobe Target'){
+      console.log(`🔍 [Background] Calling Adobe Target saveBatchResults for dataset: ${dataset.name}`);
+      console.log(`🔍 [Background] Results summary:`, results.map(r => ({ url: r.url, success: r.success, detected: r.data?.adobeTarget?.detected })));
+      savedResults = await AdobeScraperService.saveBatchResults(
+        datasetId, 
+        dataset.name, 
+        results, 
+        startTime
+      );
+      console.log(`🔍 [Background] Adobe Target saveBatchResults completed. Saved ID: ${savedResults?._id}`);
+      }
       
       // Calculate final statistics
       const successful = results.filter(r => r.success);
@@ -321,6 +336,7 @@ class BackgroundScrapingService {
       console.log(JSON.stringify(results));
       const withOptimizely = successful.filter(r => r.data?.optimizely?.detected);
       const withAbTasty = successful.filter(r => r.data?.abTasty?.detected);
+      const withAdobeTarget = successful.filter(r => r.data?.adobeTarget?.detected);
       
       const stats = {
         totalUrls: urls.length,
@@ -328,6 +344,7 @@ class BackgroundScrapingService {
         failedScans: results.length - successful.length,
         optimizelyDetected: withOptimizely.length,
         abTastyDetected: withAbTasty.length,
+        adobeTargetDetected: withAdobeTarget.length,
         totalExperiments: savedResults.totalExperiments
       };
 
@@ -436,6 +453,137 @@ class BackgroundScrapingService {
       
     } catch (error) {
       console.error('Error checking pending jobs:', error);
+    }
+  }
+
+  /**
+   * Special Adobe Target scraping that includes website crawling for different page types
+   * @param {string} url - The website URL to scrape
+   * @returns {Object} Scraping results with crawled page types
+   */
+  static async scrapeAdobeTargetWithCrawling(url) {
+    const AdobeScraperService = require('./adobeScraperService');
+    
+    try {
+      console.log(`🕷️ Starting Adobe Target crawling for: ${url}`);
+      
+      // First, crawl the website to find different page types
+      const crawlResults = await AdobeScraperService.crawlEcommercePages(url, 30, 2); // 30 pages max, depth 2
+      
+      if (!crawlResults.success) {
+        throw new Error(`Website crawling failed: ${crawlResults.error || 'Unknown error'}`);
+      }
+      
+      console.log(`🕷️ Crawling completed for ${url}:`, crawlResults.summary);
+      
+      // Now scrape Adobe Target on different page types found
+      const pageTypesToScrape = ['home', 'plp', 'pdp', 'cart', 'checkout'];
+      const scrapingResults = {
+        url: url,
+        success: true,
+        data: {
+          adobeTarget: {
+            detected: false,
+            experiments: [],
+            experimentCount: 0,
+            activeCount: 0,
+            error: null,
+            crawlSummary: crawlResults.summary,
+            pageResults: {}
+          }
+        },
+        crawlData: crawlResults
+      };
+      
+      let overallDetected = false;
+      let totalExperiments = 0;
+      
+      // Test Adobe Target on each page type found
+      for (const pageType of pageTypesToScrape) {
+        const pagesOfType = crawlResults.pages[pageType] || [];
+        
+        if (pagesOfType.length > 0) {
+          // Test the first page of each type
+          const pageToTest = pagesOfType[0];
+          console.log(`🎯 Testing Adobe Target on ${pageType} page: ${pageToTest.url}`);
+          
+          try {
+            const pageResult = await AdobeScraperService.scrapeAdobeTargetExperiments(pageToTest.url);
+            
+            if (pageResult.success && pageResult.data?.adobeTarget?.detected) {
+              overallDetected = true;
+              totalExperiments += pageResult.data.adobeTarget.experimentCount || 0;
+              
+              scrapingResults.data.adobeTarget.pageResults[pageType] = {
+                url: pageToTest.url,
+                detected: true,
+                experiments: pageResult.data.adobeTarget.experiments || [],
+                experimentCount: pageResult.data.adobeTarget.experimentCount || 0,
+                version: pageResult.data.adobeTarget.version,
+                activityNames: pageResult.data.adobeTarget.activityNames || [],
+                activityIds: pageResult.data.adobeTarget.activityIds || []
+              };
+              
+              console.log(`✅ Adobe Target found on ${pageType}: ${pageResult.data.adobeTarget.experimentCount || 0} experiments`);
+            } else {
+              scrapingResults.data.adobeTarget.pageResults[pageType] = {
+                url: pageToTest.url,
+                detected: false,
+                error: pageResult.data?.adobeTarget?.error || 'Adobe Target not detected'
+              };
+              
+              console.log(`❌ Adobe Target not found on ${pageType}`);
+            }
+          } catch (pageError) {
+            console.error(`Error testing ${pageType} page:`, pageError.message);
+            scrapingResults.data.adobeTarget.pageResults[pageType] = {
+              url: pageToTest.url,
+              detected: false,
+              error: pageError.message
+            };
+          }
+        } else {
+          console.log(`ℹ️ No ${pageType} pages found during crawling`);
+          scrapingResults.data.adobeTarget.pageResults[pageType] = {
+            detected: false,
+            error: `No ${pageType} pages found during crawling`
+          };
+        }
+      }
+      
+      // Update overall results
+      scrapingResults.data.adobeTarget.detected = overallDetected;
+      scrapingResults.data.adobeTarget.experimentCount = totalExperiments;
+      
+      // Aggregate all experiments found across page types
+      const allExperiments = [];
+      Object.values(scrapingResults.data.adobeTarget.pageResults).forEach(pageResult => {
+        if (pageResult.experiments) {
+          allExperiments.push(...pageResult.experiments);
+        }
+      });
+      scrapingResults.data.adobeTarget.experiments = allExperiments;
+      
+      console.log(`🎯 Adobe Target crawling completed for ${url}: ${overallDetected ? 'DETECTED' : 'NOT DETECTED'} (${totalExperiments} total experiments across all pages)`);
+      
+      return scrapingResults;
+      
+    } catch (error) {
+      console.error(`Error in Adobe Target crawling for ${url}:`, error);
+      return {
+        url: url,
+        success: false,
+        error: error.message,
+        data: {
+          adobeTarget: {
+            detected: false,
+            experiments: [],
+            experimentCount: 0,
+            activeCount: 0,
+            error: error.message
+          }
+        }
+      };
     }
   }
 }

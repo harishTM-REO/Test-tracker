@@ -134,6 +134,13 @@ class AdobeScraperService {
                     page.on('response', async (response) => {
                         if (response.url().includes('/mbox/')) {
                             console.log(`Found mbox response: ${response.url()}`);
+                            
+                            // Skip preflight requests (OPTIONS) and other non-readable requests
+                            if (response.request().method() === 'OPTIONS') {
+                                console.log('Skipping preflight OPTIONS request');
+                                return;
+                            }
+                            
                             if (response.ok()) {
                                 try {
                                     const fullResponse = await response.json();
@@ -167,15 +174,28 @@ class AdobeScraperService {
                                     resolve(mboxData);
                                 } catch (error) {
                                     console.error(`Failed to parse mbox JSON: ${error.message}`);
-                                    const textData = await response.text();
-                                    console.log('Captured mbox text data:', textData);
-                                    clearTimeout(timeout);
-                                    resolve(textData);
+                                    try {
+                                        const textData = await response.text();
+                                        console.log('Captured mbox text data:', textData);
+                                        clearTimeout(timeout);
+                                        resolve(textData);
+                                    } catch (textError) {
+                                        console.error(`Failed to read mbox response as text: ${textError.message}`);
+                                        clearTimeout(timeout);
+                                        resolve(null);
+                                    }
                                 }
                             }
                         }
                         else if(response.url().includes('/v1/delivery')){
                             console.log(`Found delivery response: ${response.url()}`);
+                            
+                            // Skip preflight requests (OPTIONS) and other non-readable requests
+                            if (response.request().method() === 'OPTIONS') {
+                                console.log('Skipping preflight OPTIONS request');
+                                return;
+                            }
+                            
                             if (response.ok()) {
                                 try {
                                     const fullResponse = await response.json();
@@ -225,10 +245,16 @@ class AdobeScraperService {
                                     resolve(mboxData);
                                 } catch (error) {
                                     console.error(`Failed to parse delivery JSON: ${error.message}`);
-                                    const textData = await response.text();
-                                    console.log('Captured delivery text data:', textData);
-                                    clearTimeout(timeout);
-                                    resolve(textData);
+                                    try {
+                                        const textData = await response.text();
+                                        console.log('Captured delivery text data:', textData);
+                                        clearTimeout(timeout);
+                                        resolve(textData);
+                                    } catch (textError) {
+                                        console.error(`Failed to read delivery response as text: ${textError.message}`);
+                                        clearTimeout(timeout);
+                                        resolve(null);
+                                    }
                                 }
                             }
                         }
@@ -1142,13 +1168,40 @@ class AdobeScraperService {
             /\/blog/i,
             /\/articles/i,
             /\/press/i,
-            /\/media/i
+            /\/media/i,
+            /\/payments-faq/i,
+            /\/payment-faq/i,
+            /\/payments-help/i,
+            /\/payment-help/i,
+            /\/payment-info/i,
+            /\/payments-info/i,
+            /\/payment-and-pricing/i,
+            /\/payment-pricing/i,
+            /\/payments-and-pricing/i,
+            /\/payment-guide/i,
+            /\/payment-policy/i,
+            /\/payment-policies/i,
+            /\/my-account/i,
+            /\/account/i,
+            /\/profile/i,
+            /\/orders/i,
+            /\/order-history/i,
+            /\/wishlist/i,
+            /\/cliq-care/i,
+            /\/customer-care/i,
+            /\/login/i,
+            /\/signup/i,
+            /\/register/i
         ];
 
         // Check for help/FAQ pages first
         if (helpPagePatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: other (help/FAQ page)`);
             return 'other';
         }
+
+        // Note: Home page detection is handled separately in the crawling process
+        // The initial provided URL is always treated as home page
 
         // Deal/Sale/Promotion page patterns (check before cart/checkout to avoid false positives)
         const dealPagePatterns = [
@@ -1169,6 +1222,7 @@ class AdobeScraperService {
 
         // Check for deal/sale pages
         if (dealPagePatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: plp (deals/sale page)`);
             return 'plp'; // Treat deals as PLP since they're product listing pages
         }
 
@@ -1190,6 +1244,11 @@ class AdobeScraperService {
             /\/catalog\//i,
             /\/browse\//i,
             /\/search\?/i,
+            
+            // Tata Cliq style category patterns
+            /\/c\/[\w-]+$/i,                   // /c/category-name
+            /\/sr\/[\w-]+$/i,                  // /sr/search-results or category
+            /\/cw\/[\w-]+$/i,                  // /cw/category-wide listings
             /\/designers\/[\w-]+\/\d+$/i,       // Azafashions-style: /designers/designer-name/numeric-id
             /\/aza-curates\/[\w-]+\/\d+$/i,     // Azafashions-style: /aza-curates/collection-name/numeric-id
             
@@ -1316,6 +1375,12 @@ class AdobeScraperService {
             /\/p\/\d+$/i,
             /\/dp\/\d+$/i,
             
+            // Tata Cliq style: /product-name/p-product-id
+            /\/[\w-]+\/p-[\w\d]+$/i,
+            
+            // More Tata Cliq patterns: longer product names with multiple segments
+            /\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
+            
             // Product URLs ending with /product (no .html)
             /\/\d+\/product$/i,
         ];
@@ -1339,7 +1404,7 @@ class AdobeScraperService {
         const checkoutPatterns = [
             /\/checkout/i,
             /\/secure-checkout/i,
-            /\/payment/i,
+            /\/payment(?!.*faq)(?!.*help)(?!.*info)(?!.*pricing)(?!.*and-pricing)(?!.*guide)(?!.*policy)(?!.*policies)/i,  // /payment but exclude informational pages
             /\/billing/i,
             /\/purchase/i,
             /\/pay$/i,                          // More specific - ends with /pay
@@ -1371,23 +1436,41 @@ class AdobeScraperService {
         // Enhanced pattern checking with priority order (most specific first)
         
         // 1. Cart patterns (highest priority for cart-specific URLs)
-        if (cartPatterns.some(pattern => pattern.test(urlLower))) return 'cart';
+        if (cartPatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: cart`);
+            return 'cart';
+        }
         
         // 2. Order management patterns (exclude from checkout) - check before checkout
-        if (orderManagementPatterns.some(pattern => pattern.test(urlLower))) return 'other';
+        if (orderManagementPatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: other (order management)`);
+            return 'other';
+        }
         
         // 3. Checkout patterns (high priority, but after excluding order management)
-        if (checkoutPatterns.some(pattern => pattern.test(urlLower))) return 'checkout';
+        if (checkoutPatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: checkout`);
+            return 'checkout';
+        }
         
         // 4. Brand listing patterns (check before PDP to prevent brand pages being caught as products)
         const brandListingPatterns = [/\/b\/[\w-]+\/brand\/\d+/i];
-        if (brandListingPatterns.some(pattern => pattern.test(urlLower))) return 'plp';
+        if (brandListingPatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: plp (brand listing)`);
+            return 'plp';
+        }
         
         // 5. PDP patterns (check before general PLP patterns)
-        if (pdpPatterns.some(pattern => pattern.test(urlLower))) return 'pdp';
+        if (pdpPatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: pdp`);
+            return 'pdp';
+        }
         
         // 6. PLP patterns (only after specific patterns have been checked)
-        if (plpPatterns.some(pattern => pattern.test(urlLower))) return 'plp';
+        if (plpPatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: plp`);
+            return 'plp';
+        }
         
         // 5. Content-based detection for pages that might not have clear URL patterns
         if (contentLower) {
@@ -1396,6 +1479,7 @@ class AdobeScraperService {
                 contentLower.includes('buy now') || contentLower.includes('purchase now')) &&
                 (contentLower.includes('size') || contentLower.includes('color') || 
                 contentLower.includes('quantity') || contentLower.includes('reviews'))) {
+                console.log(`📊 Categorized ${url} as: pdp (content-based)`);
                 return 'pdp';
             }
             
@@ -1403,6 +1487,7 @@ class AdobeScraperService {
             if (contentLower.includes('shopping cart') || contentLower.includes('cart total') ||
                 contentLower.includes('remove from cart') || contentLower.includes('cart items') ||
                 contentLower.includes('proceed to checkout') || contentLower.includes('update cart')) {
+                console.log(`📊 Categorized ${url} as: cart (content-based)`);
                 return 'cart';
             }
             
@@ -1411,6 +1496,7 @@ class AdobeScraperService {
                 contentLower.includes('billing address') || contentLower.includes('shipping address') ||
                 contentLower.includes('payment method') || contentLower.includes('order summary') ||
                 contentLower.includes('review and submit')) {
+                console.log(`📊 Categorized ${url} as: checkout (content-based)`);
                 return 'checkout';
             }
             
@@ -1419,10 +1505,12 @@ class AdobeScraperService {
                 contentLower.includes('showing') && contentLower.includes('results')) &&
                 (contentLower.includes('price') || contentLower.includes('brand') || 
                 contentLower.includes('category'))) {
+                console.log(`📊 Categorized ${url} as: plp (content-based)`);
                 return 'plp';
             }
         }
         
+        console.log(`📊 Categorized ${url} as: other`);
         return 'other';
     }
 
@@ -1433,6 +1521,7 @@ class AdobeScraperService {
      */
     getCategoryLimit(category) {
         const limits = {
+            home: 1,      // Home Page (only 1 needed)
             plp: 3,       // Product Listing Pages
             pdp: 3,       // Product Detail Pages
             cart: 1,      // Cart Pages (only 1 needed - websites typically have 1 cart)
@@ -1466,6 +1555,7 @@ class AdobeScraperService {
             
             const visitedUrls = new Set();
             const foundPages = {
+                home: [],
                 plp: [],
                 pdp: [],
                 cart: [],
@@ -1474,6 +1564,13 @@ class AdobeScraperService {
             };
             const urlsToVisit = [url];
             const baseUrl = new URL(url).origin;
+            
+            // Always set the initial URL as home page
+            foundPages.home.push({
+                url: url,
+                category: 'home',
+                title: 'Home Page'
+            });
             
             let currentDepth = 0;
             let processedCount = 0;
@@ -1485,11 +1582,13 @@ class AdobeScraperService {
                 visitedUrls.add(currentUrl);
 
                 // Pre-categorize current URL to make smarter crawling decisions
-                const expectedCategory = this.categorizeEcommerceUrl(currentUrl);
+                // Special case: the initial URL is always considered home page
+                const expectedCategory = (currentUrl === url) ? 'home' : this.categorizeEcommerceUrl(currentUrl);
                 
-                // Skip URLs of categories that already have maximum pages
+                // Skip URLs of categories that already have maximum pages (except for the initial home page)
                 const categoryLimit = this.getCategoryLimit(expectedCategory);
-                if (foundPages[expectedCategory] && foundPages[expectedCategory].length >= categoryLimit) {
+                const isInitialHomePage = (currentUrl === url && expectedCategory === 'home');
+                if (!isInitialHomePage && foundPages[expectedCategory] && foundPages[expectedCategory].length >= categoryLimit) {
                     console.log(`⏭️ Skipping ${expectedCategory} page ${currentUrl} - category already full (${foundPages[expectedCategory].length}/${categoryLimit})`);
                     continue;
                 }
@@ -1661,12 +1760,15 @@ class AdobeScraperService {
                         }
                     }
 
-                    // Categorize the current page (PDP should remain PDP)
-                    const category = this.categorizeEcommerceUrl(currentUrl, pageContent);
+                    // Categorize the current page (special case for home page)
+                    const category = (currentUrl === url) ? 'home' : this.categorizeEcommerceUrl(currentUrl, pageContent);
                     
-                    // Check if this category already has maximum URLs
+                    // Check if this category already has maximum URLs (skip adding home page twice)
                     const currentCategoryLimit = this.getCategoryLimit(category);
-                    if (foundPages[category].length < currentCategoryLimit) {
+                    const isHomePage = (currentUrl === url && category === 'home');
+                    const shouldAddPage = !isHomePage && foundPages[category].length < currentCategoryLimit;
+                    
+                    if (shouldAddPage) {
                         const pageData = {
                             url: currentUrl,
                             title: await page.title(),
@@ -1685,6 +1787,8 @@ class AdobeScraperService {
 
                         foundPages[category].push(pageData);
                         console.log(`📝 Added ${category} page: ${currentUrl} (${foundPages[category].length}/${currentCategoryLimit})`);
+                    } else if (isHomePage) {
+                        console.log(`🏠 Home page already added: ${currentUrl}`);
                     } else {
                         console.log(`⏭️ Skipping ${category} page ${currentUrl} - already have ${currentCategoryLimit} ${category} pages`);
                     }
@@ -1717,9 +1821,12 @@ class AdobeScraperService {
                         const categorizedLinks = [];
                         const usefulLinks = [];
                         
+                        console.log(`🔗 Found ${links.length} total links on ${currentUrl}`);
+                        
                         links.forEach(link => {
                             if (!visitedUrls.has(link) && !urlsToVisit.includes(link)) {
                                 const category = this.categorizeEcommerceUrl(link);
+                                console.log(`🏷️ Link categorized: ${link} → ${category}`);
                                 
                                 // Only add links for categories that aren't full yet
                                 const linkCategoryLimit = this.getCategoryLimit(category);
@@ -1868,6 +1975,172 @@ class AdobeScraperService {
             if (browser) {
                 await closeBrowser(browser);
             }
+        }
+    }
+
+    /**
+     * Save batch scraping results to database
+     * @param {string} datasetId - Dataset ID
+     * @param {string} datasetName - Dataset name
+     * @param {Array} results - Array of scraping results
+     * @param {Date} startTime - Start time of scraping
+     * @returns {Object} Saved results
+     */
+    async saveBatchResults(datasetId, datasetName, results, startTime) {
+        const AdobeResult = require('../models/AdobeResult');
+        
+        try {
+            console.log(`🔍 [Adobe Target] Starting saveBatchResults for dataset: ${datasetId} (${datasetName})`);
+            console.log(`🔍 [Adobe Target] Results count: ${results.length}`);
+            console.log(`🔍 [Adobe Target] Sample result:`, JSON.stringify(results[0], null, 2));
+            
+            // Test AdobeResult model connection
+            console.log(`🔍 [Adobe Target] Testing AdobeResult model...`);
+            const existingResult = await AdobeResult.findOne({ datasetId: datasetId });
+            console.log(`🔍 [Adobe Target] Existing result found:`, !!existingResult);
+            
+            const endTime = new Date();
+            const duration = `${endTime - startTime}ms`;
+            
+            // Process results
+            const websiteResults = [];
+            const websitesWithoutAdobeTarget = [];
+            const failedWebsites = [];
+            let successfulScrapes = 0;
+            let adobeTargetDetectedCount = 0;
+            let totalExperiments = 0;
+
+            results.forEach((result, index) => {
+                console.log(`🔍 [Adobe Target] Processing result ${index + 1}/${results.length}:`, {
+                    url: result.url,
+                    success: result.success,
+                    hasData: !!result.data,
+                    adobeTargetDetected: result.data?.adobeTarget?.detected
+                });
+                
+                if (result.success && result.data) {
+                    successfulScrapes++;
+                    const domain = this.extractDomain(result.url);
+                    
+                    if (result.data.adobeTarget?.detected) {
+                        // Website has Adobe Target - add to websiteResults
+                        const websiteResult = {
+                            url: result.url,
+                            domain: domain,
+                            success: true,
+                            adobeTargetDetected: true,
+                            experiments: result.data.adobeTarget.experiments || [],
+                            experimentCount: result.data.adobeTarget.experimentCount || 0,
+                            activeCount: result.data.adobeTarget.activeCount || 0,
+                            cookieType: result.data.adobeTarget.cookieType || 'unknown',
+                            error: result.data.adobeTarget.error,
+                            scrapedAt: new Date(),
+                            // Adobe Target specific fields
+                            adobeTargetVersion: result.data.adobeTarget.version,
+                            adobeTargetObject: result.data.adobeTarget.adobeTargetObject,
+                            activityNames: result.data.adobeTarget.activityNames || [],
+                            activityIds: result.data.adobeTarget.activityIds || [],
+                            mboxData: result.data.adobeTarget.mboxData
+                        };
+
+                        adobeTargetDetectedCount++;
+                        totalExperiments += websiteResult.experimentCount;
+                        websiteResults.push(websiteResult);
+                    } else {
+                        // Website does not have Adobe Target - add to separate field
+                        const websiteWithoutAdobeTarget = {
+                            url: result.url,
+                            domain: domain,
+                            cookieType: result.data.adobeTarget?.cookieType || 'unknown',
+                            scrapedAt: new Date()
+                        };
+
+                        websitesWithoutAdobeTarget.push(websiteWithoutAdobeTarget);
+                    }
+                } else {
+                    const domain = this.extractDomain(result.url);
+                    failedWebsites.push({
+                        url: result.url,
+                        domain: domain,
+                        error: result.error || 'Unknown error',
+                        failedAt: new Date()
+                    });
+                }
+            });
+
+            const failedScrapes = results.length - successfulScrapes;
+            const successRate = `${((successfulScrapes / results.length) * 100).toFixed(1)}%`;
+            const adobeTargetRate = `${((adobeTargetDetectedCount / results.length) * 100).toFixed(1)}%`;
+
+            console.log(`🔍 [Adobe Target] Processing summary:`, {
+                totalResults: results.length,
+                successfulScrapes,
+                failedScrapes,
+                adobeTargetDetectedCount,
+                totalExperiments,
+                successRate,
+                adobeTargetRate,
+                websiteResultsCount: websiteResults.length,
+                websitesWithoutAdobeTargetCount: websitesWithoutAdobeTarget.length,
+                failedWebsitesCount: failedWebsites.length
+            });
+
+            // Create or update AdobeResult document
+            console.log(`🔍 [Adobe Target] Attempting to save to database...`);
+            
+            const updateData = {
+                datasetId: datasetId,
+                datasetName: datasetName,
+                totalUrls: results.length,
+                successfulScrapes: successfulScrapes,
+                failedScrapes: failedScrapes,
+                adobeTargetDetectedCount: adobeTargetDetectedCount,
+                totalExperiments: totalExperiments,
+                websiteResults: websiteResults,
+                websitesWithoutAdobeTarget: websitesWithoutAdobeTarget,
+                failedWebsites: failedWebsites,
+                scrapingStats: {
+                    startedAt: startTime,
+                    completedAt: endTime,
+                    duration: duration,
+                    successRate: successRate,
+                    adobeTargetRate: adobeTargetRate
+                }
+            };
+            
+            console.log(`🔍 [Adobe Target] Update data:`, JSON.stringify(updateData, null, 2));
+            
+            const adobeResult = await AdobeResult.findOneAndUpdate(
+                { datasetId: datasetId },
+                updateData,
+                { 
+                    new: true, 
+                    upsert: true,
+                    runValidators: true
+                }
+            );
+
+            console.log(`✅ Adobe Target batch results saved successfully for dataset: ${datasetName}`);
+            console.log(`📊 Results: ${results.length} total, ${successfulScrapes} successful, ${adobeTargetDetectedCount} with Adobe Target, ${totalExperiments} total experiments`);
+            console.log(`🔍 [Adobe Target] Saved document ID: ${adobeResult._id}`);
+            console.log(`🔍 [Adobe Target] Saved document:`, JSON.stringify(adobeResult, null, 2));
+
+            return adobeResult;
+
+        } catch (error) {
+            console.error('Error saving Adobe Target batch results:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Helper method to extract domain from URL
+     */
+    extractDomain(url) {
+        try {
+            return new URL(url).hostname;
+        } catch (error) {
+            return url;
         }
     }
 
