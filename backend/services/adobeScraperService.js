@@ -132,7 +132,7 @@ class AdobeScraperService {
                     }, 5000);
 
                     page.on('response', async (response) => {
-                        if (response.url().includes('/mbox/json?mbox=target-global-mbox')) {
+                        if (response.url().includes('/mbox/')) {
                             console.log(`Found mbox response: ${response.url()}`);
                             if (response.ok()) {
                                 try {
