@@ -173,6 +173,13 @@ class AdobeScraperService {
                                     clearTimeout(timeout);
                                     resolve(mboxData);
                                 } catch (error) {
+                                    // Check if this is a preflight/CORS related error
+                                    if (error.message.includes('Could not load body') || 
+                                        error.message.includes('preflight request')) {
+                                        console.log('Skipping mbox response - likely preflight or consumed request');
+                                        return; // Don't try to resolve, just skip this response
+                                    }
+                                    
                                     console.error(`Failed to parse mbox JSON: ${error.message}`);
                                     try {
                                         const textData = await response.text();
@@ -180,6 +187,11 @@ class AdobeScraperService {
                                         clearTimeout(timeout);
                                         resolve(textData);
                                     } catch (textError) {
+                                        if (textError.message.includes('Could not load body') || 
+                                            textError.message.includes('preflight request')) {
+                                            console.log('Skipping mbox text read - likely preflight or consumed request');
+                                            return; // Don't resolve, just skip
+                                        }
                                         console.error(`Failed to read mbox response as text: ${textError.message}`);
                                         clearTimeout(timeout);
                                         resolve(null);
@@ -193,6 +205,18 @@ class AdobeScraperService {
                             // Skip preflight requests (OPTIONS) and other non-readable requests
                             if (response.request().method() === 'OPTIONS') {
                                 console.log('Skipping preflight OPTIONS request');
+                                return;
+                            }
+                            
+                            // Skip if response body is not available
+                            try {
+                                const headers = response.headers();
+                                if (headers['access-control-request-method'] || headers['access-control-request-headers']) {
+                                    console.log('Skipping CORS preflight-related request');
+                                    return;
+                                }
+                            } catch (headerError) {
+                                console.log('Could not read response headers, skipping');
                                 return;
                             }
                             
@@ -244,6 +268,13 @@ class AdobeScraperService {
                                     clearTimeout(timeout);
                                     resolve(mboxData);
                                 } catch (error) {
+                                    // Check if this is a preflight/CORS related error
+                                    if (error.message.includes('Could not load body') || 
+                                        error.message.includes('preflight request')) {
+                                        console.log('Skipping response - likely preflight or consumed request');
+                                        return; // Don't try to resolve, just skip this response
+                                    }
+                                    
                                     console.error(`Failed to parse delivery JSON: ${error.message}`);
                                     try {
                                         const textData = await response.text();
@@ -251,6 +282,11 @@ class AdobeScraperService {
                                         clearTimeout(timeout);
                                         resolve(textData);
                                     } catch (textError) {
+                                        if (textError.message.includes('Could not load body') || 
+                                            textError.message.includes('preflight request')) {
+                                            console.log('Skipping text read - likely preflight or consumed request');
+                                            return; // Don't resolve, just skip
+                                        }
                                         console.error(`Failed to read delivery response as text: ${textError.message}`);
                                         clearTimeout(timeout);
                                         resolve(null);
@@ -1139,6 +1175,9 @@ class AdobeScraperService {
 
         // FAQ/Help/Support page patterns (check first to avoid false positives)
         const helpPagePatterns = [
+            // General FAQ pattern - any URL containing whole word "faq" or "FAQ"
+            /\bfaq\b/i,
+            
             /\/help/i,
             /\/faq/i,
             /\/support/i,
@@ -1249,6 +1288,7 @@ class AdobeScraperService {
             /\/c\/[\w-]+$/i,                   // /c/category-name
             /\/sr\/[\w-]+$/i,                  // /sr/search-results or category
             /\/cw\/[\w-]+$/i,                  // /cw/category-wide listings
+            /\/[\w-]+\/c-[\w\d]+$/i,           // /category-path/c-category-id (like womens-clothing-ethnic-wear-kurtis-kurtas/c-msh1012100)
             /\/designers\/[\w-]+\/\d+$/i,       // Azafashions-style: /designers/designer-name/numeric-id
             /\/aza-curates\/[\w-]+\/\d+$/i,     // Azafashions-style: /aza-curates/collection-name/numeric-id
             
@@ -1375,11 +1415,17 @@ class AdobeScraperService {
             /\/p\/\d+$/i,
             /\/dp\/\d+$/i,
             
-            // Tata Cliq style: /product-name/p-product-id
+            // Tata Cliq style: /product-name/p-product-id (flexible for any length product names)
             /\/[\w-]+\/p-[\w\d]+$/i,
             
             // More Tata Cliq patterns: longer product names with multiple segments
             /\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
+            /\/[\w-]+\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
+            /\/[\w-]+\/[\w-]+\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
+            /\/[\w-]+\/[\w-]+\/[\w-]+\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
+            
+            // General pattern for very long Tata Cliq product names (up to 10 segments)
+            /\/(?:[\w-]+\/){1,10}p-[\w\d]+$/i,
             
             // Product URLs ending with /product (no .html)
             /\/\d+\/product$/i,
@@ -1859,7 +1905,7 @@ class AdobeScraperService {
                             const bNeeds = Math.max(0, categoryNeeds[b.category]);
                             
                             // Higher need = higher priority (lower sort value)
-                            if (aNeeds !== bNeeds) {
+            if (aNeeds !== bNeeds){
                                 return bNeeds - aNeeds;
                             }
                             
@@ -2009,14 +2055,22 @@ class AdobeScraperService {
             let successfulScrapes = 0;
             let adobeTargetDetectedCount = 0;
             let totalExperiments = 0;
+            let crawlingData = null;
 
             results.forEach((result, index) => {
                 console.log(`🔍 [Adobe Target] Processing result ${index + 1}/${results.length}:`, {
                     url: result.url,
                     success: result.success,
                     hasData: !!result.data,
-                    adobeTargetDetected: result.data?.adobeTarget?.detected
+                    adobeTargetDetected: result.data?.adobeTarget?.detected,
+                    hasCrawlData: !!result.crawlData
                 });
+                
+                // Extract crawling data from the first result that has it
+                if (!crawlingData && result.crawlData) {
+                    console.log(`🔍 [Adobe Target] Extracting crawling data from result ${index + 1}`);
+                    crawlingData = result.crawlData;
+                }
                 
                 if (result.success && result.data) {
                     successfulScrapes++;
@@ -2105,7 +2159,8 @@ class AdobeScraperService {
                     duration: duration,
                     successRate: successRate,
                     adobeTargetRate: adobeTargetRate
-                }
+                },
+                crawlingData: crawlingData
             };
             
             console.log(`🔍 [Adobe Target] Update data:`, JSON.stringify(updateData, null, 2));

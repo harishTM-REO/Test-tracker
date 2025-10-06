@@ -9,6 +9,7 @@ import ExperimentChanges from '@/views/ExperimentChanges.vue'
 import DatasetsList from '@/views/DatasetsList.vue'
 import DatasetDetails from '@/views/DatasetDetails.vue'
 import ChangeHistory from '@/views/ChangeHistory.vue'
+import AdobeTargetCrawledUrls from '@/views/AdobeTargetCrawledUrls.vue'
 
 const routes = [
   {
@@ -60,6 +61,11 @@ const routes = [
     path: '/dataset/:id/change-history',
     name: 'ChangeHistory',
     component: ChangeHistory
+  },
+  {
+    path: '/dataset/:datasetId/adobe-target/crawled-urls',
+    name: 'AdobeTargetCrawledUrls',
+    component: AdobeTargetCrawledUrls
   }
 ]
 

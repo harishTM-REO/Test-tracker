@@ -102,6 +102,13 @@
             <button @click.stop="viewDataset(dataset._id)" class="action-btn details-btn">
               View Domains
             </button>
+            <button 
+              v-if="dataset.toolType === 'Adobe Target'" 
+              @click.stop="viewCrawledUrls(dataset._id)" 
+              class="action-btn adobe-btn"
+            >
+              View Crawled URLs
+            </button>
           </div>
         </div>
       </div>
@@ -165,6 +172,10 @@ export default {
     
     viewDataset(datasetId) {
       this.$router.push(`/dataset/${datasetId}`)
+    },
+
+    viewCrawledUrls(datasetId) {
+      this.$router.push(`/dataset/${datasetId}/adobe-target/crawled-urls`)
     },
     
     formatDate(dateString) {
@@ -569,6 +580,15 @@ export default {
 
 .details-btn:hover {
   background: #2980b9;
+}
+
+.adobe-btn {
+  background: #e74c3c;
+  color: white;
+}
+
+.adobe-btn:hover {
+  background: #c0392b;
 }
 
 @media (max-width: 768px) {

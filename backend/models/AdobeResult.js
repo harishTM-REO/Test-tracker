@@ -183,7 +183,11 @@ const adobeResultSchema = new mongoose.Schema({
   websiteResults: [websiteResultSchema],
   websitesWithoutAdobeTarget: [websiteWithoutAdobeTargetSchema],
   failedWebsites: [failedWebsiteSchema],
-  scrapingStats: scrapingStatsSchema
+  scrapingStats: scrapingStatsSchema,
+  crawlingData: {
+    type: mongoose.Schema.Types.Mixed,
+    description: 'Complete crawling results showing all discovered URLs by page type'
+  }
 }, {
   timestamps: true,
   collection: 'adoberesults'

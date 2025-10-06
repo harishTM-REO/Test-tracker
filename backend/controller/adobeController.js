@@ -1,4 +1,5 @@
 const adobeScraperService = require('../services/adobeScraperService');
+const AdobeResult = require('../models/AdobeResult');
 const axios = require('axios');
 
 
@@ -115,7 +116,94 @@ async function crawlPages(req, res) {
     }
 }
 
+/**
+ * GET /api/adobeTarget/dataset/:datasetId/crawled-urls
+ * Get all crawled URLs discovered during Adobe Target scraping for a dataset
+ */
+async function getDatasetCrawledUrls(req, res) {
+    try {
+        const { datasetId } = req.params;
+        console.log(`Fetching crawled URLs for dataset: ${datasetId}`);
+
+        // Find the Adobe result for this dataset
+        const adobeResult = await AdobeResult.findByDatasetId(datasetId);
+        
+        if (!adobeResult) {
+            return res.status(404).json({
+                success: false,
+                message: 'No Adobe Target scraping results found for this dataset',
+                datasetId: datasetId
+            });
+        }
+
+        // Extract all discovered URLs from the crawling data
+        const crawledUrls = {
+            summary: {
+                totalUrls: adobeResult.totalUrls,
+                successfulScrapes: adobeResult.successfulScrapes,
+                failedScrapes: adobeResult.failedScrapes,
+                adobeTargetDetectedCount: adobeResult.adobeTargetDetectedCount,
+                totalExperiments: adobeResult.totalExperiments
+            },
+            // Include all discovered URLs by page type from crawling
+            discoveredPages: adobeResult.crawlingData ? {
+                home: adobeResult.crawlingData.pages?.home || [],
+                plp: adobeResult.crawlingData.pages?.plp || [],
+                pdp: adobeResult.crawlingData.pages?.pdp || [],
+                cart: adobeResult.crawlingData.pages?.cart || [],
+                checkout: adobeResult.crawlingData.pages?.checkout || [],
+                other: adobeResult.crawlingData.pages?.other || [],
+                summary: adobeResult.crawlingData.summary || {}
+            } : null,
+            // Adobe Target specific results
+            urlsByCategory: {
+                withAdobeTarget: adobeResult.websiteResults.map(result => ({
+                    url: result.url,
+                    domain: result.domain,
+                    adobeTargetDetected: result.adobeTargetDetected,
+                    experimentCount: result.experimentCount,
+                    activeCount: result.activeCount,
+                    experiments: result.experiments,
+                    activityNames: result.activityNames || [],
+                    activityIds: result.activityIds || [],
+                    scrapedAt: result.scrapedAt
+                })),
+                withoutAdobeTarget: adobeResult.websitesWithoutAdobeTarget.map(result => ({
+                    url: result.url,
+                    domain: result.domain,
+                    scrapedAt: result.scrapedAt
+                })),
+                failed: adobeResult.failedWebsites.map(result => ({
+                    url: result.url,
+                    domain: result.domain,
+                    error: result.error,
+                    failedAt: result.failedAt
+                }))
+            },
+            scrapingStats: adobeResult.scrapingStats
+        };
+
+        res.status(200).json({
+            success: true,
+            message: 'Crawled URLs retrieved successfully',
+            datasetId: datasetId,
+            datasetName: adobeResult.datasetName,
+            data: crawledUrls
+        });
+
+    } catch (error) {
+        console.error('Error fetching crawled URLs:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch crawled URLs',
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+}
+
 module.exports = {
     scrapeExperiments,
-    crawlPages
+    crawlPages,
+    getDatasetCrawledUrls
 };
