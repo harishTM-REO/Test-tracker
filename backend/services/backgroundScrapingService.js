@@ -171,7 +171,7 @@ class BackgroundScrapingService {
             if(toolType ==='AbTasty')
             return AbTastyScraperService.scrapeAbTastyExperiments(url);
             if(toolType ==='Adobe Target')
-            return this.scrapeAdobeTargetWithCrawling(url);
+            return this.scrapeAdobeTargetWithCrawling(url, options.datasetId);
           })
         );
         
@@ -295,7 +295,8 @@ class BackgroundScrapingService {
       // Perform batch scraping with progress updates
       const results = await this.batchScrapeWithProgress(urls,dataset.toolType, {
         concurrent: 2,
-        delay: 1000
+        delay: 1000,
+        datasetId: datasetId
       }, (progress, partialResult) => {
         console.log(`Scraping progress: ${progress}%`);
       });
@@ -459,9 +460,10 @@ class BackgroundScrapingService {
   /**
    * Special Adobe Target scraping that includes website crawling for different page types
    * @param {string} url - The website URL to scrape
+   * @param {string} datasetId - The dataset ID to associate crawled pages with
    * @returns {Object} Scraping results with crawled page types
    */
-  static async scrapeAdobeTargetWithCrawling(url) {
+  static async scrapeAdobeTargetWithCrawling(url, datasetId = null) {
     const AdobeScraperService = require('./adobeScraperService');
     
     try {
@@ -497,23 +499,30 @@ class BackgroundScrapingService {
       
       let overallDetected = false;
       let totalExperiments = 0;
-      
+      console.log('avinash the response data');
+      console.log(crawlResults);
+
+      // ============================================
+      // PHASE 2: Adobe Target Experiment Scraping
+      // ============================================
+      // TODO: Uncomment this section in Phase 2 to enable Adobe Target experiment scraping
+      /*
       // Test Adobe Target on each page type found
       for (const pageType of pageTypesToScrape) {
         const pagesOfType = crawlResults.pages[pageType] || [];
-        
+
         if (pagesOfType.length > 0) {
           // Test the first page of each type
           const pageToTest = pagesOfType[0];
           console.log(`🎯 Testing Adobe Target on ${pageType} page: ${pageToTest.url}`);
-          
+
           try {
             const pageResult = await AdobeScraperService.scrapeAdobeTargetExperiments(pageToTest.url);
-            
+
             if (pageResult.success && pageResult.data?.adobeTarget?.detected) {
               overallDetected = true;
               totalExperiments += pageResult.data.adobeTarget.experimentCount || 0;
-              
+
               scrapingResults.data.adobeTarget.pageResults[pageType] = {
                 url: pageToTest.url,
                 detected: true,
@@ -523,7 +532,7 @@ class BackgroundScrapingService {
                 activityNames: pageResult.data.adobeTarget.activityNames || [],
                 activityIds: pageResult.data.adobeTarget.activityIds || []
               };
-              
+
               console.log(`✅ Adobe Target found on ${pageType}: ${pageResult.data.adobeTarget.experimentCount || 0} experiments`);
             } else {
               scrapingResults.data.adobeTarget.pageResults[pageType] = {
@@ -531,7 +540,7 @@ class BackgroundScrapingService {
                 detected: false,
                 error: pageResult.data?.adobeTarget?.error || 'Adobe Target not detected'
               };
-              
+
               console.log(`❌ Adobe Target not found on ${pageType}`);
             }
           } catch (pageError) {
@@ -550,6 +559,54 @@ class BackgroundScrapingService {
           };
         }
       }
+      */
+
+      // ============================================
+      // PHASE 1: Save crawled pages to database
+      // ============================================
+      // Save all crawled pages to CrawledPages model
+      const CrawledPages = require('../models/CrawledPages');
+
+      // Get dataset ID from URL (we'll need to pass this through)
+      // For now, we'll store the crawled pages without experiments
+      const savedPages = [];
+
+      for (const [pageType, pagesArray] of Object.entries(crawlResults.pages)) {
+        for (const page of pagesArray) {
+          try {
+            // Create or update crawled page entry
+            const crawledPage = await CrawledPages.findOneAndUpdate(
+              { url: page.url, datasetId: datasetId },
+              {
+                datasetId: datasetId,
+                url: page.url,
+                title: page.title || '',
+                domain: new URL(url).hostname,
+                pageType: pageType,
+                depth: page.depth || 0,
+                discoveredFrom: page.discoveredFrom || url,
+                responseStatus: page.status || 200,
+                loadTime: page.loadTime || 0,
+                validated: page.validated || false,
+                validationMethod: page.validationMethod || 'auto',
+                pdpIndicators: page.pdpIndicators || {},
+                cartFunctionality: page.cartFunctionality || {},
+                checkoutFunctionality: page.checkoutFunctionality || {},
+                navigationFlow: page.navigationFlow || {},
+                crawledAt: new Date()
+              },
+              { upsert: true, new: true }
+            );
+
+            savedPages.push(crawledPage);
+            console.log(`💾 Saved ${pageType} page: ${page.url}`);
+          } catch (saveError) {
+            console.error(`Error saving page ${page.url}:`, saveError.message);
+          }
+        }
+      }
+
+      console.log(`💾 Successfully saved ${savedPages.length} crawled pages to database`)
       
       // Update overall results
       scrapingResults.data.adobeTarget.detected = overallDetected;
