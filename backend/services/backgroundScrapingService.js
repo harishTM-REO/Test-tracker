@@ -611,7 +611,8 @@ class BackgroundScrapingService {
       // Update overall results
       scrapingResults.data.adobeTarget.detected = overallDetected;
       scrapingResults.data.adobeTarget.experimentCount = totalExperiments;
-      
+      console.log('the scrapping results---->');
+      console.log(scrapingResults);
       // Aggregate all experiments found across page types
       const allExperiments = [];
       Object.values(scrapingResults.data.adobeTarget.pageResults).forEach(pageResult => {

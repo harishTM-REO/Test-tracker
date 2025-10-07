@@ -157,7 +157,13 @@
           @click="activeTab = 'pages'"
           :class="['tab-btn', { active: activeTab === 'pages' }]"
         >
-          🕷️ Crawled Pages
+          🕷️ Crawled Pages (Phase 1)
+        </button>
+        <button
+          @click="activeTab = 'experiments'"
+          :class="['tab-btn', { active: activeTab === 'experiments' }]"
+        >
+          🎯 Experiments (Phase 2)
         </button>
       </div>
 
@@ -237,17 +243,27 @@
           @message="handleMessage"
         />
       </div>
+
+      <!-- Experiments Tab (Phase 2) -->
+      <div v-show="activeTab === 'experiments'" class="experiments-section">
+        <ExperimentsList
+          :datasetId="datasetId"
+          @message="handleMessage"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script>
 import CrawledPages from '../components/CrawledPages.vue'
+import ExperimentsList from '../components/ExperimentsList.vue'
 
 export default {
   name: 'DatasetDetails',
   components: {
-    CrawledPages
+    CrawledPages,
+    ExperimentsList
   },
   data() {
     return {
@@ -1125,6 +1141,14 @@ export default {
 }
 
 .crawled-pages-section {
+  background: white;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.experiments-section {
   background: white;
   border: 1px solid #eee;
   border-radius: 12px;

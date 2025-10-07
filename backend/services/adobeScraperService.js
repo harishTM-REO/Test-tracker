@@ -60,15 +60,22 @@ class AdobeScraperService {
         }
     }
 
-    async scrapeExperimentsFromPage(url) {
+    async scrapeExperimentsFromPage(url, sharedPage = null) {
         let browser = null;
         let page = null;
         let navigationDetected = false; // Declare at function level
+        const useSharedPage = !!sharedPage;
 
         try {
-            // Launch browser
-            browser = await launchBrowser();
-            page = await createPage(browser);
+            if (useSharedPage) {
+                // Use the provided shared page
+                page = sharedPage;
+                console.log('♻️ Using shared browser tab for scraping...');
+            } else {
+                // Create new browser and page
+                browser = await launchBrowser();
+                page = await createPage(browser);
+            }
 
             // Navigate to URL
             await navigateToPage(page, url);
@@ -87,8 +94,8 @@ class AdobeScraperService {
             }
 
             // Handle cookie consent with detection
-            // const cookieType = handleCookieConsent(page);
-            // await new Promise(resolve => setTimeout(resolve, 4000));
+            const cookieType = handleCookieConsent(page);
+            await new Promise(resolve => setTimeout(resolve, 4000));
             console.log('avinash - the scrapping reached here');
             // Extract adobeTarget data with intelligent waiting
             // TODO
@@ -100,19 +107,20 @@ class AdobeScraperService {
             console.error('Error scraping experiments from page:', error);
             throw error;
         } finally {
-            // Clean up
-            if (page) {
-                try {
-                    // TODO
-                    await page.close();
-                } catch (e) {
-                    console.warn('Error closing page:', e.message);
+            // Only clean up if NOT using shared page
+            if (!useSharedPage) {
+                if (page) {
+                    try {
+                        // await page.close();
+                    } catch (e) {
+                        console.warn('Error closing page:', e.message);
+                    }
+                }
+                if (browser) {
+                    await closeBrowser(browser);
                 }
             }
-            if (browser) {
-                // TODO
-                await closeBrowser(browser);
-            }
+            // If using shared page, don't close it - let the caller manage it
         }
     }
 
@@ -122,26 +130,33 @@ class AdobeScraperService {
         try {
             console.log("Extracting Adobe Target data with enhanced detection...");
 
-            await page.reload({waitUntil: 'domcontentloaded'});
-
             try {
                 const mboxDataPromise = new Promise((resolve) => {
+                    let resolved = false;
                     const timeout = setTimeout(() => {
-                        console.log('No mbox response received within timeout, proceeding without it');
-                        resolve(null);
-                    }, 5000);
+                        if (!resolved) {
+                            console.log('No mbox response received within timeout, proceeding without it');
+                            resolved = true;
+                            resolve(null);
+                        }
+                    }, 8000); // Increased timeout to 8 seconds
 
                     page.on('response', async (response) => {
                         if (response.url().includes('/mbox/')) {
                             console.log(`Found mbox response: ${response.url()}`);
-                            
+
                             // Skip preflight requests (OPTIONS) and other non-readable requests
                             if (response.request().method() === 'OPTIONS') {
                                 console.log('Skipping preflight OPTIONS request');
                                 return;
                             }
-                            
+
                             if (response.ok()) {
+                                // Clear timeout immediately to prevent race condition
+                                if (!resolved) {
+                                    clearTimeout(timeout);
+                                }
+
                                 try {
                                     const fullResponse = await response.json();
 
@@ -170,33 +185,47 @@ class AdobeScraperService {
                                     mboxData.activityIds = activityIds;
                                     console.log('mbox resposedata-> ', mboxData);
 
-                                    clearTimeout(timeout);
-                                    resolve(mboxData);
+                                    if (!resolved) {
+                                        resolved = true;
+                                        clearTimeout(timeout);
+                                        resolve(mboxData);
+                                    }
                                 } catch (error) {
                                     console.error(`Failed to parse mbox JSON: ${error.message}`);
                                     try {
                                         const textData = await response.text();
                                         console.log('Captured mbox text data:', textData);
-                                        clearTimeout(timeout);
-                                        resolve(textData);
+                                        if (!resolved) {
+                                            resolved = true;
+                                            clearTimeout(timeout);
+                                            resolve(textData);
+                                        }
                                     } catch (textError) {
                                         console.error(`Failed to read mbox response as text: ${textError.message}`);
-                                        clearTimeout(timeout);
-                                        resolve(null);
+                                        if (!resolved) {
+                                            resolved = true;
+                                            clearTimeout(timeout);
+                                            resolve(null);
+                                        }
                                     }
                                 }
                             }
                         }
                         else if(response.url().includes('/v1/delivery')){
                             console.log(`Found delivery response: ${response.url()}`);
-                            
+
                             // Skip preflight requests (OPTIONS) and other non-readable requests
                             if (response.request().method() === 'OPTIONS') {
                                 console.log('Skipping preflight OPTIONS request');
                                 return;
                             }
-                            
+
                             if (response.ok()) {
+                                // Clear timeout immediately to prevent race condition
+                                if (!resolved) {
+                                    clearTimeout(timeout);
+                                }
+
                                 try {
                                     const fullResponse = await response.json();
                                     console.log('Full delivery response:', fullResponse);
@@ -241,19 +270,28 @@ class AdobeScraperService {
                                     mboxData.activityIds = activityIds;
                                     console.log('mbox response data-> ', mboxData);
 
-                                    clearTimeout(timeout);
-                                    resolve(mboxData);
+                                    if (!resolved) {
+                                        resolved = true;
+                                        clearTimeout(timeout);
+                                        resolve(mboxData);
+                                    }
                                 } catch (error) {
                                     console.error(`Failed to parse delivery JSON: ${error.message}`);
                                     try {
                                         const textData = await response.text();
                                         console.log('Captured delivery text data:', textData);
-                                        clearTimeout(timeout);
-                                        resolve(textData);
+                                        if (!resolved) {
+                                            resolved = true;
+                                            clearTimeout(timeout);
+                                            resolve(textData);
+                                        }
                                     } catch (textError) {
                                         console.error(`Failed to read delivery response as text: ${textError.message}`);
-                                        clearTimeout(timeout);
-                                        resolve(null);
+                                        if (!resolved) {
+                                            resolved = true;
+                                            clearTimeout(timeout);
+                                            resolve(null);
+                                        }
                                     }
                                 }
                             }
@@ -394,7 +432,42 @@ class AdobeScraperService {
                 console.log('the experimentData value->', experimentData)
                 if (mboxResponseData) {
                     experimentData.mboxData = mboxResponseData;
-                    experimentData.adobeTargetObject = mboxResponseData;
+
+                    // Parse activities from mbox response
+                    if (mboxResponseData.activityNames && mboxResponseData.activityIds) {
+                        const experiments = [];
+
+                        for (let i = 0; i < mboxResponseData.activityNames.length; i++) {
+                            const activityName = mboxResponseData.activityNames[i];
+                            const activityId = mboxResponseData.activityIds[i];
+
+                            // Extract variations from execute.pageLoad.options if available
+                            let variations = [];
+                            if (mboxResponseData.execute?.pageLoad?.options) {
+                                const options = mboxResponseData.execute.pageLoad.options;
+                                variations = options.map((opt, idx) => ({
+                                    name: opt.content ? `Variation ${idx + 1}` : 'Control',
+                                    id: opt.eventToken || `var_${idx}`
+                                }));
+                            }
+
+                            experiments.push({
+                                experimentId: activityId,
+                                experimentName: activityName,
+                                status: 'active', // Assume active since it's being delivered
+                                variations: variations,
+                                activityNames: [activityName],
+                                activityIds: [activityId]
+                            });
+                        }
+
+                        experimentData.experiments = experiments;
+                        experimentData.experimentCount = experiments.length;
+                        experimentData.activeCount = experiments.length;
+
+                        console.log(`✅ Parsed ${experiments.length} experiments from mbox data`);
+                    }
+
                     console.log('Added mbox response data to experiment data');
                     console.log(experimentData.mboxData)
                 }
@@ -403,6 +476,8 @@ class AdobeScraperService {
 
                 const currentUrl = page.url();
                 console.log(`Adobe Target data extracted from ${currentUrl}: ${experimentData.experiments?.length || 0} experiments found`);
+                console.log('🔍 DEBUG: About to return experimentData with', experimentData.experimentCount, 'experiments');
+                console.log('🔍 DEBUG: Experiments array:', JSON.stringify(experimentData.experiments, null, 2));
 
                 return experimentData;
 
@@ -1139,6 +1214,9 @@ class AdobeScraperService {
 
         // FAQ/Help/Support page patterns (check first to avoid false positives)
         const helpPagePatterns = [
+            // General FAQ pattern - any URL containing whole word "faq" or "FAQ"
+            /\bfaq\b/i,
+            
             /\/help/i,
             /\/faq/i,
             /\/support/i,
@@ -1194,11 +1272,12 @@ class AdobeScraperService {
             /\/register/i
         ];
 
+        // TODO: Help/FAQ pages categorization - commented out for now, might use in future
         // Check for help/FAQ pages first
-        if (helpPagePatterns.some(pattern => pattern.test(urlLower))) {
-            console.log(`📊 Categorized ${url} as: other (help/FAQ page)`);
-            return 'other';
-        }
+        // if (helpPagePatterns.some(pattern => pattern.test(urlLower))) {
+        //     console.log(`📊 Categorized ${url} as: other (help/FAQ page)`);
+        //     return 'other';
+        // }
 
         // Note: Home page detection is handled separately in the crawling process
         // The initial provided URL is always treated as home page
@@ -1249,6 +1328,7 @@ class AdobeScraperService {
             /\/c\/[\w-]+$/i,                   // /c/category-name
             /\/sr\/[\w-]+$/i,                  // /sr/search-results or category
             /\/cw\/[\w-]+$/i,                  // /cw/category-wide listings
+            /\/[\w-]+\/c-[\w\d]+$/i,           // /category-path/c-category-id (like womens-clothing-ethnic-wear-kurtis-kurtas/c-msh1012100)
             /\/designers\/[\w-]+\/\d+$/i,       // Azafashions-style: /designers/designer-name/numeric-id
             /\/aza-curates\/[\w-]+\/\d+$/i,     // Azafashions-style: /aza-curates/collection-name/numeric-id
             
@@ -1359,6 +1439,7 @@ class AdobeScraperService {
             /\/model-[\w-]+-\d+$/i,
             
             // Product with file extensions (common for individual products)
+            /\/product\/[^\/\?]+(?:\.html?)?(?:\?|$)/i,  // Titan-style: /product/product-name (with or without .html)
             /\/[\w-]+-\d{4,}\.html?$/i,        // At least 4 digits for product ID
             /\/product-\d+\.html?$/i,
             /\/[\w-]+\/[A-Z0-9]{6,}\.html?$/i,  // Biba-style: /product-name/ALPHANUMERIC-SKU.html
@@ -1375,11 +1456,17 @@ class AdobeScraperService {
             /\/p\/\d+$/i,
             /\/dp\/\d+$/i,
             
-            // Tata Cliq style: /product-name/p-product-id
+            // Tata Cliq style: /product-name/p-product-id (flexible for any length product names)
             /\/[\w-]+\/p-[\w\d]+$/i,
             
             // More Tata Cliq patterns: longer product names with multiple segments
             /\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
+            /\/[\w-]+\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
+            /\/[\w-]+\/[\w-]+\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
+            /\/[\w-]+\/[\w-]+\/[\w-]+\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
+            
+            // General pattern for very long Tata Cliq product names (up to 10 segments)
+            /\/(?:[\w-]+\/){1,10}p-[\w\d]+$/i,
             
             // Product URLs ending with /product (no .html)
             /\/\d+\/product$/i,
@@ -1509,9 +1596,14 @@ class AdobeScraperService {
                 return 'plp';
             }
         }
-        
-        console.log(`📊 Categorized ${url} as: other`);
-        return 'other';
+
+        // TODO: "other" category - commented out for now, might use in future
+        // console.log(`📊 Categorized ${url} as: other`);
+        // return 'other';
+
+        // If no category matches, return null instead of 'other'
+        console.log(`📊 URL does not match any known category, skipping: ${url}`);
+        return null;
     }
 
     /**
@@ -1522,11 +1614,11 @@ class AdobeScraperService {
     getCategoryLimit(category) {
         const limits = {
             home: 1,      // Home Page (only 1 needed)
-            plp: 3,       // Product Listing Pages
-            pdp: 3,       // Product Detail Pages
+            plp: 2,       // Product Listing Pages
+            pdp: 2,       // Product Detail Pages
             cart: 1,      // Cart Pages (only 1 needed - websites typically have 1 cart)
             checkout: 1,  // Checkout Pages (only 1 needed - websites typically have 1 main checkout flow)
-            other: 3      // Other pages
+            // other: 3      // Other pages
         };
         return limits[category] || 3;
     }
@@ -1540,12 +1632,13 @@ class AdobeScraperService {
      */
     async crawlEcommercePages(url, maxPages = 50, depth = 3) {
         let browser;
+        let page;
+
         try {
             console.log(`🕷️ Starting web crawl for: ${url} (maxPages: ${maxPages}, depth: ${depth})`);
 
-            // Launch browser using helper function
             browser = await launchBrowser();
-            const page = await createPage(browser);
+            page = await createPage(browser);
             
             console.log(`🍪 Navigating to base URL for cookie consent: ${url}`);
             await navigateToPage(page, url);
@@ -1559,8 +1652,8 @@ class AdobeScraperService {
                 plp: [],
                 pdp: [],
                 cart: [],
-                checkout: [],
-                other: []
+                checkout: []
+                // other: [] // TODO: Commented out - not collecting "other" category pages for now
             };
             const urlsToVisit = [url];
             const baseUrl = new URL(url).origin;
@@ -1762,11 +1855,17 @@ class AdobeScraperService {
 
                     // Categorize the current page (special case for home page)
                     const category = (currentUrl === url) ? 'home' : this.categorizeEcommerceUrl(currentUrl, pageContent);
-                    
+
+                    // Skip if category is null (doesn't match any known patterns)
+                    if (category === null) {
+                        console.log(`⏭️ Skipping uncategorized page: ${currentUrl}`);
+                        continue;
+                    }
+
                     // Check if this category already has maximum URLs (skip adding home page twice)
                     const currentCategoryLimit = this.getCategoryLimit(category);
                     const isHomePage = (currentUrl === url && category === 'home');
-                    const shouldAddPage = !isHomePage && foundPages[category].length < currentCategoryLimit;
+                    const shouldAddPage = !isHomePage && foundPages[category] && foundPages[category].length < currentCategoryLimit;
                     
                     if (shouldAddPage) {
                         const pageData = {
@@ -1826,8 +1925,15 @@ class AdobeScraperService {
                         links.forEach(link => {
                             if (!visitedUrls.has(link) && !urlsToVisit.includes(link)) {
                                 const category = this.categorizeEcommerceUrl(link);
+
+                                // Skip if category is null (uncategorized)
+                                if (category === null) {
+                                    console.log(`🏷️ Link skipped (uncategorized): ${link}`);
+                                    return;
+                                }
+
                                 console.log(`🏷️ Link categorized: ${link} → ${category}`);
-                                
+
                                 // Only add links for categories that aren't full yet
                                 const linkCategoryLimit = this.getCategoryLimit(category);
                                 if (!foundPages[category] || foundPages[category].length < linkCategoryLimit) {
@@ -1848,10 +1954,10 @@ class AdobeScraperService {
                         // Calculate priority based on how many pages each category still needs
                         const categoryNeeds = {
                             pdp: this.getCategoryLimit('pdp') - foundPages.pdp.length,
-                            plp: this.getCategoryLimit('plp') - foundPages.plp.length, 
+                            plp: this.getCategoryLimit('plp') - foundPages.plp.length,
                             cart: this.getCategoryLimit('cart') - foundPages.cart.length,
-                            checkout: this.getCategoryLimit('checkout') - foundPages.checkout.length,
-                            other: this.getCategoryLimit('other') - foundPages.other.length
+                            checkout: this.getCategoryLimit('checkout') - foundPages.checkout.length
+                            // other: this.getCategoryLimit('other') - (foundPages.other?.length || 0) // TODO: Commented out
                         };
 
                         usefulLinks.sort((a, b) => {
@@ -1876,7 +1982,7 @@ class AdobeScraperService {
                         console.log('useful links found:', usefulLinks.length, '/ total links:', categorizedLinks.length + links.filter(link => {
                             if (!visitedUrls.has(link) && !urlsToVisit.includes(link)) {
                                 const category = this.categorizeEcommerceUrl(link);
-                                return foundPages[category] && foundPages[category].length >= this.getCategoryLimit(category);
+                                return category !== null && foundPages[category] && foundPages[category].length >= this.getCategoryLimit(category);
                             }
                             return false;
                         }).length);
@@ -1885,8 +1991,8 @@ class AdobeScraperService {
                             pdp: usefulLinks.filter(l => l.category === 'pdp').length,
                             plp: usefulLinks.filter(l => l.category === 'plp').length,
                             cart: usefulLinks.filter(l => l.category === 'cart').length,
-                            checkout: usefulLinks.filter(l => l.category === 'checkout').length,
-                            other: usefulLinks.filter(l => l.category === 'other').length
+                            checkout: usefulLinks.filter(l => l.category === 'checkout').length
+                            // other: usefulLinks.filter(l => l.category === 'other').length // TODO: Commented out
                         });
                         
                         console.log('category needs:', categoryNeeds);
@@ -1951,7 +2057,7 @@ class AdobeScraperService {
                 pdp: foundPages.pdp.length,
                 cart: foundPages.cart.length,
                 checkout: foundPages.checkout.length,
-                other: foundPages.other.length,
+                // other: foundPages.other?.length || 0, // TODO: Commented out - not collecting "other" category
                 total: processedCount
             };
 
@@ -1972,6 +2078,7 @@ class AdobeScraperService {
             console.error('Error in crawlEcommercePages:', error);
             throw error;
         } finally {
+            // Clean up browser
             if (browser) {
                 await closeBrowser(browser);
             }

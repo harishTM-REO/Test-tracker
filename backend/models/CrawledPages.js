@@ -140,6 +140,24 @@ const crawledPageSchema = new mongoose.Schema({
     required: false
   },
 
+  // Adobe Target Experiment Data (Phase 2)
+  adobeTarget: {
+    detected: { type: Boolean, default: false },
+    experiments: [{
+      experimentId: { type: String },
+      experimentName: { type: String },
+      status: { type: String, enum: ['active', 'running', 'paused', 'inactive', 'archived', 'unknown'], default: 'unknown' },
+      variations: [{
+        name: { type: String },
+        id: { type: String }
+      }],
+      activityNames: [{ type: String }],
+      activityIds: [{ type: String }]
+    }],
+    experimentCount: { type: Number, default: 0 },
+    detectedAt: { type: Date }
+  },
+
   // Navigation relationships
   navigationFlow: {
     cartUrlDiscovered: { type: String },

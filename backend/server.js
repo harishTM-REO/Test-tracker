@@ -24,6 +24,7 @@ const optimizelyRoutes = require('./routes/optimizelyRoutes');
 const abTastyRoutes = require('./routes/abTastyRoutes');
 const adobeTargetRoutes = require('./routes/adobeRoutes');
 const pageCrawlerRoutes = require('./routes/pageCrawlerRoutes');
+const experimentsRoutes = require('./routes/experimentsRoutes');
 // Trust proxy for rate limiting (needed when behind reverse proxy/load balancer)
 app.set('trust proxy', 1);
 
@@ -88,6 +89,9 @@ app.use('/api/adobetarget', adobeTargetRoutes);
 
 // Page Crawler Routes
 app.use('/api/crawler', pageCrawlerRoutes);
+
+// Experiments Routes (Phase 2)
+app.use('/api/experiments', experimentsRoutes);
 
 // Change Detection Routes
 app.use('/api/change-detection', changeDetectionRoutes);

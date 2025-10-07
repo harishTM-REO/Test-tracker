@@ -419,14 +419,45 @@ const detectCaptcha = async (page) => {
 
             // 1. Check for specific selectors
             for (const selector of selectors) {
-                if (document.querySelector(selector)) {
-                    return {detected: true, reason: `Found selector: ${selector}`};
+                const elements = document.querySelectorAll(selector);
+                // Check if any element is a real captcha (not notify-related)
+                for (const element of elements) {
+                    const elementClasses = element.className || '';
+                    const classString = typeof elementClasses === 'string' ? elementClasses : (elementClasses.baseVal || '');
+                    const lowerClassString = classString.toLowerCase();
+
+                    // Skip elements with class containing "notify" (e.g., notifyme-recaptcha)
+                    if (lowerClassString.includes('notify')) {
+                        continue;
+                    }
+
+                    // Skip elements that have "recaptcha" but NOT "grecaptcha" or "g-recaptcha"
+                    // (these are typically notify/terms elements, not actual captchas)
+                    if (lowerClassString.includes('recaptcha') &&
+                        !lowerClassString.includes('grecaptcha') &&
+                        !lowerClassString.includes('g-recaptcha')) {
+                        continue;
+                    }
+
+                    // Skip grecaptcha elements (invisible reCAPTCHA v3 that doesn't block scraping)
+                    // This includes grecaptcha-badge, grecaptcha-logo, grecaptcha-error, etc.
+                    if (lowerClassString.includes('grecaptcha')) {
+                        continue;
+                    }
+
+                    // Found a captcha element that's not notify-related
+                    return {detected: true, reason: `Found selector: ${selector} with classes: ${classString}`};
                 }
             }
 
             // 2. Check iframe sources
             for (const iframe of document.querySelectorAll('iframe')) {
                 const src = iframe.src || '';
+                const iframeClasses = iframe.className || '';
+                // Skip iframes with class containing "notify"
+                if (typeof iframeClasses === 'string' && iframeClasses.toLowerCase().includes('notify')) {
+                    continue;
+                }
                 if (iframeKeywords.some(keyword => src.includes(keyword))) {
                     return {detected: true, reason: `Found iframe with src: ${src}`};
                 }
@@ -670,7 +701,7 @@ const handleCookieConsent= async(page)=> {
 const closeBrowser = async(browser)=> {
     try {
         if (browser) {
-            await browser.close();
+            // await browser.close();
             console.log('Browser closed successfully');
         }
     } catch (error) {
