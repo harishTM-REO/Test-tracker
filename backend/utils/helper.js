@@ -204,7 +204,7 @@ const createPage = async (browser) => {
  * @param {string} url - URL to navigate to
  */
 const navigateToPage = async (page, url) => {
-    const maxRetries = 3;
+    const maxRetries = 2; // Reduced from 3 to 2 for faster failure
     let lastError;
 
     // Validate and normalize URL first
@@ -219,7 +219,7 @@ const navigateToPage = async (page, url) => {
 
             await page.goto(normalizedUrl, {
                 waitUntil: 'domcontentloaded',
-                timeout: 45000, // 45 seconds timeout (fixed - env var was causing issues)
+                timeout: 30000, // 30 seconds timeout - faster failure for unresponsive sites
             });
 
             console.log("Page loaded successfully");

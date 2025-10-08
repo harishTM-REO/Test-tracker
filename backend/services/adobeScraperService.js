@@ -1822,6 +1822,10 @@ class AdobeScraperService {
             };
             const urlsToVisit = [url];
             const baseUrl = new URL(url).origin;
+
+            // Track consecutive failures to fail fast
+            let consecutiveTimeouts = 0;
+            const maxConsecutiveTimeouts = 3; // Stop crawling after 3 consecutive timeouts
             
             // Always set the initial URL as home page
             foundPages.home.push({
@@ -1870,9 +1874,12 @@ class AdobeScraperService {
                 
                 try {
                     console.log(`📄 Crawling: ${currentUrl}`);
-                    
+
                     // Navigate to page using helper function
                     await navigateToPage(page, currentUrl);
+
+                    // Reset timeout counter on successful navigation
+                    consecutiveTimeouts = 0;
 
                     // Check for captcha
                     const captchaCheck = await detectCaptcha(page);
@@ -2190,6 +2197,24 @@ class AdobeScraperService {
 
                 } catch (pageError) {
                     console.error(`Error crawling ${currentUrl}:`, pageError.message);
+
+                    // Check if it's a timeout error
+                    const isTimeout = pageError.message.includes('timeout') ||
+                                      pageError.message.includes('Navigation timeout');
+
+                    if (isTimeout) {
+                        consecutiveTimeouts++;
+                        console.warn(`⚠️ Consecutive timeouts: ${consecutiveTimeouts}/${maxConsecutiveTimeouts}`);
+
+                        if (consecutiveTimeouts >= maxConsecutiveTimeouts) {
+                            console.error(`❌ Too many consecutive timeouts (${consecutiveTimeouts}). Stopping crawl for ${url} to prevent excessive delays.`);
+                            console.error(`This domain may be blocking automated access or is very slow.`);
+                            break; // Exit the while loop
+                        }
+                    } else {
+                        // Reset counter on non-timeout errors
+                        consecutiveTimeouts = 0;
+                    }
                 }
 
                 // Move to next depth level after processing current level
