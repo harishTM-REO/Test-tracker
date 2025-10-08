@@ -1777,10 +1777,13 @@ class AdobeScraperService {
 
             console.log(`🍪 Navigating to base URL for cookie consent: ${url}`);
 
+            // Declare cookieType outside try-catch so it's accessible throughout function
+            let cookieType = 'unknown';
+
             // Wrap initial navigation in try-catch to handle timeout gracefully
             try {
                 await navigateToPage(page, url);
-                const cookieType = await handleCookieConsent(page);
+                cookieType = await handleCookieConsent(page);
                 console.log(`🍪 Cookie consent handled: ${cookieType}`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
             } catch (initialNavError) {
