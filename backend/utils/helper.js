@@ -701,7 +701,7 @@ const handleCookieConsent= async(page)=> {
 const closeBrowser = async(browser)=> {
     try {
         if (browser) {
-            // await browser.close();
+            await browser.close();
             console.log('Browser closed successfully');
         }
     } catch (error) {
