@@ -111,7 +111,7 @@ class AdobeScraperService {
             if (!useSharedPage) {
                 if (page) {
                     try {
-                        // await page.close();
+                        await page.close();
                     } catch (e) {
                         console.warn('Error closing page:', e.message);
                     }
