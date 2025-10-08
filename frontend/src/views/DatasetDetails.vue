@@ -145,8 +145,30 @@
         </div>
       </div>
 
-      <!-- Companies and Domains -->
-      <div class="companies-domains-section">
+      <!-- Navigation Tabs -->
+      <div class="navigation-tabs">
+        <button
+          @click="activeTab = 'companies'"
+          :class="['tab-btn', { active: activeTab === 'companies' }]"
+        >
+          🏢 Companies & Domains
+        </button>
+        <button
+          @click="activeTab = 'pages'"
+          :class="['tab-btn', { active: activeTab === 'pages' }]"
+        >
+          🕷️ Crawled Pages (Phase 1)
+        </button>
+        <button
+          @click="activeTab = 'experiments'"
+          :class="['tab-btn', { active: activeTab === 'experiments' }]"
+        >
+          🎯 Experiments (Phase 2)
+        </button>
+      </div>
+
+      <!-- Companies and Domains Tab -->
+      <div v-show="activeTab === 'companies'" class="companies-domains-section">
         <div class="section-header">
           <h2>Companies & Domains</h2>
           <span class="count-badge">{{ dataset.companies ? dataset.companies.length : 0 }} companies found</span>
@@ -213,13 +235,36 @@
           </div>
         </div>
       </div>
+
+      <!-- Crawled Pages Tab -->
+      <div v-show="activeTab === 'pages'" class="crawled-pages-section">
+        <CrawledPages
+          :datasetId="datasetId"
+          @message="handleMessage"
+        />
+      </div>
+
+      <!-- Experiments Tab (Phase 2) -->
+      <div v-show="activeTab === 'experiments'" class="experiments-section">
+        <ExperimentsList
+          :datasetId="datasetId"
+          @message="handleMessage"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script>
+import CrawledPages from '../components/CrawledPages.vue'
+import ExperimentsList from '../components/ExperimentsList.vue'
+
 export default {
   name: 'DatasetDetails',
+  components: {
+    CrawledPages,
+    ExperimentsList
+  },
   data() {
     return {
       dataset: null,
@@ -229,8 +274,9 @@ export default {
       changeDetectionStatus: 'not_started',
       changeDetectionError: null,
       latestVersionSummary: null,
-      statusPollingInterval: null,      
-      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL
+      statusPollingInterval: null,
+      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
+      activeTab: 'companies' // Default tab
     }
   },
   
@@ -435,6 +481,12 @@ export default {
       } catch (e) {
         return url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]
       }
+    },
+
+    handleMessage(message) {
+      // Handle messages from CrawledPages component
+      console.log('Message from CrawledPages:', message)
+      // You can add toast notifications or other UI feedback here
     }
   }
 }
@@ -1052,5 +1104,55 @@ export default {
   .changes-breakdown {
     justify-content: flex-start;
   }
+}
+
+/* Tab Navigation Styles */
+.navigation-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+.tab-btn {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px 8px 0 0;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
+  color: #495057;
+  font-size: 0.95rem;
+}
+
+.tab-btn:hover {
+  background: #e9ecef;
+  border-color: #adb5bd;
+}
+
+.tab-btn.active {
+  background: #0d6efd;
+  color: white;
+  border-color: #0d6efd;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(13, 110, 253, 0.25);
+}
+
+.crawled-pages-section {
+  background: white;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.experiments-section {
+  background: white;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 </style>

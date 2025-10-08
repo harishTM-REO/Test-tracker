@@ -141,6 +141,7 @@ class BackgroundScrapingService {
   static async batchScrapeWithProgress(urls, toolType, options = {}, progressCallback) {
     const OptimizelyScraperService = require('./optimizelyScraperService');
     const AbTastyScraperService = require('./abTastyScraperService');
+    const AdobeScraperService = require('./adobeScraperService');
     const jobQueue = require('./jobQueue');
     
     // Get adaptive options based on current system load
@@ -169,6 +170,8 @@ class BackgroundScrapingService {
             return OptimizelyScraperService.scrapeOptimizelyExperiments(url);
             if(toolType ==='AbTasty')
             return AbTastyScraperService.scrapeAbTastyExperiments(url);
+            if(toolType ==='Adobe Target')
+            return this.scrapeAdobeTargetWithCrawling(url, options.datasetId);
           })
         );
         
@@ -266,8 +269,13 @@ class BackgroundScrapingService {
         return;
       }
 
-      await dataset.startScraping();
-      console.log(`Scraping started for dataset: ${dataset.name}`);
+      // Only update status if not already in progress
+      if (dataset.scrapingStatus !== 'in_progress') {
+        await dataset.startScraping();
+        console.log(`Scraping started for dataset: ${dataset.name}`);
+      } else {
+        console.log(`Scraping already in progress for dataset: ${dataset.name}`);
+      }
 
       // Perform direct scraping instead of calling endpoint to avoid double job creation
       const startTime = new Date();
@@ -284,14 +292,16 @@ class BackgroundScrapingService {
       
       console.log(`Performing direct scraping for ${urls.length} URLs`);
       
-      // Import the OptimizelyScraperService
+      // Import the scraper services
       const OptimizelyScraperService = require('./optimizelyScraperService');
       const AbTastyyScraperService = require('./abTastyScraperService');
+      const AdobeScraperService = require('./adobeScraperService');
       
       // Perform batch scraping with progress updates
       const results = await this.batchScrapeWithProgress(urls,dataset.toolType, {
         concurrent: 2,
-        delay: 1000
+        delay: 1000,
+        datasetId: datasetId
       }, (progress, partialResult) => {
         console.log(`Scraping progress: ${progress}%`);
       });
@@ -314,6 +324,17 @@ class BackgroundScrapingService {
         startTime
       );
       }
+      if(dataset.toolType ==='Adobe Target'){
+      console.log(`🔍 [Background] Calling Adobe Target saveBatchResults for dataset: ${dataset.name}`);
+      console.log(`🔍 [Background] Results summary:`, results.map(r => ({ url: r.url, success: r.success, detected: r.data?.adobeTarget?.detected })));
+      savedResults = await AdobeScraperService.saveBatchResults(
+        datasetId, 
+        dataset.name, 
+        results, 
+        startTime
+      );
+      console.log(`🔍 [Background] Adobe Target saveBatchResults completed. Saved ID: ${savedResults?._id}`);
+      }
       
       // Calculate final statistics
       const successful = results.filter(r => r.success);
@@ -321,6 +342,7 @@ class BackgroundScrapingService {
       console.log(JSON.stringify(results));
       const withOptimizely = successful.filter(r => r.data?.optimizely?.detected);
       const withAbTasty = successful.filter(r => r.data?.abTasty?.detected);
+      const withAdobeTarget = successful.filter(r => r.data?.adobeTarget?.detected);
       
       const stats = {
         totalUrls: urls.length,
@@ -328,16 +350,90 @@ class BackgroundScrapingService {
         failedScans: results.length - successful.length,
         optimizelyDetected: withOptimizely.length,
         abTastyDetected: withAbTasty.length,
+        adobeTargetDetected: withAdobeTarget.length,
         totalExperiments: savedResults.totalExperiments
       };
 
+      // Mark Phase 1 (crawling) as complete
       await dataset.completeScraping(stats);
-      console.log(`✅ Scraping completed successfully for dataset: ${dataset.name}`);
+      console.log(`✅ Phase 1 (Crawling) completed successfully for dataset: ${dataset.name}`);
       console.log(`📊 Stats:`, stats);
-      
+
+      // ============================================
+      // AUTO-TRIGGER EXPERIMENT DETECTION (PHASE 2)
+      // ============================================
+      // Only for Adobe Target datasets - auto-start experiment detection after crawling
+      if (dataset.toolType === 'Adobe Target' && results.length > 0) {
+        console.log(`\n🎯 ========================================`);
+        console.log(`🎯 AUTO-TRIGGERING EXPERIMENT DETECTION`);
+        console.log(`🎯 Dataset: ${dataset.name} (${datasetId})`);
+        console.log(`🎯 Tool Type: ${dataset.toolType}`);
+        console.log(`🎯 Phase 1: Crawling ✅ Complete`);
+        console.log(`🎯 Phase 2: Experiment Detection 🚀 Starting...`);
+        console.log(`🎯 ========================================\n`);
+
+        // Update scraping status to show experiment detection is starting
+        dataset.scrapingStatus = 'in_progress';
+        dataset.scrapingError = 'Experiment detection in progress...';
+        await dataset.save();
+
+        try {
+          const experimentsController = require('../controller/experimentsController');
+
+          // Create a mock request and response for the experiment detection
+          const mockReq = {
+            params: { datasetId: datasetId },
+            body: {}
+          };
+
+          const mockRes = {
+            statusCode: 200,
+            status: function(code) {
+              this.statusCode = code;
+              console.log(`📡 Response status set to: ${code}`);
+              return this;
+            },
+            json: function(data) {
+              console.log(`📡 Experiment detection API response:`, JSON.stringify({
+                success: data.success,
+                message: data.message,
+                status: data.status,
+                totalPages: data.totalPages
+              }, null, 2));
+              return this;
+            }
+          };
+
+          // Call the experiment detection controller
+          console.log(`🚀 Calling startAirtableExperimentDetection...`);
+          await experimentsController.startAirtableExperimentDetection(mockReq, mockRes);
+          console.log(`\n✅ Experiment detection triggered! Status code: ${mockRes.statusCode}`);
+          console.log(`✅ Phase 2 (Experiment Detection) is now running in background`);
+          console.log(`✅ Check /api/experiments/airtable/status/${datasetId} for progress\n`);
+
+          // Note: The experiment detection runs in background via setImmediate
+          // The final status will be updated by the experimentsController when it completes
+
+        } catch (expError) {
+          console.error(`\n❌ Failed to auto-trigger experiment detection for dataset ${datasetId}`);
+          console.error(`❌ Error:`, expError.message);
+          console.error(`❌ Stack:`, expError.stack);
+
+          // Reset status back to completed with error message
+          const updatedDataset = await Dataset.findById(datasetId);
+          if (updatedDataset) {
+            updatedDataset.scrapingStatus = 'completed';
+            updatedDataset.scrapingError = `Crawling completed but experiment detection failed: ${expError.message}`;
+            await updatedDataset.save();
+          }
+        }
+      } else {
+        console.log(`ℹ️ Skipping auto-trigger: Tool type is ${dataset.toolType}, not Adobe Target`);
+      }
+
     } catch (error) {
       console.error(`Error during scraping for dataset ${datasetId}:`, error);
-      
+
       if (dataset) {
         await dataset.failScraping(error.message);
       }
@@ -436,6 +532,203 @@ class BackgroundScrapingService {
       
     } catch (error) {
       console.error('Error checking pending jobs:', error);
+    }
+  }
+
+  /**
+   * Special Adobe Target scraping that includes website crawling for different page types
+   * @param {string} url - The website URL to scrape
+   * @param {string} datasetId - The dataset ID to associate crawled pages with
+   * @returns {Object} Scraping results with crawled page types
+   */
+  static async scrapeAdobeTargetWithCrawling(url, datasetId = null) {
+    const AdobeScraperService = require('./adobeScraperService');
+
+    try {
+      console.log(`🕷️ Starting Adobe Target crawling for: ${url}`);
+
+      // Update dataset status to in_progress at the start of web crawling
+      if (datasetId) {
+        const dataset = await Dataset.findById(datasetId);
+        if (dataset && dataset.scrapingStatus === 'not_started') {
+          await dataset.startScraping();
+          console.log(`✅ Dataset status updated to 'in_progress' for web crawling`);
+        }
+      }
+
+      // First, crawl the website to find different page types
+      const crawlResults = await AdobeScraperService.crawlEcommercePages(url, 30, 2); // 30 pages max, depth 2
+      
+      if (!crawlResults.success) {
+        throw new Error(`Website crawling failed: ${crawlResults.error || 'Unknown error'}`);
+      }
+      
+      console.log(`🕷️ Crawling completed for ${url}:`, crawlResults.summary);
+      
+      // Now scrape Adobe Target on different page types found
+      const pageTypesToScrape = ['home', 'plp', 'pdp', 'cart', 'checkout'];
+      const scrapingResults = {
+        url: url,
+        success: true,
+        data: {
+          adobeTarget: {
+            detected: false,
+            experiments: [],
+            experimentCount: 0,
+            activeCount: 0,
+            error: null,
+            crawlSummary: crawlResults.summary,
+            pageResults: {}
+          }
+        },
+        crawlData: crawlResults
+      };
+      
+      let overallDetected = false;
+      let totalExperiments = 0;
+      console.log('avinash the response data');
+      console.log(crawlResults);
+
+      // ============================================
+      // PHASE 2: Adobe Target Experiment Scraping
+      // ============================================
+      // TODO: Uncomment this section in Phase 2 to enable Adobe Target experiment scraping
+      /*
+      // Test Adobe Target on each page type found
+      for (const pageType of pageTypesToScrape) {
+        const pagesOfType = crawlResults.pages[pageType] || [];
+
+        if (pagesOfType.length > 0) {
+          // Test the first page of each type
+          const pageToTest = pagesOfType[0];
+          console.log(`🎯 Testing Adobe Target on ${pageType} page: ${pageToTest.url}`);
+
+          try {
+            const pageResult = await AdobeScraperService.scrapeAdobeTargetExperiments(pageToTest.url);
+
+            if (pageResult.success && pageResult.data?.adobeTarget?.detected) {
+              overallDetected = true;
+              totalExperiments += pageResult.data.adobeTarget.experimentCount || 0;
+
+              scrapingResults.data.adobeTarget.pageResults[pageType] = {
+                url: pageToTest.url,
+                detected: true,
+                experiments: pageResult.data.adobeTarget.experiments || [],
+                experimentCount: pageResult.data.adobeTarget.experimentCount || 0,
+                version: pageResult.data.adobeTarget.version,
+                activityNames: pageResult.data.adobeTarget.activityNames || [],
+                activityIds: pageResult.data.adobeTarget.activityIds || []
+              };
+
+              console.log(`✅ Adobe Target found on ${pageType}: ${pageResult.data.adobeTarget.experimentCount || 0} experiments`);
+            } else {
+              scrapingResults.data.adobeTarget.pageResults[pageType] = {
+                url: pageToTest.url,
+                detected: false,
+                error: pageResult.data?.adobeTarget?.error || 'Adobe Target not detected'
+              };
+
+              console.log(`❌ Adobe Target not found on ${pageType}`);
+            }
+          } catch (pageError) {
+            console.error(`Error testing ${pageType} page:`, pageError.message);
+            scrapingResults.data.adobeTarget.pageResults[pageType] = {
+              url: pageToTest.url,
+              detected: false,
+              error: pageError.message
+            };
+          }
+        } else {
+          console.log(`ℹ️ No ${pageType} pages found during crawling`);
+          scrapingResults.data.adobeTarget.pageResults[pageType] = {
+            detected: false,
+            error: `No ${pageType} pages found during crawling`
+          };
+        }
+      }
+      */
+
+      // ============================================
+      // PHASE 1: Save crawled pages to database
+      // ============================================
+      // Save all crawled pages to CrawledPages model
+      const CrawledPages = require('../models/CrawledPages');
+
+      // Get dataset ID from URL (we'll need to pass this through)
+      // For now, we'll store the crawled pages without experiments
+      const savedPages = [];
+
+      for (const [pageType, pagesArray] of Object.entries(crawlResults.pages)) {
+        for (const page of pagesArray) {
+          try {
+            // Create or update crawled page entry
+            const crawledPage = await CrawledPages.findOneAndUpdate(
+              { url: page.url, datasetId: datasetId },
+              {
+                datasetId: datasetId,
+                url: page.url,
+                title: page.title || '',
+                domain: new URL(url).hostname,
+                pageType: pageType,
+                depth: page.depth || 0,
+                discoveredFrom: page.discoveredFrom || url,
+                responseStatus: page.status || 200,
+                loadTime: page.loadTime || 0,
+                validated: page.validated || false,
+                validationMethod: page.validationMethod || 'auto',
+                pdpIndicators: page.pdpIndicators || {},
+                cartFunctionality: page.cartFunctionality || {},
+                checkoutFunctionality: page.checkoutFunctionality || {},
+                navigationFlow: page.navigationFlow || {},
+                crawledAt: new Date()
+              },
+              { upsert: true, new: true }
+            );
+
+            savedPages.push(crawledPage);
+            console.log(`💾 Saved ${pageType} page: ${page.url}`);
+          } catch (saveError) {
+            console.error(`Error saving page ${page.url}:`, saveError.message);
+          }
+        }
+      }
+
+      console.log(`💾 Successfully saved ${savedPages.length} crawled pages to database`)
+      
+      // Update overall results
+      scrapingResults.data.adobeTarget.detected = overallDetected;
+      scrapingResults.data.adobeTarget.experimentCount = totalExperiments;
+      console.log('the scrapping results---->');
+      console.log(scrapingResults);
+      // Aggregate all experiments found across page types
+      const allExperiments = [];
+      Object.values(scrapingResults.data.adobeTarget.pageResults).forEach(pageResult => {
+        if (pageResult.experiments) {
+          allExperiments.push(...pageResult.experiments);
+        }
+      });
+      scrapingResults.data.adobeTarget.experiments = allExperiments;
+      
+      console.log(`🎯 Adobe Target crawling completed for ${url}: ${overallDetected ? 'DETECTED' : 'NOT DETECTED'} (${totalExperiments} total experiments across all pages)`);
+      
+      return scrapingResults;
+      
+    } catch (error) {
+      console.error(`Error in Adobe Target crawling for ${url}:`, error);
+      return {
+        url: url,
+        success: false,
+        error: error.message,
+        data: {
+          adobeTarget: {
+            detected: false,
+            experiments: [],
+            experimentCount: 0,
+            activeCount: 0,
+            error: error.message
+          }
+        }
+      };
     }
   }
 }

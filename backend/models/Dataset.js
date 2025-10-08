@@ -221,6 +221,20 @@ const datasetSchema = new mongoose.Schema({
     duration: { type: String, default: null }
   },
 
+  // Experiment Detection Status (Phase 2)
+  experimentDetectionStartedAt: {
+    type: Date,
+    default: null
+  },
+  experimentDetectionCompletedAt: {
+    type: Date,
+    default: null
+  },
+  experimentDetectionError: {
+    type: String,
+    default: null
+  },
+
   // Change Detection Status
   changeDetectionStatus: {
     type: String,
