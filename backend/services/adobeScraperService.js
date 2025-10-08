@@ -1637,7 +1637,7 @@ class AdobeScraperService {
         // return 'other';
 
         // If no category matches, return null instead of 'other'
-        console.log(`📊 URL does not match any known category, skipping: ${url}`);
+        // console.log(`📊 URL does not match any known category, skipping: ${url}`);
         return null;
     }
 
@@ -1776,10 +1776,39 @@ class AdobeScraperService {
             page = await createPage(browser);
 
             console.log(`🍪 Navigating to base URL for cookie consent: ${url}`);
-            await navigateToPage(page, url);
-            const cookieType = await handleCookieConsent(page);
-            console.log(`🍪 Cookie consent handled: ${cookieType}`);
-            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Wrap initial navigation in try-catch to handle timeout gracefully
+            try {
+                await navigateToPage(page, url);
+                const cookieType = await handleCookieConsent(page);
+                console.log(`🍪 Cookie consent handled: ${cookieType}`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            } catch (initialNavError) {
+                console.error(`❌ Failed to load home page ${url}:`, initialNavError.message);
+
+                // Return failure result instead of throwing
+                return {
+                    success: false,
+                    error: `Failed to load homepage: ${initialNavError.message}`,
+                    message: 'Could not access the website. It may be down or blocking automated access.',
+                    url: url,
+                    summary: {
+                        plp: 0,
+                        pdp: 0,
+                        cart: 0,
+                        checkout: 0,
+                        total: 0
+                    },
+                    pages: {
+                        home: [],
+                        plp: [],
+                        pdp: [],
+                        cart: [],
+                        checkout: [],
+                        faq: []
+                    }
+                };
+            }
             
             const visitedUrls = new Set();
             const foundPages = {
