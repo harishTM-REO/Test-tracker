@@ -219,7 +219,7 @@ const navigateToPage = async (page, url) => {
 
             await page.goto(normalizedUrl, {
                 waitUntil: 'domcontentloaded',
-                timeout: process.env.TIME_OUT_TIME || 30000, // 30 seconds timeout
+                timeout: 45000, // 45 seconds timeout (fixed - env var was causing issues)
             });
 
             console.log("Page loaded successfully");

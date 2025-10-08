@@ -558,9 +558,24 @@ class BackgroundScrapingService {
 
       // First, crawl the website to find different page types
       const crawlResults = await AdobeScraperService.crawlEcommercePages(url, 30, 2); // 30 pages max, depth 2
-      
+
       if (!crawlResults.success) {
-        throw new Error(`Website crawling failed: ${crawlResults.error || 'Unknown error'}`);
+        console.error(`⚠️ Website crawling failed for ${url}:`, crawlResults.error || crawlResults.message);
+
+        // Return failure result instead of throwing - allows batch to continue
+        return {
+          url: url,
+          success: false,
+          error: crawlResults.error || crawlResults.message || 'Website crawling failed',
+          data: {
+            adobeTarget: {
+              detected: false,
+              experiments: [],
+              experimentCount: 0,
+              error: `Crawling failed: ${crawlResults.error || crawlResults.message}`
+            }
+          }
+        };
       }
       
       console.log(`🕷️ Crawling completed for ${url}:`, crawlResults.summary);
