@@ -90,13 +90,78 @@ async function crawlDataset(req, res) {
             timestamp: new Date().toISOString()
         });
 
-        // Continue crawling in background
-        try {
-            const results = await crawlPromise;
-            console.log(`✅ Crawling completed for dataset ${datasetId}:`, results);
-        } catch (crawlError) {
-            console.error(`❌ Crawling failed for dataset ${datasetId}:`, crawlError);
-        }
+        // Continue crawling in background and auto-trigger experiment detection
+        (async () => {
+            try {
+                console.log(`⏳ Waiting for crawling to complete for dataset ${datasetId}...`);
+                const results = await crawlPromise;
+
+                console.log(`✅ Crawling completed for dataset ${datasetId}`);
+                console.log(`📊 Crawl Results:`, JSON.stringify({
+                    totalPagesCrawled: results.totalPagesCrawled,
+                    summary: results.summary,
+                    totalSites: results.totalSites,
+                    errorsCount: results.errors?.length || 0
+                }, null, 2));
+
+                // Auto-trigger experiment detection after crawling completes
+                // Only if crawling was successful and pages were found
+                if (results && results.totalPagesCrawled > 0) {
+                    console.log(`\n🎯 ========================================`);
+                    console.log(`🎯 AUTO-TRIGGERING EXPERIMENT DETECTION`);
+                    console.log(`🎯 Dataset ID: ${datasetId}`);
+                    console.log(`🎯 Pages Crawled: ${results.totalPagesCrawled}`);
+                    console.log(`🎯 ========================================\n`);
+
+                    try {
+                        const experimentsController = require('./experimentsController');
+
+                        // Create a mock request and response for the experiment detection
+                        const mockReq = {
+                            params: { datasetId: datasetId },
+                            body: {}
+                        };
+
+                        const mockRes = {
+                            statusCode: 200,
+                            status: function(code) {
+                                this.statusCode = code;
+                                console.log(`📡 Response status set to: ${code}`);
+                                return this;
+                            },
+                            json: function(data) {
+                                console.log(`📡 Experiment detection API response:`, JSON.stringify({
+                                    success: data.success,
+                                    message: data.message,
+                                    status: data.status,
+                                    totalPages: data.totalPages
+                                }, null, 2));
+                                return this;
+                            }
+                        };
+
+                        // Call the experiment detection controller
+                        console.log(`🚀 Calling startAirtableExperimentDetection...`);
+                        await experimentsController.startAirtableExperimentDetection(mockReq, mockRes);
+                        console.log(`\n✅ Experiment detection triggered! Status code: ${mockRes.statusCode}`);
+                        console.log(`✅ Check /api/experiments/airtable/status/${datasetId} for progress\n`);
+
+                    } catch (expError) {
+                        console.error(`\n❌ Failed to auto-trigger experiment detection for dataset ${datasetId}`);
+                        console.error(`❌ Error:`, expError.message);
+                        console.error(`❌ Stack:`, expError.stack);
+                    }
+                } else {
+                    console.log(`⚠️ No pages found after crawling (totalPagesCrawled: ${results?.totalPagesCrawled || 0}). Skipping experiment detection.`);
+                }
+
+            } catch (crawlError) {
+                console.error(`❌ Crawling failed for dataset ${datasetId}:`, crawlError.message);
+                console.error(`❌ Stack:`, crawlError.stack);
+            }
+        })().catch(err => {
+            console.error(`❌ CRITICAL: Background crawling/detection failed for dataset ${datasetId}:`, err);
+        });
 
     } catch (error) {
         console.error('Error in crawlDataset controller:', error);

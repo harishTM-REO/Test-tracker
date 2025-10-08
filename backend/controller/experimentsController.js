@@ -20,12 +20,19 @@ exports.getExperimentsByDomain = async (req, res) => {
       });
     }
 
-    // Get all crawled pages with Adobe Target detected
-    const pagesWithExperiments = await CrawledPages.find({
-      datasetId: datasetId,
-      'adobeTarget.detected': true,
-      'adobeTarget.experimentCount': { $gt: 0 }
+    // Get all crawled pages (both with and without Adobe Target)
+    const allCrawledPages = await CrawledPages.find({
+      datasetId: datasetId
     }).sort({ domain: 1, pageType: 1 });
+
+    console.log(`📊 Found ${allCrawledPages.length} total crawled pages`);
+
+    // Get pages with Adobe Target detected
+    const pagesWithExperiments = allCrawledPages.filter(page =>
+      page.adobeTarget &&
+      page.adobeTarget.detected === true &&
+      page.adobeTarget.experimentCount > 0
+    );
 
     console.log(`📊 Found ${pagesWithExperiments.length} pages with experiments`);
 
@@ -42,13 +49,17 @@ exports.getExperimentsByDomain = async (req, res) => {
 
     // Group experiments by domain
     const experimentsByDomain = {};
+    const domainsWithAdobeTargetButNoExperiments = {};
+    const domainsWithoutAdobeTarget = {};
 
+    // Process pages with experiments
     pagesWithExperiments.forEach(page => {
       const domain = page.domain;
 
       if (!experimentsByDomain[domain]) {
         experimentsByDomain[domain] = {
           domain: domain,
+          adobeTargetDetected: true,
           experiments: {},
           totalExperiments: 0,
           activeExperiments: 0,
@@ -92,6 +103,62 @@ exports.getExperimentsByDomain = async (req, res) => {
       }
     });
 
+    // Process all crawled pages to categorize domains
+    allCrawledPages.forEach(page => {
+      const domain = page.domain;
+
+      // Skip if this domain already has experiments
+      if (experimentsByDomain[domain]) {
+        return;
+      }
+
+      // Check if Adobe Target was checked on this page
+      if (page.adobeTarget && page.adobeTarget.detectedAt) {
+        // Case 1: Adobe Target detected but no experiments (detected: true, experimentCount: 0)
+        if (page.adobeTarget.detected === true) {
+          if (!domainsWithAdobeTargetButNoExperiments[domain]) {
+            domainsWithAdobeTargetButNoExperiments[domain] = {
+              domain: domain,
+              adobeTargetDetected: true,
+              hasExperiments: false,
+              message: 'Adobe Target detected but no experiments found',
+              pagesTested: 0,
+              pagesChecked: []
+            };
+          }
+          domainsWithAdobeTargetButNoExperiments[domain].pagesTested++;
+          domainsWithAdobeTargetButNoExperiments[domain].pagesChecked.push({
+            url: page.url,
+            pageType: page.pageType,
+            checkedAt: page.adobeTarget.detectedAt
+          });
+        }
+        // Case 2: Adobe Target explicitly not detected (detected: false)
+        else {
+          // Skip if this domain already has Adobe Target on other pages
+          if (domainsWithAdobeTargetButNoExperiments[domain]) {
+            return;
+          }
+
+          if (!domainsWithoutAdobeTarget[domain]) {
+            domainsWithoutAdobeTarget[domain] = {
+              domain: domain,
+              adobeTargetDetected: false,
+              message: 'Adobe Target not detected on this domain',
+              pagesTested: 0,
+              pagesChecked: []
+            };
+          }
+          domainsWithoutAdobeTarget[domain].pagesTested++;
+          domainsWithoutAdobeTarget[domain].pagesChecked.push({
+            url: page.url,
+            pageType: page.pageType,
+            checkedAt: page.adobeTarget.detectedAt
+          });
+        }
+      }
+    });
+
     // Convert experiments object to array for each domain
     Object.keys(experimentsByDomain).forEach(domain => {
       experimentsByDomain[domain].experiments = Object.values(experimentsByDomain[domain].experiments);
@@ -99,20 +166,214 @@ exports.getExperimentsByDomain = async (req, res) => {
 
     // Calculate summary
     const summary = {
-      totalDomains: Object.keys(experimentsByDomain).length,
+      totalDomainsWithExperiments: Object.keys(experimentsByDomain).length,
+      domainsWithAdobeTargetButNoExperiments: Object.keys(domainsWithAdobeTargetButNoExperiments).length,
+      domainsWithoutAdobeTarget: Object.keys(domainsWithoutAdobeTarget).length,
+      totalDomainsProcessed: Object.keys(experimentsByDomain).length +
+                            Object.keys(domainsWithAdobeTargetButNoExperiments).length +
+                            Object.keys(domainsWithoutAdobeTarget).length,
       totalExperiments: Object.values(experimentsByDomain).reduce((sum, d) => sum + d.totalExperiments, 0),
       activeExperiments: Object.values(experimentsByDomain).reduce((sum, d) => sum + d.activeExperiments, 0),
-      totalPages: pagesWithExperiments.length
+      totalPages: pagesWithExperiments.length,
+      totalCrawledPages: allCrawledPages.length
     };
 
     res.json({
       success: true,
       experimentsByDomain,
+      domainsWithAdobeTargetButNoExperiments,
+      domainsWithoutAdobeTarget,
       summary
     });
 
   } catch (error) {
     console.error('Error getting experiments by domain:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve experiments',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get experiments for a specific domain within a dataset
+ * GET /api/experiments/by-dataset-domain/:datasetId/:domain
+ */
+exports.getExperimentsByDatasetAndDomain = async (req, res) => {
+  try {
+    const { datasetId, domain } = req.params;
+
+    console.log(`🔍 Fetching experiments for dataset: ${datasetId}, domain: ${domain}`);
+
+    // Validate datasetId
+    if (!mongoose.Types.ObjectId.isValid(datasetId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid dataset ID format'
+      });
+    }
+
+    // Validate domain
+    if (!domain || domain.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Domain parameter is required'
+      });
+    }
+
+    // Get dataset info
+    const dataset = await Dataset.findById(datasetId);
+    if (!dataset) {
+      return res.status(404).json({
+        success: false,
+        message: 'Dataset not found'
+      });
+    }
+
+    // Clean up domain (remove protocol, www, trailing slash)
+    const cleanDomain = domain
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/$/, '')
+      .toLowerCase();
+
+    console.log(`🔍 Cleaned domain: ${cleanDomain}`);
+
+    // Get all crawled pages for this domain
+    const allPagesForDomain = await CrawledPages.find({
+      datasetId: datasetId,
+      $or: [
+        { domain: domain },
+        { domain: cleanDomain },
+        { domain: `www.${cleanDomain}` },
+        { url: { $regex: cleanDomain, $options: 'i' } }
+      ]
+    }).sort({ pageType: 1, crawledAt: -1 });
+
+    console.log(`📊 Found ${allPagesForDomain.length} pages for domain`);
+
+    // Get pages with Adobe Target detected
+    const pagesWithExperiments = allPagesForDomain.filter(page =>
+      page.adobeTarget &&
+      page.adobeTarget.detected === true &&
+      page.adobeTarget.experimentCount > 0
+    );
+
+    console.log(`📊 Found ${pagesWithExperiments.length} pages with experiments`);
+
+    // Check if Adobe Target was detected but no experiments found
+    const adobeTargetDetected = allPagesForDomain.some(page =>
+      page.adobeTarget && page.adobeTarget.detectedAt
+    );
+
+    // Group experiments
+    const experimentsMap = {};
+    const pageResults = [];
+
+    pagesWithExperiments.forEach(page => {
+      // Add page to results
+      pageResults.push({
+        url: page.url,
+        pageType: page.pageType,
+        title: page.title,
+        experimentCount: page.adobeTarget.experimentCount,
+        detectedAt: page.adobeTarget.detectedAt,
+        experiments: page.adobeTarget.experiments || []
+      });
+
+      // Process each experiment
+      if (page.adobeTarget.experiments && page.adobeTarget.experiments.length > 0) {
+        page.adobeTarget.experiments.forEach(exp => {
+          const expId = exp.experimentId;
+
+          if (!experimentsMap[expId]) {
+            experimentsMap[expId] = {
+              experimentId: expId,
+              experimentName: exp.experimentName,
+              status: exp.status,
+              variations: exp.variations || [],
+              pageTypes: [],
+              pages: [],
+              activityNames: exp.activityNames || [],
+              activityIds: exp.activityIds || []
+            };
+          }
+
+          // Add page type if not already added
+          if (!experimentsMap[expId].pageTypes.includes(page.pageType)) {
+            experimentsMap[expId].pageTypes.push(page.pageType);
+          }
+
+          // Add page URL if not already added
+          if (!experimentsMap[expId].pages.includes(page.url)) {
+            experimentsMap[expId].pages.push(page.url);
+          }
+        });
+      }
+    });
+
+    // Convert experiments map to array
+    const experiments = Object.values(experimentsMap);
+
+    // Collect all unique experiment IDs
+    const uniqueExperimentIds = experiments.map(exp => exp.experimentId);
+
+    // Determine overall status (similar to getAirtableExperimentStatus)
+    const isExperimentDetectionInProgress = dataset.experimentDetectionStartedAt &&
+                                            !dataset.experimentDetectionCompletedAt;
+    const isWebCrawlingInProgress = dataset.scrapingStatus === 'in_progress' ||
+                                     dataset.scrapingStatus === 'pending';
+
+    let status = 'not_started';
+    if (isWebCrawlingInProgress) {
+      status = 'in_progress'; // Phase 1: Web crawling
+    } else if (isExperimentDetectionInProgress) {
+      status = 'in_progress'; // Phase 2: Experiment detection
+    } else if (dataset.experimentDetectionCompletedAt) {
+      status = 'completed';
+    } else if (dataset.experimentDetectionError) {
+      status = 'failed';
+    } else if (dataset.scrapingStatus === 'completed' && allPagesForDomain.length > 0) {
+      // If crawling is done but experiment detection hasn't started yet
+      status = 'not_started'; // Ready for experiment detection
+    }
+
+    // Calculate summary
+    const summary = {
+      domain: cleanDomain,
+      datasetId: datasetId,
+      datasetName: dataset.name,
+      status: status, // Overall status including crawling and experiment detection
+      adobeTargetDetected: adobeTargetDetected,
+      totalPages: allPagesForDomain.length,
+      pagesWithExperiments: pagesWithExperiments.length,
+      totalExperiments: experiments.length,
+      activeExperiments: experiments.filter(exp => exp.status === 'active' || exp.status === 'running').length,
+      uniqueExperimentIds: uniqueExperimentIds, // All unique experiment IDs
+      lastScrapedAt: dataset.experimentDetectionCompletedAt || dataset.experimentDetectionStartedAt,
+      detectionStatus: dataset.experimentDetectionCompletedAt ? 'completed' : 'in_progress', // Kept for backwards compatibility
+      scrapingStatus: dataset.scrapingStatus // Added for transparency
+    };
+
+    // Response structure
+    const response = {
+      success: true,
+      domain: cleanDomain,
+      summary: summary,
+      experiments: experiments,
+      pageResults: pageResults,
+      message: experiments.length > 0
+        ? `Found ${experiments.length} experiments on ${cleanDomain}`
+        : adobeTargetDetected
+          ? 'Adobe Target detected but no experiments found'
+          : 'Adobe Target not detected on this domain'
+    };
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('Error getting experiments by dataset and domain:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve experiments',
@@ -202,8 +463,12 @@ exports.getAirtableExperimentStatus = async (req, res) => {
     }
 
     // Check if detection is currently in progress
-    const isInProgress = dataset.experimentDetectionStartedAt &&
+    const isExperimentDetectionInProgress = dataset.experimentDetectionStartedAt &&
                         !dataset.experimentDetectionCompletedAt;
+
+    // Check if web crawling (Phase 1) is in progress or pending
+    const isWebCrawlingInProgress = dataset.scrapingStatus === 'in_progress' ||
+                                     dataset.scrapingStatus === 'pending';
 
     // Get crawled pages count
     const totalCrawledPages = await CrawledPages.countDocuments({ datasetId: datasetId });
@@ -221,14 +486,19 @@ exports.getAirtableExperimentStatus = async (req, res) => {
       'adobeTarget.detectedAt': { $exists: true }
     });
 
-    // Determine status
+    // Determine status - should be in_progress if either crawling or detection is happening
     let status = 'not_started';
-    if (isInProgress) {
-      status = 'in_progress';
+    if (isWebCrawlingInProgress) {
+      status = 'in_progress'; // Phase 1: Web crawling
+    } else if (isExperimentDetectionInProgress) {
+      status = 'in_progress'; // Phase 2: Experiment detection
     } else if (dataset.experimentDetectionCompletedAt) {
       status = 'completed';
     } else if (dataset.experimentDetectionError) {
       status = 'failed';
+    } else if (dataset.scrapingStatus === 'completed' && totalCrawledPages > 0) {
+      // If crawling is done but experiment detection hasn't started yet
+      status = 'not_started'; // Ready for experiment detection
     }
 
     // Calculate progress percentage
@@ -489,12 +759,35 @@ async function performExperimentDetection(datasetId, crawledPages) {
     page = await createPage(browser);
     console.log('✅ Shared browser and tab created successfully');
 
-    // Process pages sequentially using the same tab
-    for (let i = 0; i < crawledPages.length; i++) {
-      const crawledPage = crawledPages[i];
+    // ============================================
+    // STEP 1: Check home page first (for prioritization)
+    // ============================================
+    const homePages = crawledPages.filter(p => p.pageType === 'home');
+    const otherPages = crawledPages.filter(p => p.pageType !== 'home');
+
+    // Reorder pages: home page first, then others
+    const orderedPages = [...homePages, ...otherPages];
+
+    if (homePages.length > 0) {
+      console.log(`\n🏠 ========================================`);
+      console.log(`🏠 STEP 1: Checking home page FIRST for Adobe Target`);
+      console.log(`🏠 Home page: ${homePages[0].url}`);
+      console.log(`🏠 Note: Will check all pages regardless of home page result`);
+      console.log(`🏠 ========================================\n`);
+    } else {
+      console.log(`\n⚠️ No home page found. Checking all pages in order.\n`);
+    }
+
+    // ============================================
+    // Process ALL pages sequentially (home page first if exists)
+    // ============================================
+    for (let i = 0; i < orderedPages.length; i++) {
+      const crawledPage = orderedPages[i];
+      const isHomePage = crawledPage.pageType === 'home';
 
       try {
-        console.log(`🔍 [${i + 1}/${crawledPages.length}] Scraping experiments from: ${crawledPage.url}`);
+        const pageLabel = isHomePage ? '🏠 HOME' : `🔍 ${crawledPage.pageType.toUpperCase()}`;
+        console.log(`${pageLabel} [${i + 1}/${orderedPages.length}] Scraping experiments from: ${crawledPage.url}`);
 
         // Use the shared page to scrape this URL
         const result = await AdobeScraperService.scrapeExperimentsFromPage(crawledPage.url, page);
@@ -513,31 +806,73 @@ async function performExperimentDetection(datasetId, crawledPages) {
 
           if (result.hasAdobeTarget && result.experimentCount > 0) {
             console.log(`✅ Found ${result.experimentCount} experiments on ${crawledPage.url}`);
+          } else if (result.hasAdobeTarget && result.experimentCount === 0) {
+            console.log(`⚠️ Adobe Target detected but no experiments on ${crawledPage.url}`);
           } else {
-            console.log(`ℹ️ No experiments found on ${crawledPage.url}`);
+            console.log(`ℹ️ Adobe Target not detected on ${crawledPage.url}`);
           }
         }
 
         // Small delay between pages to avoid overwhelming the server
-        if (i < crawledPages.length - 1) {
+        if (i < orderedPages.length - 1) {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
       } catch (pageError) {
         console.error(`❌ Error detecting experiments on ${crawledPage.url}:`, pageError.message);
+
+        // Mark page as checked even if there was an error
+        try {
+          crawledPage.adobeTarget = {
+            detected: false,
+            experiments: [],
+            experimentCount: 0,
+            detectedAt: new Date()
+          };
+          await crawledPage.save();
+        } catch (saveError) {
+          console.error(`Error saving error state for ${crawledPage.url}:`, saveError.message);
+        }
+
         errorCount++;
       }
     }
+
+    // Verify all pages have been processed before marking as complete
+    const totalCrawledPages = await CrawledPages.countDocuments({ datasetId: datasetId });
+    const processedPages = await CrawledPages.countDocuments({
+      datasetId: datasetId,
+      'adobeTarget.detectedAt': { $exists: true }
+    });
+
+    console.log(`📊 Verification: ${processedPages}/${totalCrawledPages} pages processed`);
 
     // Update dataset with completion
     const dataset = await Dataset.findById(datasetId);
     if (dataset) {
       dataset.experimentDetectionCompletedAt = new Date();
+
+      // Only mark as fully completed if ALL pages have been processed
+      if (processedPages >= totalCrawledPages) {
+        dataset.scrapingStatus = 'completed';
+        dataset.scrapingError = null; // Clear the "in progress" message
+        console.log(`✅ All pages processed - marking as completed`);
+      } else {
+        console.log(`⚠️ Only ${processedPages}/${totalCrawledPages} pages processed - keeping status as in_progress`);
+        // Keep status as in_progress if not all pages are done
+        dataset.scrapingStatus = 'in_progress';
+        dataset.scrapingError = `Experiment detection in progress: ${processedPages}/${totalCrawledPages} pages completed`;
+      }
+
       await dataset.save();
     }
 
-    console.log(`✅ Experiment detection completed for dataset ${datasetId}`);
-    console.log(`   Success: ${successCount}, Errors: ${errorCount}`);
+    console.log(`\n🎉 ========================================`);
+    console.log(`🎉 PHASE 2 (EXPERIMENT DETECTION) COMPLETE`);
+    console.log(`🎉 Dataset: ${datasetId}`);
+    console.log(`🎉 Pages Processed: ${processedPages}/${totalCrawledPages}`);
+    console.log(`🎉 Success: ${successCount}, Errors: ${errorCount}`);
+    console.log(`🎉 ========================================\n`);
 
   } catch (error) {
     console.error(`Error in experiment detection for dataset ${datasetId}:`, error);
@@ -547,6 +882,9 @@ async function performExperimentDetection(datasetId, crawledPages) {
     if (dataset) {
       dataset.experimentDetectionError = error.message;
       dataset.experimentDetectionCompletedAt = new Date();
+      // Mark scraping as completed with error
+      dataset.scrapingStatus = 'failed';
+      dataset.scrapingError = `Experiment detection failed: ${error.message}`;
       await dataset.save();
     }
   } finally {

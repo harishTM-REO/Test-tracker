@@ -1216,13 +1216,18 @@ class AdobeScraperService {
         const helpPagePatterns = [
             // General FAQ pattern - any URL containing whole word "faq" or "FAQ"
             /\bfaq\b/i,
-            
-            /\/help/i,
-            /\/faq/i,
-            /\/support/i,
+
+            /\/help(?:\/|$|\?)/i,                   // /help followed by /, end, or query param (not /helpful)
+            /\/faq(?:\/|$|\?)/i,                    // /faq with word boundary
+            /\/support(?:\/|$|\?)/i,                // /support with word boundary
             /\/customer-service/i,
-            /\/contact/i,
-            /\/about/i,
+            /\/contact(?:\/|$|\?)/i,                // /contact with word boundary
+            /\/about(?:-us)?(?:\/|$|\?)/i,          // /about or /about-us with word boundary
+            /\/about-us\//i,                        // Any /about-us/ subpages (careers, sustainability, etc.)
+            /\/careers/i,                           // Career pages
+            /\/sustainability/i,                    // Sustainability pages
+            /\/our-story/i,                         // Company story pages
+            /\/company/i,                           // Company info pages
             /\/guide/i,
             /\/tutorial/i,
             /\/instructions/i,
@@ -1232,11 +1237,14 @@ class AdobeScraperService {
             /\/policy/i,
             /\/legal/i,
             /\/warranty/i,
-            /\/return/i,
-            /\/exchange/i,
-            /\/refund/i,
-            /\/shipping/i,
-            /\/delivery/i,
+            /\/return-policy/i,                     // Return policy pages (not /return as checkout)
+            /\/returns-policy/i,
+            /\/exchange-policy/i,
+            /\/refund-policy/i,
+            /\/shipping-delivery/i,                 // Shipping info pages (not /shipping as checkout)
+            /\/shipping-information/i,
+            /\/shipping-policy/i,
+            /\/delivery-information/i,
             /\/store-pickup/i,
             /\/help-topics/i,
             /\/customer-care/i,
@@ -1262,7 +1270,7 @@ class AdobeScraperService {
             /\/my-account/i,
             /\/account/i,
             /\/profile/i,
-            /\/orders/i,
+            /\/orders(?:\/|$|\?)/i,                 // Orders listing (not order completion)
             /\/order-history/i,
             /\/wishlist/i,
             /\/cliq-care/i,
@@ -1272,12 +1280,11 @@ class AdobeScraperService {
             /\/register/i
         ];
 
-        // TODO: Help/FAQ pages categorization - commented out for now, might use in future
-        // Check for help/FAQ pages first
-        // if (helpPagePatterns.some(pattern => pattern.test(urlLower))) {
-        //     console.log(`📊 Categorized ${url} as: other (help/FAQ page)`);
-        //     return 'other';
-        // }
+        // Check for help/FAQ pages first (before checkout patterns to avoid false positives)
+        if (helpPagePatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: faq (help/FAQ/support page)`);
+            return 'faq';
+        }
 
         // Note: Home page detection is handled separately in the crawling process
         // The initial provided URL is always treated as home page
@@ -1307,12 +1314,21 @@ class AdobeScraperService {
 
         // Product Listing Page (PLP) patterns - Enhanced with GameStop and better specificity
         const plpPatterns = [
+            // Dell-style category patterns (must come before PDP patterns)
+            /\/ar\//i,                              // Dell category: /monitor-accessories/ar/5390 (ar = article/category reference)
+
+            // Abercrombie style: /shop/wd/category-name-numeric-id (without /p/)
+            /\/shop\/wd\/(?!p\/)[\w-]+-\d+$/i,      // Abercrombie category: /shop/wd/womens-a-and-f-essentials-67155128
+
+            // Harley-Davidson style category patterns (must come before PDP patterns)
+            /\/motorcycles\/(touring|cruiser|sportster|trike|adventure-touring|softail|street|electric)\.html?$/i,  // HD categories without query params
+
             // GameStop-style category patterns (must come before PDP patterns)
             /\/video-games\/[\w-]+(?:\/[\w-]+)?$/i, // /video-games/playstation-4 or /video-games/playstation-4/action
             /\/collectibles\/[\w-]+(?:\/[\w-]+)?$/i,
             /\/electronics\/[\w-]+(?:\/[\w-]+)?$/i,
             /\/toys\/[\w-]+(?:\/[\w-]+)?$/i,
-            
+
             // Generic category patterns
             /\/products?$/i,                    // /products (not /products/specific-item)
             /\/category\//i,
@@ -1399,15 +1415,24 @@ class AdobeScraperService {
         
         // Product Detail Page (PDP) patterns - Enhanced with Ulta, 6pm, Overstock and other patterns
         const pdpPatterns = [
+            // Dell-style: /shop/product-name/apd/product-id/category (apd = article product detail)
+            /\/apd\//i,                             // Dell PDP: contains /apd/ anywhere in the path
+
+            // Abercrombie style: /shop/wd/p/product-name-numeric-id (with /p/)
+            /\/shop\/wd\/p\/[\w-]+-\d+/i,           // Abercrombie PDP: /shop/wd/p/essential-body-skimming-tee-55084827
+
+            // Harley-Davidson style: /motorcycles/model-name.html?color=code (product with color variant)
+            /\/motorcycles\/[\w-]+\.html?\?color=/i,  // HD PDP: motorcycle model with color parameter
+
             // Ulta-style: /p/product-name-pimprod12345 (product ID embedded in name)
             /\/p\/[\w-]*pimprod\d+/i,
-            
+
             // 6pm-style: /p/product-name/product/numeric-id/color/color-id
             /\/p\/[\w-]+\/product\/\d+\/color\/\d+/i,
-            
+
             // Zappos/6pm-style: /p/product-name/product/numeric-id (without color)
             /\/p\/[\w-]+\/product\/\d+(?!\/color)/i,
-            
+
             // Generic /p/product-name pattern (for sites like Ulta that don't use /product/ structure)
             /\/p\/[\w-]+(?!\/product)(?!.*\/brand\/)/i,
             
@@ -1430,9 +1455,9 @@ class AdobeScraperService {
             /\/products\/[\w-]+\/\d+$/i,       // Azafashions-style: /products/product-name/numeric-id
             /\/[\w-]+\/[\w-]+\/[\w-]+\/\d+\/buy$/i,  // Myntra-style: /category/brand/product-name/numeric-id/buy
             
-            // Long product URLs with numeric IDs (Overstock style without product.html) 
-            // But NOT brand/designers/aza-curates pages - exclude URLs containing /brand/, /designers/, or /aza-curates/
-            /\/[\w-]+\/(?!.*\/brand\/)(?!.*\/designers\/)(?!.*\/aza-curates\/)[\w\s\-%.()]+\/\d+$/i,
+            // Long product URLs with numeric IDs (Overstock style without product.html)
+            // But NOT brand/designers/aza-curates/ar pages - exclude URLs containing /brand/, /designers/, /aza-curates/, or /ar/
+            /\/[\w-]+\/(?!.*\/brand\/)(?!.*\/designers\/)(?!.*\/aza-curates\/)(?!.*\/ar\/)[\w\s\-%.()]+\/\d+$/i,
             
             // SKU and model patterns (specific)
             /\/sku-\d+$/i,
@@ -1472,11 +1497,11 @@ class AdobeScraperService {
             /\/\d+\/product$/i,
         ];
         
-        // Cart patterns - Enhanced
+        // Cart patterns - Enhanced with word boundaries to prevent false matches
         const cartPatterns = [
-            /\/cart/i,
-            /\/basket/i,
-            /\/bag/i,
+            /\/cart(?:\/|$|\?)/i,                   // /cart followed by /, end of string, or query param
+            /\/basket(?:\/|$|\?)/i,                 // /basket (not /basketball) - must end or continue with / or ?
+            /\/bag(?:\/|$|\?)/i,                    // /bag (not part of longer word)
             /\/shopping-cart/i,
             /\/shopping_cart/i,
             /\/shopping-bag/i,
@@ -1546,7 +1571,17 @@ class AdobeScraperService {
             console.log(`📊 Categorized ${url} as: plp (brand listing)`);
             return 'plp';
         }
-        
+
+        // 4b. Specific category patterns that must be checked before PDP (to prevent false PDP matches)
+        const specificCategoryPatterns = [
+            /\/ar\//i,                              // Dell categories
+            /\/motorcycles\/(touring|cruiser|sportster|trike|adventure-touring|softail|street|electric)\.html?$/i  // Harley-Davidson categories
+        ];
+        if (specificCategoryPatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: plp (specific category)`);
+            return 'plp';
+        }
+
         // 5. PDP patterns (check before general PLP patterns)
         if (pdpPatterns.some(pattern => pattern.test(urlLower))) {
             console.log(`📊 Categorized ${url} as: pdp`);
@@ -1618,9 +1653,74 @@ class AdobeScraperService {
             pdp: 2,       // Product Detail Pages
             cart: 1,      // Cart Pages (only 1 needed - websites typically have 1 cart)
             checkout: 1,  // Checkout Pages (only 1 needed - websites typically have 1 main checkout flow)
+            faq: 0,       // FAQ/Help/Support Pages (0 = don't collect these pages during crawling)
             // other: 3      // Other pages
         };
         return limits[category] || 3;
+    }
+
+    /**
+     * Check if Adobe Target is present on the homepage before crawling
+     * @param {string} url - The website URL to check
+     * @returns {Object} Adobe Target detection result
+     */
+    async checkAdobeTargetOnHomepage(url) {
+        let browser;
+        let page;
+
+        try {
+            console.log(`🎯 Checking for Adobe Target on homepage: ${url}`);
+
+            browser = await launchBrowser();
+            page = await createPage(browser);
+
+            // Navigate to homepage
+            await navigateToPage(page, url);
+
+            // Handle cookie consent
+            await handleCookieConsent(page);
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Check for Adobe Target
+            const adobeTargetDetection = await page.evaluate(() => {
+                // Check for Adobe Target indicators
+                const hasAdobeTarget = !!(
+                    window.adobe ||
+                    window.target ||
+                    window.targetGlobalSettings ||
+                    document.querySelector('script[src*="at.js"]') ||
+                    document.querySelector('script[src*="target"]') ||
+                    document.body.innerHTML.includes('adobe.target') ||
+                    document.body.innerHTML.includes('at.js')
+                );
+
+                return {
+                    detected: hasAdobeTarget,
+                    indicators: {
+                        hasAdobeObject: !!window.adobe,
+                        hasTargetObject: !!window.target,
+                        hasTargetSettings: !!window.targetGlobalSettings,
+                        hasAtJs: !!(document.querySelector('script[src*="at.js"]') || document.querySelector('script[src*="target"]')),
+                        hasTargetInHtml: document.body.innerHTML.includes('adobe.target') || document.body.innerHTML.includes('at.js')
+                    }
+                };
+            });
+
+            console.log(`🎯 Adobe Target detection result:`, adobeTargetDetection);
+
+            return adobeTargetDetection;
+
+        } catch (error) {
+            console.error('Error checking Adobe Target on homepage:', error);
+            return {
+                detected: false,
+                error: error.message
+            };
+        } finally {
+            if (browser) {
+                await closeBrowser(browser);
+            }
+        }
     }
 
     /**
@@ -1628,18 +1728,53 @@ class AdobeScraperService {
      * @param {string} url - The website URL to crawl
      * @param {number} maxPages - Maximum number of pages to crawl
      * @param {number} depth - Maximum crawl depth
+     * @param {boolean} checkAdobeTargetFirst - Whether to check for Adobe Target before crawling (default: true)
      * @returns {Object} Crawling results with page categorization
      */
-    async crawlEcommercePages(url, maxPages = 50, depth = 3) {
+    async crawlEcommercePages(url, maxPages = 50, depth = 3, checkAdobeTargetFirst = true) {
         let browser;
         let page;
 
         try {
             console.log(`🕷️ Starting web crawl for: ${url} (maxPages: ${maxPages}, depth: ${depth})`);
 
+            // Check for Adobe Target first if enabled
+            if (checkAdobeTargetFirst) {
+                console.log(`🎯 Pre-flight check: Detecting Adobe Target on homepage...`);
+                const adobeCheck = await this.checkAdobeTargetOnHomepage(url);
+
+                if (!adobeCheck.detected) {
+                    console.log(`❌ Adobe Target NOT detected on ${url}. Skipping crawl.`);
+                    return {
+                        skipped: true,
+                        reason: 'no_adobe_target',
+                        message: 'Adobe Target not detected on homepage. Crawling skipped.',
+                        url: url,
+                        adobeTargetCheck: adobeCheck,
+                        summary: {
+                            plp: 0,
+                            pdp: 0,
+                            cart: 0,
+                            checkout: 0,
+                            total: 0
+                        },
+                        pages: {
+                            home: [],
+                            plp: [],
+                            pdp: [],
+                            cart: [],
+                            checkout: [],
+                            faq: []
+                        }
+                    };
+                }
+
+                console.log(`✅ Adobe Target detected! Proceeding with crawl...`);
+            }
+
             browser = await launchBrowser();
             page = await createPage(browser);
-            
+
             console.log(`🍪 Navigating to base URL for cookie consent: ${url}`);
             await navigateToPage(page, url);
             const cookieType = await handleCookieConsent(page);
@@ -1652,7 +1787,8 @@ class AdobeScraperService {
                 plp: [],
                 pdp: [],
                 cart: [],
-                checkout: []
+                checkout: [],
+                faq: []       // FAQ/Help/Support pages (categorized but not actively collected)
                 // other: [] // TODO: Commented out - not collecting "other" category pages for now
             };
             const urlsToVisit = [url];
@@ -1686,12 +1822,18 @@ class AdobeScraperService {
                     continue;
                 }
                 
+                // Skip FAQ/Help pages (they're categorized but not collected)
+                if (expectedCategory === 'faq') {
+                    console.log(`⏭️ Skipping FAQ/Help page ${currentUrl}`);
+                    continue;
+                }
+
                 // Optional: Skip "other" pages if we have enough important ecommerce pages and are running low on quota
                 const importantPagesFound = foundPages.pdp.length + foundPages.plp.length + foundPages.cart.length + foundPages.checkout.length;
-                const shouldSkipOther = expectedCategory === 'other' && 
-                                      importantPagesFound >= 10 && 
+                const shouldSkipOther = expectedCategory === 'other' &&
+                                      importantPagesFound >= 10 &&
                                       (maxPages - processedCount) < 10;
-                
+
                 if (shouldSkipOther) {
                     console.log(`⏭️ Skipping 'other' page ${currentUrl} to focus on ecommerce pages`);
                     continue;

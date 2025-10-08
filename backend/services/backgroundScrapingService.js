@@ -269,8 +269,13 @@ class BackgroundScrapingService {
         return;
       }
 
-      await dataset.startScraping();
-      console.log(`Scraping started for dataset: ${dataset.name}`);
+      // Only update status if not already in progress
+      if (dataset.scrapingStatus !== 'in_progress') {
+        await dataset.startScraping();
+        console.log(`Scraping started for dataset: ${dataset.name}`);
+      } else {
+        console.log(`Scraping already in progress for dataset: ${dataset.name}`);
+      }
 
       // Perform direct scraping instead of calling endpoint to avoid double job creation
       const startTime = new Date();
@@ -349,13 +354,86 @@ class BackgroundScrapingService {
         totalExperiments: savedResults.totalExperiments
       };
 
+      // Mark Phase 1 (crawling) as complete
       await dataset.completeScraping(stats);
-      console.log(`✅ Scraping completed successfully for dataset: ${dataset.name}`);
+      console.log(`✅ Phase 1 (Crawling) completed successfully for dataset: ${dataset.name}`);
       console.log(`📊 Stats:`, stats);
-      
+
+      // ============================================
+      // AUTO-TRIGGER EXPERIMENT DETECTION (PHASE 2)
+      // ============================================
+      // Only for Adobe Target datasets - auto-start experiment detection after crawling
+      if (dataset.toolType === 'Adobe Target' && results.length > 0) {
+        console.log(`\n🎯 ========================================`);
+        console.log(`🎯 AUTO-TRIGGERING EXPERIMENT DETECTION`);
+        console.log(`🎯 Dataset: ${dataset.name} (${datasetId})`);
+        console.log(`🎯 Tool Type: ${dataset.toolType}`);
+        console.log(`🎯 Phase 1: Crawling ✅ Complete`);
+        console.log(`🎯 Phase 2: Experiment Detection 🚀 Starting...`);
+        console.log(`🎯 ========================================\n`);
+
+        // Update scraping status to show experiment detection is starting
+        dataset.scrapingStatus = 'in_progress';
+        dataset.scrapingError = 'Experiment detection in progress...';
+        await dataset.save();
+
+        try {
+          const experimentsController = require('../controller/experimentsController');
+
+          // Create a mock request and response for the experiment detection
+          const mockReq = {
+            params: { datasetId: datasetId },
+            body: {}
+          };
+
+          const mockRes = {
+            statusCode: 200,
+            status: function(code) {
+              this.statusCode = code;
+              console.log(`📡 Response status set to: ${code}`);
+              return this;
+            },
+            json: function(data) {
+              console.log(`📡 Experiment detection API response:`, JSON.stringify({
+                success: data.success,
+                message: data.message,
+                status: data.status,
+                totalPages: data.totalPages
+              }, null, 2));
+              return this;
+            }
+          };
+
+          // Call the experiment detection controller
+          console.log(`🚀 Calling startAirtableExperimentDetection...`);
+          await experimentsController.startAirtableExperimentDetection(mockReq, mockRes);
+          console.log(`\n✅ Experiment detection triggered! Status code: ${mockRes.statusCode}`);
+          console.log(`✅ Phase 2 (Experiment Detection) is now running in background`);
+          console.log(`✅ Check /api/experiments/airtable/status/${datasetId} for progress\n`);
+
+          // Note: The experiment detection runs in background via setImmediate
+          // The final status will be updated by the experimentsController when it completes
+
+        } catch (expError) {
+          console.error(`\n❌ Failed to auto-trigger experiment detection for dataset ${datasetId}`);
+          console.error(`❌ Error:`, expError.message);
+          console.error(`❌ Stack:`, expError.stack);
+
+          // Reset status back to completed with error message
+          const updatedDataset = await Dataset.findById(datasetId);
+          if (updatedDataset) {
+            updatedDataset.scrapingStatus = 'completed';
+            updatedDataset.scrapingError = `Crawling completed but experiment detection failed: ${expError.message}`;
+            await updatedDataset.save();
+          }
+        }
+      } else {
+        console.log(`ℹ️ Skipping auto-trigger: Tool type is ${dataset.toolType}, not Adobe Target`);
+      }
+
     } catch (error) {
       console.error(`Error during scraping for dataset ${datasetId}:`, error);
-      
+
       if (dataset) {
         await dataset.failScraping(error.message);
       }
@@ -465,10 +543,19 @@ class BackgroundScrapingService {
    */
   static async scrapeAdobeTargetWithCrawling(url, datasetId = null) {
     const AdobeScraperService = require('./adobeScraperService');
-    
+
     try {
       console.log(`🕷️ Starting Adobe Target crawling for: ${url}`);
-      
+
+      // Update dataset status to in_progress at the start of web crawling
+      if (datasetId) {
+        const dataset = await Dataset.findById(datasetId);
+        if (dataset && dataset.scrapingStatus === 'not_started') {
+          await dataset.startScraping();
+          console.log(`✅ Dataset status updated to 'in_progress' for web crawling`);
+        }
+      }
+
       // First, crawl the website to find different page types
       const crawlResults = await AdobeScraperService.crawlEcommercePages(url, 30, 2); // 30 pages max, depth 2
       

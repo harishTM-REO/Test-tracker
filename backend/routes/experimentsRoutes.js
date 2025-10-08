@@ -21,6 +21,12 @@ router.get('/test', (req, res) => {
 router.get('/by-domain/:datasetId', experimentsController.getExperimentsByDomain);
 
 /**
+ * GET /api/experiments/by-dataset-domain/:datasetId/:domain
+ * Get experiments for a specific domain within a dataset
+ */
+router.get('/by-dataset-domain/:datasetId/:domain', experimentsController.getExperimentsByDatasetAndDomain);
+
+/**
  * GET /api/experiments/detection-status/:datasetId
  * Get experiment detection status for a dataset
  */

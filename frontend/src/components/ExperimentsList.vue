@@ -71,6 +71,20 @@
           <div class="summary-label">Active Experiments</div>
         </div>
       </div>
+      <div v-if="experimentsSummary.domainsWithAdobeTargetButNoExperiments > 0" class="summary-card info">
+        <div class="summary-icon">⚠️</div>
+        <div class="summary-content">
+          <div class="summary-value">{{ experimentsSummary.domainsWithAdobeTargetButNoExperiments }}</div>
+          <div class="summary-label">Adobe Target (No Experiments)</div>
+        </div>
+      </div>
+      <div v-if="experimentsSummary.domainsWithoutAdobeTarget > 0" class="summary-card warning">
+        <div class="summary-icon">❌</div>
+        <div class="summary-content">
+          <div class="summary-value">{{ experimentsSummary.domainsWithoutAdobeTarget }}</div>
+          <div class="summary-label">Domains Without Adobe Target</div>
+        </div>
+      </div>
     </div>
 
     <!-- Loading State -->
@@ -214,6 +228,96 @@
           </transition>
         </div>
       </div>
+
+      <!-- Domains With Adobe Target But No Experiments Section -->
+      <div v-if="domainsWithAdobeTargetButNoExperiments && Object.keys(domainsWithAdobeTargetButNoExperiments).length > 0" class="no-experiments-section">
+        <h3 class="no-experiments-title">⚠️ Domains With Adobe Target (No Active Experiments)</h3>
+        <p class="no-experiments-description">
+          Adobe Target is installed on these domains, but no active experiments were found.
+        </p>
+
+        <div class="no-experiments-list">
+          <div
+            v-for="(domainData, domain) in domainsWithAdobeTargetButNoExperiments"
+            :key="domain"
+            class="no-experiments-item"
+          >
+            <div class="no-experiments-header">
+              <span class="no-experiments-domain">🌐 {{ domain }}</span>
+              <span class="no-experiments-badge">Adobe Target Installed</span>
+            </div>
+            <div class="no-experiments-details">
+              <p class="no-experiments-message">{{ domainData.message }}</p>
+              <p class="no-experiments-stats">{{ domainData.pagesTested }} pages checked</p>
+
+              <!-- Show checked pages (collapsible) -->
+              <details class="checked-pages-details">
+                <summary>View checked pages</summary>
+                <div class="checked-pages-list">
+                  <div
+                    v-for="(pageInfo, index) in domainData.pagesChecked.slice(0, 5)"
+                    :key="index"
+                    class="checked-page-item"
+                  >
+                    <span class="page-type-icon">{{ getPageTypeIcon(pageInfo.pageType) }}</span>
+                    <a :href="pageInfo.url" target="_blank" class="checked-page-url">
+                      {{ truncateUrl(pageInfo.url) }}
+                    </a>
+                  </div>
+                  <div v-if="domainData.pagesChecked.length > 5" class="more-checked-pages">
+                    +{{ domainData.pagesChecked.length - 5 }} more pages
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Domains Without Adobe Target Section -->
+      <div v-if="domainsWithoutAdobeTarget && Object.keys(domainsWithoutAdobeTarget).length > 0" class="no-adobe-section">
+        <h3 class="no-adobe-title">❌ Domains Without Adobe Target</h3>
+        <p class="no-adobe-description">
+          Adobe Target was not detected on these domains.
+        </p>
+
+        <div class="no-adobe-list">
+          <div
+            v-for="(domainData, domain) in domainsWithoutAdobeTarget"
+            :key="domain"
+            class="no-adobe-item"
+          >
+            <div class="no-adobe-header">
+              <span class="no-adobe-domain">🌐 {{ domain }}</span>
+              <span class="no-adobe-badge">No Adobe Target</span>
+            </div>
+            <div class="no-adobe-details">
+              <p class="no-adobe-message">{{ domainData.message }}</p>
+              <p class="no-adobe-stats">{{ domainData.pagesTested }} pages checked</p>
+
+              <!-- Show checked pages (collapsible) -->
+              <details class="checked-pages-details">
+                <summary>View checked pages</summary>
+                <div class="checked-pages-list">
+                  <div
+                    v-for="(pageInfo, index) in domainData.pagesChecked.slice(0, 5)"
+                    :key="index"
+                    class="checked-page-item"
+                  >
+                    <span class="page-type-icon">{{ getPageTypeIcon(pageInfo.pageType) }}</span>
+                    <a :href="pageInfo.url" target="_blank" class="checked-page-url">
+                      {{ truncateUrl(pageInfo.url) }}
+                    </a>
+                  </div>
+                  <div v-if="domainData.pagesChecked.length > 5" class="more-checked-pages">
+                    +{{ domainData.pagesChecked.length - 5 }} more pages
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -234,6 +338,8 @@ export default {
       loading: false,
       error: null,
       experimentsByDomain: {},
+      domainsWithAdobeTargetButNoExperiments: {},
+      domainsWithoutAdobeTarget: {},
       experimentsSummary: null,
       expandedDomains: [],
 
@@ -285,6 +391,8 @@ export default {
         const response = await axios.get(`${this.apiBaseUrl}/api/experiments/by-domain/${this.datasetId}`)
         if (response.data.success) {
           this.experimentsByDomain = response.data.experimentsByDomain
+          this.domainsWithAdobeTargetButNoExperiments = response.data.domainsWithAdobeTargetButNoExperiments || {}
+          this.domainsWithoutAdobeTarget = response.data.domainsWithoutAdobeTarget || {}
           this.experimentsSummary = response.data.summary
         } else {
           this.error = response.data.message
@@ -916,6 +1024,258 @@ export default {
   font-weight: 500;
 }
 
+/* Info Summary Card */
+.summary-card.info {
+  border-color: #2196f3;
+  background: #e7f3ff;
+}
+
+.summary-card.info:hover {
+  border-color: #1976d2;
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.15);
+}
+
+/* Warning Summary Card */
+.summary-card.warning {
+  border-color: #ffc107;
+  background: #fff9e6;
+}
+
+.summary-card.warning:hover {
+  border-color: #ff9800;
+  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.15);
+}
+
+/* Domains With Adobe Target But No Experiments Section */
+.no-experiments-section {
+  margin-top: 30px;
+  padding: 25px;
+  background: #e7f3ff;
+  border: 2px solid #2196f3;
+  border-radius: 10px;
+}
+
+.no-experiments-title {
+  margin: 0 0 10px 0;
+  color: #0d47a1;
+  font-size: 1.3rem;
+}
+
+.no-experiments-description {
+  color: #1565c0;
+  margin-bottom: 20px;
+  font-size: 0.95rem;
+}
+
+.no-experiments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.no-experiments-item {
+  background: white;
+  border: 2px solid #2196f3;
+  border-radius: 8px;
+  padding: 15px;
+  transition: all 0.2s;
+}
+
+.no-experiments-item:hover {
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.2);
+  transform: translateY(-2px);
+}
+
+.no-experiments-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #bbdefb;
+}
+
+.no-experiments-domain {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: #495057;
+}
+
+.no-experiments-badge {
+  background: #2196f3;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.no-experiments-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.no-experiments-message {
+  margin: 0;
+  color: #1565c0;
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.no-experiments-stats {
+  margin: 0;
+  color: #0d47a1;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+/* Domains Without Adobe Target Section */
+.no-adobe-section {
+  margin-top: 30px;
+  padding: 25px;
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  border-radius: 10px;
+}
+
+.no-adobe-title {
+  margin: 0 0 10px 0;
+  color: #856404;
+  font-size: 1.3rem;
+}
+
+.no-adobe-description {
+  color: #856404;
+  margin-bottom: 20px;
+  font-size: 0.95rem;
+}
+
+.no-adobe-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.no-adobe-item {
+  background: white;
+  border: 2px solid #ffc107;
+  border-radius: 8px;
+  padding: 15px;
+  transition: all 0.2s;
+}
+
+.no-adobe-item:hover {
+  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
+  transform: translateY(-2px);
+}
+
+.no-adobe-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #ffe69c;
+}
+
+.no-adobe-domain {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: #495057;
+}
+
+.no-adobe-badge {
+  background: #dc3545;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.no-adobe-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.no-adobe-message {
+  margin: 0;
+  color: #856404;
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.no-adobe-stats {
+  margin: 0;
+  color: #6c757d;
+  font-size: 0.85rem;
+}
+
+.checked-pages-details {
+  margin-top: 10px;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.checked-pages-details summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: #495057;
+  font-size: 0.9rem;
+  user-select: none;
+  padding: 5px;
+}
+
+.checked-pages-details summary:hover {
+  color: #007bff;
+}
+
+.checked-pages-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checked-page-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #dee2e6;
+}
+
+.page-type-icon {
+  font-size: 1.1rem;
+}
+
+.checked-page-url {
+  color: #0d6efd;
+  text-decoration: none;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.checked-page-url:hover {
+  text-decoration: underline;
+  color: #0a58ca;
+}
+
+.more-checked-pages {
+  font-size: 0.8rem;
+  color: #6c757d;
+  font-style: italic;
+  padding: 6px 10px;
+  text-align: center;
+}
+
 @media (max-width: 768px) {
   .experiments-header {
     flex-direction: column;
@@ -937,6 +1297,12 @@ export default {
   .experiment-header {
     flex-direction: column;
     gap: 10px;
+  }
+
+  .no-adobe-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
   }
 }
 </style>

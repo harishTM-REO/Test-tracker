@@ -35,8 +35,8 @@ const crawledPageSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Page type is required'],
     enum: {
-      values: ['home', 'plp', 'pdp', 'cart', 'checkout', 'other'],
-      message: 'Page type must be one of: home, plp, pdp, cart, checkout, other'
+      values: ['home', 'plp', 'pdp', 'cart', 'checkout', 'faq', 'other'],
+      message: 'Page type must be one of: home, plp, pdp, cart, checkout, faq, other'
     },
     index: true
   },
@@ -211,6 +211,7 @@ crawledPageSchema.virtual('pageTypeDisplay').get(function() {
     pdp: 'Product Detail Page',
     cart: 'Shopping Cart',
     checkout: 'Checkout Page',
+    faq: 'FAQ/Help Page',
     other: 'Other Page'
   };
   return displayNames[this.pageType] || this.pageType;
