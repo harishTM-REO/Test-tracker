@@ -781,9 +781,30 @@ async function performExperimentDetection(datasetId, crawledPages) {
     // ============================================
     // Process ALL pages sequentially (home page first if exists)
     // ============================================
+    // Track consecutive timeouts to fail fast on problematic domains
+    let consecutiveTimeouts = 0;
+    const maxConsecutiveTimeouts = 3;
+
     for (let i = 0; i < orderedPages.length; i++) {
       const crawledPage = orderedPages[i];
       const isHomePage = crawledPage.pageType === 'home';
+
+      // Check if we should stop due to too many consecutive timeouts
+      if (consecutiveTimeouts >= maxConsecutiveTimeouts) {
+        console.error(`❌ Too many consecutive timeouts (${consecutiveTimeouts}). Marking remaining ${orderedPages.length - i} pages as failed.`);
+
+        // Mark all remaining pages as not detected
+        for (let j = i; j < orderedPages.length; j++) {
+          orderedPages[j].adobeTarget = {
+            detected: false,
+            experiments: [],
+            experimentCount: 0,
+            detectedAt: new Date()
+          };
+          await orderedPages[j].save();
+        }
+        break;
+      }
 
       try {
         const pageLabel = isHomePage ? '🏠 HOME' : `🔍 ${crawledPage.pageType.toUpperCase()}`;
@@ -791,6 +812,9 @@ async function performExperimentDetection(datasetId, crawledPages) {
 
         // Use the shared page to scrape this URL
         const result = await AdobeScraperService.scrapeExperimentsFromPage(crawledPage.url, page);
+
+        // Reset timeout counter on success
+        consecutiveTimeouts = 0;
 
         if (result) {
           // Update the page with experiment data
@@ -820,6 +844,19 @@ async function performExperimentDetection(datasetId, crawledPages) {
 
       } catch (pageError) {
         console.error(`❌ Error detecting experiments on ${crawledPage.url}:`, pageError.message);
+
+        // Check if it's a timeout error
+        const isTimeout = pageError.message.includes('timeout') ||
+                          pageError.message.includes('Navigation timeout') ||
+                          pageError.message.includes('timed out');
+
+        if (isTimeout) {
+          consecutiveTimeouts++;
+          console.warn(`⚠️ Consecutive timeouts: ${consecutiveTimeouts}/${maxConsecutiveTimeouts}`);
+        } else {
+          // Reset counter on non-timeout errors
+          consecutiveTimeouts = 0;
+        }
 
         // Mark page as checked even if there was an error
         try {

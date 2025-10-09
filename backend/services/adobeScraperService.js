@@ -1162,12 +1162,21 @@ class AdobeScraperService {
 
                         console.log(`🔍 PDP validation for ${pdpUrl}:`, pdpIndicators);
 
-                        // More flexible validation: Accept if categorized as PDP OR has strong indicators
+                        // STRICT validation: Require URL pattern match AND strong indicators
                         const indicatorCount = Object.values(pdpIndicators).filter(Boolean).length;
-                        const isStrongPDP = indicatorCount >= 2; // Lowered from 2 to 1
                         const isCategorizedAsPDP = confirmedCategory === 'pdp';
-                        
-                        if (isCategorizedAsPDP || isStrongPDP) {
+
+                        // Key PDP indicators that must be present
+                        const hasCriticalIndicators = pdpIndicators.hasAddToCart ||
+                                                     (pdpIndicators.hasPrice && pdpIndicators.hasProductDetails);
+
+                        // Strong validation requires:
+                        // 1. URL pattern MUST match PDP (confirmed category = 'pdp')
+                        // 2. AND at least 3 indicators OR critical indicators
+                        const isValidPDP = isCategorizedAsPDP &&
+                                          (indicatorCount >= 3 || hasCriticalIndicators);
+
+                        if (isValidPDP) {
                             const pdpPageData = {
                                 url: pdpUrl,
                                 title: await page.title(),
@@ -1176,13 +1185,19 @@ class AdobeScraperService {
                                 validated: true,
                                 pdpIndicators: pdpIndicators,
                                 confirmedCategory: confirmedCategory,
-                                validationMethod: isCategorizedAsPDP ? 'url-pattern' : 'content-indicators'
+                                validationMethod: 'url-pattern-with-indicators'
                             };
 
                             results.pdpPages.push(pdpPageData);
-                            console.log(`✅ Confirmed PDP from PLP discovery: ${pdpUrl} (${results.pdpPages.length}/${pdpLimit}) - Method: ${pdpPageData.validationMethod}`);
+                            console.log(`✅ Confirmed PDP from PLP discovery: ${pdpUrl} (${results.pdpPages.length}/${pdpLimit})`);
                         } else {
-                            console.log(`❌ PDP validation failed - Category: ${confirmedCategory}, Indicators: ${indicatorCount}/5, URL: ${pdpUrl}`);
+                            console.log(`❌ PDP validation failed:`, {
+                                url: pdpUrl,
+                                urlMatches: isCategorizedAsPDP,
+                                indicators: indicatorCount,
+                                critical: hasCriticalIndicators,
+                                reason: !isCategorizedAsPDP ? 'URL pattern does not match PDP' : 'Insufficient indicators'
+                            });
                         }
 
                     } catch (pdpError) {
@@ -1312,16 +1327,88 @@ class AdobeScraperService {
             return 'plp'; // Treat deals as PLP since they're product listing pages
         }
 
+        // ============================================
+        // IMPORTANT: Check PDP patterns FIRST before PLP patterns
+        // to avoid false positives from broad patterns like /shop/
+        // ============================================
+
+        // Product Detail Page (PDP) patterns - Check FIRST to avoid false PLP matches
+        const pdpPatterns = [
+            // Nike style: /t/product-name-sku/product-id (has /t/ for product)
+            /\/t\/[\w-]+\/[\w-]+$/i,                // Nike PDP: /in/t/dri-fit-fitness-t-shirt-LR78xp/HJ3595-437
+
+            // Boden style: /products/product-name (must come before generic /products/ pattern)
+            /\/products\/[\w-]+$/i,                 // Boden PDP: /products/eva-cashmere-roll-neck-jumper-chestnut-colour-block
+
+            // Dell-style: /shop/product-name/apd/product-id/category (apd = article product detail)
+            /\/apd\//i,                             // Dell PDP: contains /apd/ anywhere in the path
+
+            // Abercrombie style: /shop/wd/p/product-name-numeric-id (with /p/)
+            /\/shop\/wd\/p\/[\w-]+-\d+/i,           // Abercrombie PDP: /shop/wd/p/essential-body-skimming-tee-55084827
+
+            // Harley-Davidson style: any URL with motorcycles and ?color= parameter (product with color variant)
+            /\/motorcycles\/.*?\.html?\?.*color=/i,
+
+            // Ulta-style and other /p/ patterns
+            /\/p\/[\w-]*pimprod\d+/i,
+            /\/p\/[\w-]+\/product\/\d+/i,
+            /\/p\/[\w-]+(?!\/product)(?!.*\/brand\/)/i,
+
+            // GameStop and other product patterns
+            /\/products\/[\w-]+\/\d+\.html?$/i,
+            /\/[\w-]+\/[\w\s\-%.()]+\/\d+\/product\.html?$/i,
+
+            // Amazon-style
+            /\/dp\/[A-Z0-9]{10}/i,
+            /\/gp\/product\/[A-Z0-9]{10}/i,
+
+            // Generic product patterns
+            /\/product\/[\w-]+\/\d+/i,
+            /\/item\/[\w-]+\/\d+/i,
+            /\/product\/\d+$/i,
+            /\/item\/\d+$/i,
+            /\/products\/[\w-]+-\d+$/i,
+            /\/products\/[\w-]+\/\d+$/i,
+
+            // Product with SKU/model
+            /\/sku-\d+$/i,
+            /\/model-[\w-]+-\d+$/i,
+            /\/[\w-]+-item-\d+/i,
+
+            // Product with file extensions
+            /\/[\w-]+-\d{4,}\.html?$/i,
+            /\/product-\d+\.html?$/i,
+            /\/[\w-]+\/[A-Z0-9]{6,}\.html?$/i,
+
+            // Tata Cliq style: /product-name/p-product-id
+            /\/(?:[\w-]+\/){1,10}p-[\w\d]+$/i,
+
+            // Very specific patterns
+            /\/p\/\d+$/i,
+            /\/dp\/\d+$/i,
+            /\/\d+\/product$/i,
+        ];
+
+        // Check for PDP first
+        if (pdpPatterns.some(pattern => pattern.test(urlLower))) {
+            console.log(`📊 Categorized ${url} as: pdp (product detail page)`);
+            return 'pdp';
+        }
+
         // Product Listing Page (PLP) patterns - Enhanced with GameStop and better specificity
         const plpPatterns = [
+            // Boden style: /collections/collection-name
+            /\/collections\/[\w-]+$/i,              // Boden PLP: /collections/womens-maxi-dresses
+
             // Dell-style category patterns (must come before PDP patterns)
             /\/ar\//i,                              // Dell category: /monitor-accessories/ar/5390 (ar = article/category reference)
 
             // Abercrombie style: /shop/wd/category-name-numeric-id (without /p/)
             /\/shop\/wd\/(?!p\/)[\w-]+-\d+$/i,      // Abercrombie category: /shop/wd/womens-a-and-f-essentials-67155128
 
-            // Harley-Davidson style category patterns (must come before PDP patterns)
+            // Harley-Davidson style category patterns (motorcycles without color parameter = PLP)
             /\/motorcycles\/(touring|cruiser|sportster|trike|adventure-touring|softail|street|electric)\.html?$/i,  // HD categories without query params
+            /\/motorcycles\/[\w-]+\.html?(?!\?.*color=)/i,  // HD model pages without color parameter (e.g., street-bob.html without ?color=)
 
             // GameStop-style category patterns (must come before PDP patterns)
             /\/video-games\/[\w-]+(?:\/[\w-]+)?$/i, // /video-games/playstation-4 or /video-games/playstation-4/action
@@ -1413,90 +1500,8 @@ class AdobeScraperService {
             /\/strategy\/$/i,
         ];
         
-        // Product Detail Page (PDP) patterns - Enhanced with Ulta, 6pm, Overstock and other patterns
-        const pdpPatterns = [
-            // Dell-style: /shop/product-name/apd/product-id/category (apd = article product detail)
-            /\/apd\//i,                             // Dell PDP: contains /apd/ anywhere in the path
+        // PDP patterns already checked earlier - this section is removed to avoid duplicates
 
-            // Abercrombie style: /shop/wd/p/product-name-numeric-id (with /p/)
-            /\/shop\/wd\/p\/[\w-]+-\d+/i,           // Abercrombie PDP: /shop/wd/p/essential-body-skimming-tee-55084827
-
-            // Harley-Davidson style: /motorcycles/model-name.html?color=code (product with color variant)
-            /\/motorcycles\/[\w-]+\.html?\?color=/i,  // HD PDP: motorcycle model with color parameter
-
-            // Ulta-style: /p/product-name-pimprod12345 (product ID embedded in name)
-            /\/p\/[\w-]*pimprod\d+/i,
-
-            // 6pm-style: /p/product-name/product/numeric-id/color/color-id
-            /\/p\/[\w-]+\/product\/\d+\/color\/\d+/i,
-
-            // Zappos/6pm-style: /p/product-name/product/numeric-id (without color)
-            /\/p\/[\w-]+\/product\/\d+(?!\/color)/i,
-
-            // Generic /p/product-name pattern (for sites like Ulta that don't use /product/ structure)
-            /\/p\/[\w-]+(?!\/product)(?!.*\/brand\/)/i,
-            
-            // Overstock-style: /Category-Subcategory/Product-Name/numeric-id/product.html
-            /\/[\w-]+\/[\w\s\-%.()]+\/\d+\/product\.html?$/i,
-            
-            // GameStop-style: /category/subcategory/products/product-name/numeric-id.html
-            /\/products\/[\w-]+\/\d+\.html?$/i,
-            
-            // Amazon-style (very specific)
-            /\/dp\/[A-Z0-9]{10}/i,
-            /\/gp\/product\/[A-Z0-9]{10}/i,
-            
-            // Generic product patterns with numeric IDs (more specific)
-            /\/product\/[\w-]+\/\d+/i,
-            /\/item\/[\w-]+\/\d+/i,
-            /\/product\/\d+$/i,
-            /\/item\/\d+$/i,
-            /\/products\/[\w-]+-\d+$/i,        // Dressland-style: /products/product-name-number
-            /\/products\/[\w-]+\/\d+$/i,       // Azafashions-style: /products/product-name/numeric-id
-            /\/[\w-]+\/[\w-]+\/[\w-]+\/\d+\/buy$/i,  // Myntra-style: /category/brand/product-name/numeric-id/buy
-            
-            // Long product URLs with numeric IDs (Overstock style without product.html)
-            // But NOT brand/designers/aza-curates/ar pages - exclude URLs containing /brand/, /designers/, /aza-curates/, or /ar/
-            /\/[\w-]+\/(?!.*\/brand\/)(?!.*\/designers\/)(?!.*\/aza-curates\/)(?!.*\/ar\/)[\w\s\-%.()]+\/\d+$/i,
-            
-            // SKU and model patterns (specific)
-            /\/sku-\d+$/i,
-            /\/model-[\w-]+-\d+$/i,
-            
-            // Product with file extensions (common for individual products)
-            /\/product\/[^\/\?]+(?:\.html?)?(?:\?|$)/i,  // Titan-style: /product/product-name (with or without .html)
-            /\/[\w-]+-\d{4,}\.html?$/i,        // At least 4 digits for product ID
-            /\/product-\d+\.html?$/i,
-            /\/[\w-]+\/[A-Z0-9]{6,}\.html?$/i,  // Biba-style: /product-name/ALPHANUMERIC-SKU.html
-            /\/[\w-]+-item-\d+/i,              // Farfetch-style: /product-name-item-XXXXXXXX
-            
-            // Product with color/variant (specific)
-            /\/product\/\d+\/color\/\d+/i,
-            /\/products\/[\w-]+\/color\/[\w-]+$/i,
-            
-            // Brand + product with numeric ID (more specific, at least 3 digits)
-            /\/[\w-]+\/[\w-]+-\d{3,}$/i,
-            
-            // Very specific product patterns (must have numeric ID at end)
-            /\/p\/\d+$/i,
-            /\/dp\/\d+$/i,
-            
-            // Tata Cliq style: /product-name/p-product-id (flexible for any length product names)
-            /\/[\w-]+\/p-[\w\d]+$/i,
-            
-            // More Tata Cliq patterns: longer product names with multiple segments
-            /\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
-            /\/[\w-]+\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
-            /\/[\w-]+\/[\w-]+\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
-            /\/[\w-]+\/[\w-]+\/[\w-]+\/[\w-]+\/[\w-]+\/p-[\w\d]+$/i,
-            
-            // General pattern for very long Tata Cliq product names (up to 10 segments)
-            /\/(?:[\w-]+\/){1,10}p-[\w\d]+$/i,
-            
-            // Product URLs ending with /product (no .html)
-            /\/\d+\/product$/i,
-        ];
-        
         // Cart patterns - Enhanced with word boundaries to prevent false matches
         const cartPatterns = [
             /\/cart(?:\/|$|\?)/i,                   // /cart followed by /, end of string, or query param
