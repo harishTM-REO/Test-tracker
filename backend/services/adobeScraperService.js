@@ -305,7 +305,7 @@ class AdobeScraperService {
                 // Wait for mbox data (with timeout)
                 mboxResponseData = await mboxDataPromise;
                 // Now run the page evaluation to check for Adobe Target
-                const experimentData = await page.evaluate(() => {
+                let experimentData = await page.evaluate(() => {
                     console.log('Inside page.evaluate - starting extraction...');
                     return new Promise((resolve, reject) => {
                         console.log('Starting Adobe Target extraction...');
@@ -466,6 +466,7 @@ class AdobeScraperService {
                         experimentData.activeCount = experiments.length;
 
                         console.log(`✅ Parsed ${experiments.length} experiments from mbox data`);
+                        console.log('📊 Parsed experiments:', JSON.stringify(experiments, null, 2));
                     }
 
                     console.log('Added mbox response data to experiment data');
@@ -478,6 +479,11 @@ class AdobeScraperService {
                 console.log(`Adobe Target data extracted from ${currentUrl}: ${experimentData.experiments?.length || 0} experiments found`);
                 console.log('🔍 DEBUG: About to return experimentData with', experimentData.experimentCount, 'experiments');
                 console.log('🔍 DEBUG: Experiments array:', JSON.stringify(experimentData.experiments, null, 2));
+                console.log('🔍 DEBUG: FINAL experimentData before return:', JSON.stringify({
+                    hasAdobeTarget: experimentData.hasAdobeTarget,
+                    experimentCount: experimentData.experimentCount,
+                    experiments: experimentData.experiments
+                }, null, 2));
 
                 return experimentData;
 
