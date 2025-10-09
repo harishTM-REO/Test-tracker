@@ -503,12 +503,19 @@ const detectCaptcha = async (page) => {
  */
 const handleCookieConsent= async(page)=> {
     try {
+        // Check if page is still valid
+        if (!page || page.isClosed()) {
+            console.warn('Page is closed, skipping cookie consent handling');
+            return 'page_closed';
+        }
+
         const currentUrl = await page.url();
         console.log("Handling cookie consent with enhanced detection...");
 
-        const cookieType = await page.evaluate(() => {
-            return new Promise((resolve) => {
-                let cookieType = 'custom';
+        const cookieType = await Promise.race([
+            page.evaluate(() => {
+                return new Promise((resolve) => {
+                    let cookieType = 'custom';
 
                 function acceptCookie(btn, interval) {
                     if (interval) {
@@ -683,11 +690,29 @@ const handleCookieConsent= async(page)=> {
                     }
                 }, 100);
             });
+            }),
+            // Timeout after 10 seconds to prevent hanging
+            new Promise((resolve) => setTimeout(() => resolve('timeout'), 10000))
+        ]).catch((error) => {
+            // Handle context destruction gracefully
+            if (error.message.includes('Execution context was destroyed') ||
+                error.message.includes('Target closed')) {
+                console.log('Page context destroyed during cookie consent - likely due to navigation');
+                return 'context_destroyed';
+            }
+            throw error;
         });
 
         console.log(`Cookie consent handling completed for ${currentUrl}. Type detected: ${cookieType}`);
         return cookieType;
     } catch (error) {
+        // More specific error handling
+        if (error.message.includes('Execution context was destroyed') ||
+            error.message.includes('Target closed') ||
+            error.message.includes('Session closed')) {
+            console.log('Page navigated or closed during cookie consent handling - this is normal for some sites');
+            return 'context_destroyed';
+        }
         console.warn('Error handling cookie consent:', error.message);
         return 'error';
     }
