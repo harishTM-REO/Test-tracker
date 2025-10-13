@@ -72,11 +72,13 @@ exports.getExperimentsByDomain = async (req, res) => {
       // Process each experiment on this page
       if (page.adobeTarget.experiments && page.adobeTarget.experiments.length > 0) {
         page.adobeTarget.experiments.forEach(exp => {
-          const expId = exp.experimentId;
+          // Use experimentId if available, otherwise use experimentName as the key
+          // This ensures experiments without IDs are grouped separately by name
+          const expKey = exp.experimentId || exp.experimentName || 'unknown';
 
-          if (!experimentsByDomain[domain].experiments[expId]) {
-            experimentsByDomain[domain].experiments[expId] = {
-              experimentId: expId,
+          if (!experimentsByDomain[domain].experiments[expKey]) {
+            experimentsByDomain[domain].experiments[expKey] = {
+              experimentId: exp.experimentId,
               experimentName: exp.experimentName,
               status: exp.status,
               variations: exp.variations || [],
@@ -91,13 +93,13 @@ exports.getExperimentsByDomain = async (req, res) => {
           }
 
           // Add page type if not already added
-          if (!experimentsByDomain[domain].experiments[expId].pageTypes.includes(page.pageType)) {
-            experimentsByDomain[domain].experiments[expId].pageTypes.push(page.pageType);
+          if (!experimentsByDomain[domain].experiments[expKey].pageTypes.includes(page.pageType)) {
+            experimentsByDomain[domain].experiments[expKey].pageTypes.push(page.pageType);
           }
 
           // Add page URL if not already added
-          if (!experimentsByDomain[domain].experiments[expId].pages.includes(page.url)) {
-            experimentsByDomain[domain].experiments[expId].pages.push(page.url);
+          if (!experimentsByDomain[domain].experiments[expKey].pages.includes(page.url)) {
+            experimentsByDomain[domain].experiments[expKey].pages.push(page.url);
           }
         });
       }
@@ -162,6 +164,13 @@ exports.getExperimentsByDomain = async (req, res) => {
     // Convert experiments object to array for each domain
     Object.keys(experimentsByDomain).forEach(domain => {
       experimentsByDomain[domain].experiments = Object.values(experimentsByDomain[domain].experiments);
+
+      // Add uniqueExperimentIds and uniqueExperimentNames for this domain
+      const experiments = experimentsByDomain[domain].experiments;
+      experimentsByDomain[domain].uniqueExperimentIds = experiments
+        .map(exp => exp.experimentId)
+        .filter(id => id !== null && id !== undefined);
+      experimentsByDomain[domain].uniqueExperimentNames = [...new Set(experiments.map(exp => exp.experimentName).filter(name => name))];
     });
 
     // Calculate summary
@@ -240,6 +249,30 @@ exports.getExperimentsByDatasetAndDomain = async (req, res) => {
 
     console.log(`🔍 Cleaned domain: ${cleanDomain}`);
 
+    // Validate that the domain is among the companies' URLs for this dataset
+    const companyUrls = dataset.companies.map(company => {
+      const companyUrl = company.companyURL
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .replace(/\/$/, '')
+        .toLowerCase();
+      return companyUrl;
+    });
+
+    const isDomainValid = companyUrls.some(url =>
+      url === cleanDomain || cleanDomain.includes(url) || url.includes(cleanDomain)
+    );
+
+    if (!isDomainValid) {
+      console.log(`❌ Domain ${cleanDomain} not found in dataset companies`);
+      return res.status(400).json({
+        success: false,
+        message: 'Domain not found in dataset companies'
+      });
+    }
+
+    console.log(`✅ Domain ${cleanDomain} validated against dataset companies`);
+
     // Get all crawled pages for this domain
     const allPagesForDomain = await CrawledPages.find({
       datasetId: datasetId,
@@ -285,11 +318,13 @@ exports.getExperimentsByDatasetAndDomain = async (req, res) => {
       // Process each experiment
       if (page.adobeTarget.experiments && page.adobeTarget.experiments.length > 0) {
         page.adobeTarget.experiments.forEach(exp => {
-          const expId = exp.experimentId;
+          // Use experimentId if available, otherwise use experimentName as the key
+          // This ensures experiments without IDs are grouped separately by name
+          const expKey = exp.experimentId || exp.experimentName || 'unknown';
 
-          if (!experimentsMap[expId]) {
-            experimentsMap[expId] = {
-              experimentId: expId,
+          if (!experimentsMap[expKey]) {
+            experimentsMap[expKey] = {
+              experimentId: exp.experimentId,
               experimentName: exp.experimentName,
               status: exp.status,
               variations: exp.variations || [],
@@ -301,13 +336,13 @@ exports.getExperimentsByDatasetAndDomain = async (req, res) => {
           }
 
           // Add page type if not already added
-          if (!experimentsMap[expId].pageTypes.includes(page.pageType)) {
-            experimentsMap[expId].pageTypes.push(page.pageType);
+          if (!experimentsMap[expKey].pageTypes.includes(page.pageType)) {
+            experimentsMap[expKey].pageTypes.push(page.pageType);
           }
 
           // Add page URL if not already added
-          if (!experimentsMap[expId].pages.includes(page.url)) {
-            experimentsMap[expId].pages.push(page.url);
+          if (!experimentsMap[expKey].pages.includes(page.url)) {
+            experimentsMap[expKey].pages.push(page.url);
           }
         });
       }
@@ -316,8 +351,13 @@ exports.getExperimentsByDatasetAndDomain = async (req, res) => {
     // Convert experiments map to array
     const experiments = Object.values(experimentsMap);
 
-    // Collect all unique experiment IDs
-    const uniqueExperimentIds = experiments.map(exp => exp.experimentId);
+    // Collect all unique experiment IDs (filter out null/undefined values)
+    const uniqueExperimentIds = experiments
+      .map(exp => exp.experimentId)
+      .filter(id => id !== null && id !== undefined);
+
+    // Collect ALL unique experiment names
+    const uniqueExperimentNames = [...new Set(experiments.map(exp => exp.experimentName).filter(name => name))];
 
     // Determine overall status (similar to getAirtableExperimentStatus)
     const isExperimentDetectionInProgress = dataset.experimentDetectionStartedAt &&
@@ -350,7 +390,8 @@ exports.getExperimentsByDatasetAndDomain = async (req, res) => {
       pagesWithExperiments: pagesWithExperiments.length,
       totalExperiments: experiments.length,
       activeExperiments: experiments.filter(exp => exp.status === 'active' || exp.status === 'running').length,
-      uniqueExperimentIds: uniqueExperimentIds, // All unique experiment IDs
+      uniqueExperimentIds: uniqueExperimentIds, // All unique experiment IDs (null values filtered out)
+      uniqueExperimentNames: uniqueExperimentNames, // All unique experiment names
       lastScrapedAt: dataset.experimentDetectionCompletedAt || dataset.experimentDetectionStartedAt,
       detectionStatus: dataset.experimentDetectionCompletedAt ? 'completed' : 'in_progress', // Kept for backwards compatibility
       scrapingStatus: dataset.scrapingStatus // Added for transparency
