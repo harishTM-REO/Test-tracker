@@ -249,6 +249,30 @@ exports.getExperimentsByDatasetAndDomain = async (req, res) => {
 
     console.log(`🔍 Cleaned domain: ${cleanDomain}`);
 
+    // Validate that the domain is among the companies' URLs for this dataset
+    const companyUrls = dataset.companies.map(company => {
+      const companyUrl = company.companyURL
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .replace(/\/$/, '')
+        .toLowerCase();
+      return companyUrl;
+    });
+
+    const isDomainValid = companyUrls.some(url =>
+      url === cleanDomain || cleanDomain.includes(url) || url.includes(cleanDomain)
+    );
+
+    if (!isDomainValid) {
+      console.log(`❌ Domain ${cleanDomain} not found in dataset companies`);
+      return res.status(400).json({
+        success: false,
+        message: 'Domain not found in dataset companies'
+      });
+    }
+
+    console.log(`✅ Domain ${cleanDomain} validated against dataset companies`);
+
     // Get all crawled pages for this domain
     const allPagesForDomain = await CrawledPages.find({
       datasetId: datasetId,
