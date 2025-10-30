@@ -1,0 +1,415 @@
+{
+    "success": true,
+    "message": "Live crawl and prioritization completed successfully",
+    "url": "https://www.size.co.uk/",
+    "totalUrlsCollected": 285,
+    "totalPrioritized": 15,
+    "prioritizedUrls": [
+        {
+            "url": "https://www.size.co.uk/brand",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/brand",
+                    "children": [
+                        "https://www.size.co.uk/brand/adidas",
+                        "https://www.size.co.uk/brand/asics",
+                        "https://www.size.co.uk/brand/birkenstock",
+                        "https://www.size.co.uk/brand/carhartt-wip",
+                        "https://www.size.co.uk/brand/clarks-originals",
+                        "https://www.size.co.uk/brand/columbia",
+                        "https://www.size.co.uk/brand/converse",
+                        "https://www.size.co.uk/brand/fred-perry",
+                        "https://www.size.co.uk/brand/hoka",
+                        "https://www.size.co.uk/brand/home-grown",
+                        "https://www.size.co.uk/brand/jordan",
+                        "https://www.size.co.uk/brand/new-balance",
+                        "https://www.size.co.uk/brand/nike",
+                        "https://www.size.co.uk/brand/on-running",
+                        "https://www.size.co.uk/brand/puma",
+                        "https://www.size.co.uk/brand/reebok",
+                        "https://www.size.co.uk/brand/salomon",
+                        "https://www.size.co.uk/brand/the-north-face",
+                        "https://www.size.co.uk/brand/ugg",
+                        "https://www.size.co.uk/brand/vans",
+                        "https://www.size.co.uk/brand/veja",
+                        "https://www.size.co.uk/brand/adidas/",
+                        "https://www.size.co.uk/brand/asics/",
+                        "https://www.size.co.uk/brand/birkenstock/",
+                        "https://www.size.co.uk/brand/carhartt-wip/",
+                        "https://www.size.co.uk/brand/clarks-originals/",
+                        "https://www.size.co.uk/brand/columbia/",
+                        "https://www.size.co.uk/brand/converse/",
+                        "https://www.size.co.uk/brand/home-grown/",
+                        "https://www.size.co.uk/brand/nike/",
+                        "https://www.size.co.uk/brand/adidas/sale/",
+                        "https://www.size.co.uk/brand/asics/sale/",
+                        "https://www.size.co.uk/brand/carhartt-wip/sale/",
+                        "https://www.size.co.uk/brand/columbia/sale/",
+                        "https://www.size.co.uk/brand/converse/sale/",
+                        "https://www.size.co.uk/brand/new-balance/sale/",
+                        "https://www.size.co.uk/brand/nike/sale/",
+                        "https://www.size.co.uk/brand/puma/sale/",
+                        "https://www.size.co.uk/brand/reebok/sale/",
+                        "https://www.size.co.uk/brand/salomon/sale/",
+                        "https://www.size.co.uk/brand/the-north-face/sale/",
+                        "https://www.size.co.uk/brand/vans/sale/"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "https://www.size.co.uk/brands",
+            "topChildren": []
+        },
+        {
+            "url": "https://www.size.co.uk/campaign",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/campaign",
+                    "children": [
+                        "https://www.size.co.uk/campaign/Boosted+Discount/",
+                        "https://www.size.co.uk/campaign/Launches/",
+                        "https://www.size.co.uk/campaign/New+In/",
+                        "https://www.size.co.uk/campaign/Seasonal+Essentials/"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "https://www.size.co.uk/collection",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/collection",
+                    "children": [
+                        "https://www.size.co.uk/collection/Birkenstock-Boston/",
+                        "https://www.size.co.uk/collection/adidas-originals-campus/",
+                        "https://www.size.co.uk/collection/adidas-originals-gazelle/",
+                        "https://www.size.co.uk/collection/adidas-originals-handball-spezial/",
+                        "https://www.size.co.uk/collection/adidas-originals-samba/",
+                        "https://www.size.co.uk/collection/adidas-originals-sl-72/",
+                        "https://www.size.co.uk/collection/adidas-originals-stan-smith/",
+                        "https://www.size.co.uk/collection/adidas-originals-superstar/",
+                        "https://www.size.co.uk/collection/asics-gel-kayano/",
+                        "https://www.size.co.uk/collection/asics-gel-nyc/",
+                        "https://www.size.co.uk/collection/clarks-originals-wallabee/",
+                        "https://www.size.co.uk/collection/gift-guide/",
+                        "https://www.size.co.uk/collection/jordan-1/",
+                        "https://www.size.co.uk/collection/new-balance-1906r/",
+                        "https://www.size.co.uk/collection/new-balance-2002r/",
+                        "https://www.size.co.uk/collection/new-balance-327/",
+                        "https://www.size.co.uk/collection/new-balance-9060/",
+                        "https://www.size.co.uk/collection/new-balance-990/",
+                        "https://www.size.co.uk/collection/new-balance-made-in-uk/",
+                        "https://www.size.co.uk/collection/new-balance-made-in-usa/",
+                        "https://www.size.co.uk/collection/nike-acg/",
+                        "https://www.size.co.uk/collection/nike-air-force-1/",
+                        "https://www.size.co.uk/collection/nike-air-max-1/",
+                        "https://www.size.co.uk/collection/nike-air-max-90/",
+                        "https://www.size.co.uk/collection/nike-dunk/",
+                        "https://www.size.co.uk/collection/puma-mostro/",
+                        "https://www.size.co.uk/collection/puma-speedcat/",
+                        "https://www.size.co.uk/collection/reebok-club-c/",
+                        "https://www.size.co.uk/collection/salomon-xt-6/"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "https://www.size.co.uk/customer-service",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/customer-service",
+                    "children": [
+                        "https://www.size.co.uk/customer-service/become-an-affiliate/",
+                        "https://www.size.co.uk/customer-service/contact/",
+                        "https://www.size.co.uk/customer-service/cookies/",
+                        "https://www.size.co.uk/customer-service/faqs/",
+                        "https://www.size.co.uk/customer-service/orders/",
+                        "https://www.size.co.uk/customer-service/payment-methods/",
+                        "https://www.size.co.uk/customer-service/privacy/",
+                        "https://www.size.co.uk/customer-service/security/",
+                        "https://www.size.co.uk/customer-service/size-guide",
+                        "https://www.size.co.uk/customer-service/size-guide/",
+                        "https://www.size.co.uk/customer-service/terms/"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "https://www.size.co.uk/mens",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/mens",
+                    "children": [
+                        "https://www.size.co.uk/mens/accessories",
+                        "https://www.size.co.uk/mens/brand",
+                        "https://www.size.co.uk/mens/clothing",
+                        "https://www.size.co.uk/mens/footwear",
+                        "https://www.size.co.uk/mens/accessories/",
+                        "https://www.size.co.uk/mens/brand/",
+                        "https://www.size.co.uk/mens/clothing/",
+                        "https://www.size.co.uk/mens/footwear/",
+                        "https://www.size.co.uk/mens/accessories/bags/",
+                        "https://www.size.co.uk/mens/accessories/beanies/",
+                        "https://www.size.co.uk/mens/accessories/bucket-hats/",
+                        "https://www.size.co.uk/mens/accessories/caps/",
+                        "https://www.size.co.uk/mens/accessories/latest/",
+                        "https://www.size.co.uk/mens/accessories/lifestyle/",
+                        "https://www.size.co.uk/mens/accessories/sale/",
+                        "https://www.size.co.uk/mens/accessories/scarves-and-gloves/",
+                        "https://www.size.co.uk/mens/accessories/shoe-care/",
+                        "https://www.size.co.uk/mens/accessories/socks/",
+                        "https://www.size.co.uk/mens/accessories/underwear/",
+                        "https://www.size.co.uk/mens/brand/adidas/",
+                        "https://www.size.co.uk/mens/brand/adidas/latest/",
+                        "https://www.size.co.uk/mens/brand/asics/",
+                        "https://www.size.co.uk/mens/brand/carhartt-wip/",
+                        "https://www.size.co.uk/mens/brand/carhartt-wip/latest/",
+                        "https://www.size.co.uk/mens/brand/clarks-originals/",
+                        "https://www.size.co.uk/mens/brand/columbia/",
+                        "https://www.size.co.uk/mens/brand/columbia/latest/",
+                        "https://www.size.co.uk/mens/brand/converse/",
+                        "https://www.size.co.uk/mens/brand/fred-perry/",
+                        "https://www.size.co.uk/mens/brand/jordan/",
+                        "https://www.size.co.uk/mens/brand/jordan/latest/",
+                        "https://www.size.co.uk/mens/brand/new-balance/",
+                        "https://www.size.co.uk/mens/brand/new-balance/latest/",
+                        "https://www.size.co.uk/mens/brand/new-era/",
+                        "https://www.size.co.uk/mens/brand/nike/",
+                        "https://www.size.co.uk/mens/brand/nike/latest/",
+                        "https://www.size.co.uk/mens/brand/puma/",
+                        "https://www.size.co.uk/mens/brand/reebok/",
+                        "https://www.size.co.uk/mens/brand/salomon/",
+                        "https://www.size.co.uk/mens/brand/the-north-face/",
+                        "https://www.size.co.uk/mens/brand/the-north-face/latest/",
+                        "https://www.size.co.uk/mens/clothing/hoodies/",
+                        "https://www.size.co.uk/mens/clothing/jackets-and-coats/",
+                        "https://www.size.co.uk/mens/clothing/jeans-and-trousers/",
+                        "https://www.size.co.uk/mens/clothing/knits-and-cardigans/",
+                        "https://www.size.co.uk/mens/clothing/latest/",
+                        "https://www.size.co.uk/mens/clothing/polos/",
+                        "https://www.size.co.uk/mens/clothing/sale/",
+                        "https://www.size.co.uk/mens/clothing/shirts/",
+                        "https://www.size.co.uk/mens/clothing/shorts/",
+                        "https://www.size.co.uk/mens/clothing/size",
+                        "https://www.size.co.uk/mens/clothing/size/l/sale/",
+                        "https://www.size.co.uk/mens/clothing/size/m/sale/",
+                        "https://www.size.co.uk/mens/clothing/size/s/sale/",
+                        "https://www.size.co.uk/mens/clothing/size/xl/sale/",
+                        "https://www.size.co.uk/mens/clothing/size/xs/sale/",
+                        "https://www.size.co.uk/mens/clothing/sweatshirts/",
+                        "https://www.size.co.uk/mens/clothing/t-shirts/",
+                        "https://www.size.co.uk/mens/clothing/track-pants/",
+                        "https://www.size.co.uk/mens/footwear/s",
+                        "https://www.size.co.uk/mens/footwear/size",
+                        "https://www.size.co.uk/mens/footwear/s/canvas-and-skate/",
+                        "https://www.size.co.uk/mens/footwear/s/low-profile/",
+                        "https://www.size.co.uk/mens/footwear/s/performance-running/",
+                        "https://www.size.co.uk/mens/footwear/s/print/",
+                        "https://www.size.co.uk/mens/footwear/s/sandals-and-slides/",
+                        "https://www.size.co.uk/mens/footwear/s/shoes-and-boots/",
+                        "https://www.size.co.uk/mens/footwear/s/terrace/",
+                        "https://www.size.co.uk/mens/footwear/s/trail-running/",
+                        "https://www.size.co.uk/mens/footwear/s/trainers/",
+                        "https://www.size.co.uk/mens/footwear/s/vintage-running/",
+                        "https://www.size.co.uk/mens/footwear/latest/",
+                        "https://www.size.co.uk/mens/footwear/sale/",
+                        "https://www.size.co.uk/mens/footwear/size/10,10-5/sale/",
+                        "https://www.size.co.uk/mens/footwear/size/11,11-5/sale/",
+                        "https://www.size.co.uk/mens/footwear/size/12,12-5/sale/",
+                        "https://www.size.co.uk/mens/footwear/size/6,6-5/sale/",
+                        "https://www.size.co.uk/mens/footwear/size/7,7-5/sale/",
+                        "https://www.size.co.uk/mens/footwear/size/8,8-5/sale/",
+                        "https://www.size.co.uk/mens/footwear/size/9,9-5/sale/"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "https://www.size.co.uk/myaccount",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/myaccount",
+                    "children": [
+                        "https://www.size.co.uk/myaccount/dashboard/"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "https://www.size.co.uk/page",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/page",
+                    "children": [
+                        "https://www.size.co.uk/page/about-us/",
+                        "https://www.size.co.uk/page/clearpay/",
+                        "https://www.size.co.uk/page/delivery-returns/",
+                        "https://www.size.co.uk/page/emergency-services",
+                        "https://www.size.co.uk/page/emergency-services/",
+                        "https://www.size.co.uk/page/gift-cards/",
+                        "https://www.size.co.uk/page/klarna/",
+                        "https://www.size.co.uk/page/our-apps/",
+                        "https://www.size.co.uk/page/sizeaccess/",
+                        "https://www.size.co.uk/page/sizepreviews-launches/",
+                        "https://www.size.co.uk/page/student-discount",
+                        "https://www.size.co.uk/page/student-discount/",
+                        "https://www.size.co.uk/page/syllabus/",
+                        "https://www.size.co.uk/page/weee/"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "https://www.size.co.uk/pages",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/pages",
+                    "children": [
+                        "https://www.size.co.uk/pages/faqs/"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "https://www.size.co.uk/product",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/product",
+                    "children": [
+                        "https://www.size.co.uk/product/beige-adidas-originals-superstar-premium---size-exclusive",
+                        "https://www.size.co.uk/product/black-adidas-originals-adistar-control-5",
+                        "https://www.size.co.uk/product/black-adidas-originals-sl-72-pt---size-exclusive",
+                        "https://www.size.co.uk/product/black-columbia-upwards-t-shirt---size-exclusive",
+                        "https://www.size.co.uk/product/black-nike-air-max-95-house-flies",
+                        "https://www.size.co.uk/product/blue-adidas-originals-italia-70s---size-exclusive",
+                        "https://www.size.co.uk/product/cream-columbia-scratch-t-shirt---size-exclusive",
+                        "https://www.size.co.uk/product/grey-adidas-originals-sl-72-pt---size-exclusive",
+                        "https://www.size.co.uk/product/white-carhartt-wip-wiptopia-t-shirt",
+                        "https://www.size.co.uk/product/white-nike-air-force-1-house-flies",
+                        "https://www.size.co.uk/product/beige-adidas-originals-superstar-premium---size-exclusive/19719838",
+                        "https://www.size.co.uk/product/black-adidas-originals-adistar-control-5/19717014",
+                        "https://www.size.co.uk/product/black-adidas-originals-sl-72-pt---size-exclusive/19721478",
+                        "https://www.size.co.uk/product/black-columbia-upwards-t-shirt---size-exclusive/19672050",
+                        "https://www.size.co.uk/product/black-nike-air-max-95-house-flies/19721746",
+                        "https://www.size.co.uk/product/blue-adidas-originals-italia-70s---size-exclusive/19717640",
+                        "https://www.size.co.uk/product/cream-columbia-scratch-t-shirt---size-exclusive/19671760",
+                        "https://www.size.co.uk/product/grey-adidas-originals-sl-72-pt---size-exclusive/19721477",
+                        "https://www.size.co.uk/product/white-carhartt-wip-wiptopia-t-shirt/19715171",
+                        "https://www.size.co.uk/product/white-nike-air-force-1-house-flies/19721744"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "https://www.size.co.uk/sale",
+            "topChildren": []
+        },
+        {
+            "url": "https://www.size.co.uk/store-locator",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/store-locator",
+                    "children": [
+                        "https://www.size.co.uk/store-locator/all-stores/"
+                    ]
+                }
+            ]
+        },
+        {
+            "url": "https://www.size.co.uk/track-my-order",
+            "topChildren": []
+        },
+        {
+            "url": "https://www.size.co.uk/wishlists",
+            "topChildren": []
+        },
+        {
+            "url": "https://www.size.co.uk/womens",
+            "topChildren": [
+                {
+                    "url": "https://www.size.co.uk/womens",
+                    "children": [
+                        "https://www.size.co.uk/womens/accessories",
+                        "https://www.size.co.uk/womens/brand",
+                        "https://www.size.co.uk/womens/collection",
+                        "https://www.size.co.uk/womens/footwear",
+                        "https://www.size.co.uk/womens/accessories/",
+                        "https://www.size.co.uk/womens/brand/",
+                        "https://www.size.co.uk/womens/collection/",
+                        "https://www.size.co.uk/womens/footwear/",
+                        "https://www.size.co.uk/womens/p",
+                        "https://www.size.co.uk/womens/accessories/bags/",
+                        "https://www.size.co.uk/womens/accessories/headwear/",
+                        "https://www.size.co.uk/womens/accessories/headwear/latest/",
+                        "https://www.size.co.uk/womens/accessories/latest/",
+                        "https://www.size.co.uk/womens/accessories/lifestyle/",
+                        "https://www.size.co.uk/womens/brand/adidas/",
+                        "https://www.size.co.uk/womens/brand/adidas/latest/",
+                        "https://www.size.co.uk/womens/brand/asics/",
+                        "https://www.size.co.uk/womens/brand/birkenstock/latest/",
+                        "https://www.size.co.uk/womens/brand/carhartt-wip/latest/",
+                        "https://www.size.co.uk/womens/brand/converse/",
+                        "https://www.size.co.uk/womens/brand/converse/latest/",
+                        "https://www.size.co.uk/womens/brand/crocs/",
+                        "https://www.size.co.uk/womens/brand/new-balance/",
+                        "https://www.size.co.uk/womens/brand/new-balance/latest/",
+                        "https://www.size.co.uk/womens/brand/nike/",
+                        "https://www.size.co.uk/womens/brand/nike/latest/",
+                        "https://www.size.co.uk/womens/brand/puma/",
+                        "https://www.size.co.uk/womens/brand/puma/latest/",
+                        "https://www.size.co.uk/womens/brand/reebok/",
+                        "https://www.size.co.uk/womens/brand/reebok/latest/",
+                        "https://www.size.co.uk/womens/brand/salomon/",
+                        "https://www.size.co.uk/womens/brand/ugg/",
+                        "https://www.size.co.uk/womens/brand/vans/",
+                        "https://www.size.co.uk/womens/brand/vans/latest/",
+                        "https://www.size.co.uk/womens/collection/adidas-originals-campus/",
+                        "https://www.size.co.uk/womens/collection/adidas-originals-gazelle/",
+                        "https://www.size.co.uk/womens/collection/adidas-originals-handball-spezial/",
+                        "https://www.size.co.uk/womens/collection/adidas-originals-samba/",
+                        "https://www.size.co.uk/womens/collection/birkenstock-boston/",
+                        "https://www.size.co.uk/womens/collection/converse-chuck-70s/",
+                        "https://www.size.co.uk/womens/collection/jordan-1/",
+                        "https://www.size.co.uk/womens/collection/new-balance-1906r/",
+                        "https://www.size.co.uk/womens/collection/new-balance-204l/",
+                        "https://www.size.co.uk/womens/collection/new-balance-550/",
+                        "https://www.size.co.uk/womens/collection/new-balance-9060/",
+                        "https://www.size.co.uk/womens/collection/nike-air-force-1/",
+                        "https://www.size.co.uk/womens/collection/nike-dunk/",
+                        "https://www.size.co.uk/womens/collection/nike-shox/",
+                        "https://www.size.co.uk/womens/collection/reebok-club-c/",
+                        "https://www.size.co.uk/womens/footwear/s",
+                        "https://www.size.co.uk/womens/footwear/size",
+                        "https://www.size.co.uk/womens/footwear/s/Mary-Jane/",
+                        "https://www.size.co.uk/womens/footwear/s/canvas-and-skate/",
+                        "https://www.size.co.uk/womens/footwear/s/low-profile/",
+                        "https://www.size.co.uk/womens/footwear/s/performance-running/",
+                        "https://www.size.co.uk/womens/footwear/s/print/",
+                        "https://www.size.co.uk/womens/footwear/s/sandals-and-slides/",
+                        "https://www.size.co.uk/womens/footwear/s/shoes-and-boots/",
+                        "https://www.size.co.uk/womens/footwear/s/terrace/",
+                        "https://www.size.co.uk/womens/footwear/s/trail-running/",
+                        "https://www.size.co.uk/womens/footwear/s/trainers/",
+                        "https://www.size.co.uk/womens/footwear/s/vintage-running/",
+                        "https://www.size.co.uk/womens/footwear/latest/",
+                        "https://www.size.co.uk/womens/footwear/sale/",
+                        "https://www.size.co.uk/womens/footwear/size/3,3-5/sale/",
+                        "https://www.size.co.uk/womens/footwear/size/4,4-5/sale/",
+                        "https://www.size.co.uk/womens/footwear/size/5,5-5/sale/",
+                        "https://www.size.co.uk/womens/footwear/size/6,6-5/sale/",
+                        "https://www.size.co.uk/womens/footwear/size/7,7-5/sale/",
+                        "https://www.size.co.uk/womens/footwear/size/8,8-5/sale/",
+                        "https://www.size.co.uk/womens/p/socks/"
+                    ]
+                }
+            ]
+        }
+    ],
+    "metadata": {
+        "crawlDuration": "6330ms",
+        "prioritizationDuration": "78ms",
+        "totalDuration": "6408ms",
+        "timestamp": "2025-10-29T16:22:04.849Z"
+    }
+}

@@ -1,0 +1,461 @@
+{
+  "comment": "Domain Whitelist for Business Type Detection - Tier 1 (Highest Accuracy: 90-95%)",
+  "lastUpdated": "2025-01-22",
+  "domains": {
+    "boots.com": {
+      "type": "ecommerce",
+      "subtype": ["pharmacy", "healthcare", "beauty"],
+      "confidence": 0.92,
+      "region": "UK",
+      "description": "Health, beauty, and pharmacy retailer"
+    },
+    "amazon.com": {
+      "type": "ecommerce",
+      "subtype": ["marketplace", "streaming", "cloud"],
+      "confidence": 0.95,
+      "region": "Global",
+      "description": "E-commerce marketplace and technology company"
+    },
+    "amazon.co.uk": {
+      "type": "ecommerce",
+      "subtype": ["marketplace"],
+      "confidence": 0.95,
+      "region": "UK",
+      "description": "Amazon UK marketplace"
+    },
+    "ebay.com": {
+      "type": "ecommerce",
+      "subtype": ["marketplace", "auction"],
+      "confidence": 0.93,
+      "region": "Global",
+      "description": "Online marketplace and auction platform"
+    },
+    "walmart.com": {
+      "type": "ecommerce",
+      "subtype": ["retail", "grocery"],
+      "confidence": 0.94,
+      "region": "US",
+      "description": "Retail and grocery e-commerce"
+    },
+    "target.com": {
+      "type": "ecommerce",
+      "subtype": ["retail"],
+      "confidence": 0.93,
+      "region": "US",
+      "description": "Department store retailer"
+    },
+    "shopify.com": {
+      "type": "ecommerce",
+      "subtype": ["platform"],
+      "confidence": 0.90,
+      "region": "Global",
+      "description": "E-commerce platform provider"
+    },
+    "etsy.com": {
+      "type": "ecommerce",
+      "subtype": ["marketplace", "handmade"],
+      "confidence": 0.92,
+      "region": "Global",
+      "description": "Handmade and vintage marketplace"
+    },
+    "bestbuy.com": {
+      "type": "ecommerce",
+      "subtype": ["electronics"],
+      "confidence": 0.93,
+      "region": "US",
+      "description": "Electronics retailer"
+    },
+    "nike.com": {
+      "type": "ecommerce",
+      "subtype": ["apparel", "sports"],
+      "confidence": 0.94,
+      "region": "Global",
+      "description": "Sports apparel and footwear"
+    },
+    "adidas.com": {
+      "type": "ecommerce",
+      "subtype": ["apparel", "sports"],
+      "confidence": 0.94,
+      "region": "Global",
+      "description": "Sports apparel and footwear"
+    },
+    "zara.com": {
+      "type": "ecommerce",
+      "subtype": ["fashion", "apparel"],
+      "confidence": 0.93,
+      "region": "Global",
+      "description": "Fashion retailer"
+    },
+    "hm.com": {
+      "type": "ecommerce",
+      "subtype": ["fashion", "apparel"],
+      "confidence": 0.93,
+      "region": "Global",
+      "description": "Fashion retailer H&M"
+    },
+    "booking.com": {
+      "type": "travel",
+      "subtype": ["hotel_booking", "accommodation"],
+      "confidence": 0.98,
+      "region": "Global",
+      "description": "Hotel and accommodation booking"
+    },
+    "expedia.com": {
+      "type": "travel",
+      "subtype": ["hotel_booking", "flights", "packages"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Travel booking platform"
+    },
+    "hotels.com": {
+      "type": "travel",
+      "subtype": ["hotel_booking"],
+      "confidence": 0.97,
+      "region": "Global",
+      "description": "Hotel booking platform"
+    },
+    "airbnb.com": {
+      "type": "travel",
+      "subtype": ["accommodation", "vacation_rental"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Vacation rental and accommodation platform"
+    },
+    "tripadvisor.com": {
+      "type": "travel",
+      "subtype": ["reviews", "booking"],
+      "confidence": 0.94,
+      "region": "Global",
+      "description": "Travel reviews and booking"
+    },
+    "skyscanner.com": {
+      "type": "travel",
+      "subtype": ["flight_search", "comparison"],
+      "confidence": 0.95,
+      "region": "Global",
+      "description": "Flight and travel search engine"
+    },
+    "kayak.com": {
+      "type": "travel",
+      "subtype": ["flight_search", "hotel_search", "comparison"],
+      "confidence": 0.95,
+      "region": "Global",
+      "description": "Travel search engine"
+    },
+    "uber.com": {
+      "type": "transportation",
+      "subtype": ["rideshare", "food_delivery"],
+      "confidence": 0.94,
+      "region": "Global",
+      "description": "Ridesharing and delivery platform"
+    },
+    "ubereats.com": {
+      "type": "food_delivery",
+      "subtype": ["restaurant", "delivery"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Food delivery platform"
+    },
+    "doordash.com": {
+      "type": "food_delivery",
+      "subtype": ["restaurant", "delivery"],
+      "confidence": 0.96,
+      "region": "US",
+      "description": "Food delivery platform"
+    },
+    "grubhub.com": {
+      "type": "food_delivery",
+      "subtype": ["restaurant", "delivery"],
+      "confidence": 0.95,
+      "region": "US",
+      "description": "Food delivery platform"
+    },
+    "deliveroo.com": {
+      "type": "food_delivery",
+      "subtype": ["restaurant", "delivery"],
+      "confidence": 0.95,
+      "region": "UK",
+      "description": "Food delivery platform"
+    },
+    "justeat.co.uk": {
+      "type": "food_delivery",
+      "subtype": ["restaurant", "delivery"],
+      "confidence": 0.95,
+      "region": "UK",
+      "description": "Food delivery platform"
+    },
+    "netflix.com": {
+      "type": "streaming",
+      "subtype": ["video", "entertainment"],
+      "confidence": 0.98,
+      "region": "Global",
+      "description": "Video streaming platform"
+    },
+    "spotify.com": {
+      "type": "streaming",
+      "subtype": ["music", "audio"],
+      "confidence": 0.97,
+      "region": "Global",
+      "description": "Music streaming platform"
+    },
+    "youtube.com": {
+      "type": "streaming",
+      "subtype": ["video", "social"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Video sharing and streaming"
+    },
+    "hulu.com": {
+      "type": "streaming",
+      "subtype": ["video", "entertainment"],
+      "confidence": 0.97,
+      "region": "US",
+      "description": "Video streaming platform"
+    },
+    "disneyplus.com": {
+      "type": "streaming",
+      "subtype": ["video", "entertainment"],
+      "confidence": 0.97,
+      "region": "Global",
+      "description": "Disney+ streaming platform"
+    },
+    "bbc.co.uk": {
+      "type": "news_media",
+      "subtype": ["news", "broadcasting"],
+      "confidence": 0.96,
+      "region": "UK",
+      "description": "British Broadcasting Corporation"
+    },
+    "cnn.com": {
+      "type": "news_media",
+      "subtype": ["news"],
+      "confidence": 0.97,
+      "region": "US",
+      "description": "Cable News Network"
+    },
+    "nytimes.com": {
+      "type": "news_media",
+      "subtype": ["news", "newspaper"],
+      "confidence": 0.97,
+      "region": "US",
+      "description": "The New York Times"
+    },
+    "theguardian.com": {
+      "type": "news_media",
+      "subtype": ["news", "newspaper"],
+      "confidence": 0.96,
+      "region": "UK",
+      "description": "The Guardian newspaper"
+    },
+    "reuters.com": {
+      "type": "news_media",
+      "subtype": ["news", "wire_service"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Reuters news agency"
+    },
+    "github.com": {
+      "type": "saas",
+      "subtype": ["developer", "code_hosting"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Code hosting and collaboration platform"
+    },
+    "linkedin.com": {
+      "type": "social_media",
+      "subtype": ["professional_network"],
+      "confidence": 0.97,
+      "region": "Global",
+      "description": "Professional networking platform"
+    },
+    "facebook.com": {
+      "type": "social_media",
+      "subtype": ["social_network"],
+      "confidence": 0.98,
+      "region": "Global",
+      "description": "Social networking platform"
+    },
+    "instagram.com": {
+      "type": "social_media",
+      "subtype": ["photo_sharing"],
+      "confidence": 0.97,
+      "region": "Global",
+      "description": "Photo and video sharing platform"
+    },
+    "twitter.com": {
+      "type": "social_media",
+      "subtype": ["microblogging"],
+      "confidence": 0.97,
+      "region": "Global",
+      "description": "Microblogging platform (now X)"
+    },
+    "x.com": {
+      "type": "social_media",
+      "subtype": ["microblogging"],
+      "confidence": 0.97,
+      "region": "Global",
+      "description": "Microblogging platform (formerly Twitter)"
+    },
+    "salesforce.com": {
+      "type": "saas",
+      "subtype": ["crm", "enterprise"],
+      "confidence": 0.95,
+      "region": "Global",
+      "description": "CRM and enterprise software"
+    },
+    "slack.com": {
+      "type": "saas",
+      "subtype": ["communication", "collaboration"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Team communication platform"
+    },
+    "zoom.us": {
+      "type": "saas",
+      "subtype": ["video_conferencing"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Video conferencing platform"
+    },
+    "dropbox.com": {
+      "type": "saas",
+      "subtype": ["cloud_storage"],
+      "confidence": 0.95,
+      "region": "Global",
+      "description": "Cloud storage platform"
+    },
+    "paypal.com": {
+      "type": "fintech",
+      "subtype": ["payment", "financial_services"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Online payment platform"
+    },
+    "stripe.com": {
+      "type": "fintech",
+      "subtype": ["payment_processing"],
+      "confidence": 0.95,
+      "region": "Global",
+      "description": "Payment processing platform"
+    },
+    "coinbase.com": {
+      "type": "fintech",
+      "subtype": ["cryptocurrency", "exchange"],
+      "confidence": 0.94,
+      "region": "Global",
+      "description": "Cryptocurrency exchange"
+    },
+    "coursera.org": {
+      "type": "education",
+      "subtype": ["online_learning", "mooc"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Online learning platform"
+    },
+    "udemy.com": {
+      "type": "education",
+      "subtype": ["online_learning", "courses"],
+      "confidence": 0.95,
+      "region": "Global",
+      "description": "Online course marketplace"
+    },
+    "khanacademy.org": {
+      "type": "education",
+      "subtype": ["online_learning", "free"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Free online education platform"
+    },
+    "nhs.uk": {
+      "type": "healthcare",
+      "subtype": ["public_health", "government"],
+      "confidence": 0.97,
+      "region": "UK",
+      "description": "National Health Service UK"
+    },
+    "webmd.com": {
+      "type": "healthcare",
+      "subtype": ["health_information"],
+      "confidence": 0.95,
+      "region": "US",
+      "description": "Health information and tools"
+    },
+    "cvs.com": {
+      "type": "healthcare",
+      "subtype": ["pharmacy", "retail"],
+      "confidence": 0.94,
+      "region": "US",
+      "description": "Pharmacy and healthcare retailer"
+    },
+    "walgreens.com": {
+      "type": "healthcare",
+      "subtype": ["pharmacy", "retail"],
+      "confidence": 0.94,
+      "region": "US",
+      "description": "Pharmacy and healthcare retailer"
+    },
+    "zillow.com": {
+      "type": "real_estate",
+      "subtype": ["property_search", "listings"],
+      "confidence": 0.96,
+      "region": "US",
+      "description": "Real estate marketplace"
+    },
+    "rightmove.co.uk": {
+      "type": "real_estate",
+      "subtype": ["property_search", "listings"],
+      "confidence": 0.96,
+      "region": "UK",
+      "description": "UK property marketplace"
+    },
+    "redfin.com": {
+      "type": "real_estate",
+      "subtype": ["property_search", "brokerage"],
+      "confidence": 0.95,
+      "region": "US",
+      "description": "Real estate brokerage and search"
+    },
+    "indeed.com": {
+      "type": "job_board",
+      "subtype": ["employment", "recruiting"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Job search platform"
+    },
+    "glassdoor.com": {
+      "type": "job_board",
+      "subtype": ["employment", "reviews"],
+      "confidence": 0.95,
+      "region": "Global",
+      "description": "Job search and company reviews"
+    },
+    "stackoverflow.com": {
+      "type": "community",
+      "subtype": ["developer", "qa"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Developer Q&A community"
+    },
+    "reddit.com": {
+      "type": "social_media",
+      "subtype": ["community", "forum"],
+      "confidence": 0.96,
+      "region": "Global",
+      "description": "Social news and discussion platform"
+    },
+    "medium.com": {
+      "type": "content",
+      "subtype": ["blogging", "publishing"],
+      "confidence": 0.94,
+      "region": "Global",
+      "description": "Online publishing platform"
+    },
+    "wordpress.com": {
+      "type": "content",
+      "subtype": ["blogging", "cms"],
+      "confidence": 0.93,
+      "region": "Global",
+      "description": "Blogging and website platform"
+    }
+  }
+}

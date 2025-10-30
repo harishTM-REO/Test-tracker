@@ -1,0 +1,1109 @@
+{
+  "comment": "Priority Mappings (P0-P4) by Business Type and Page Category",
+  "description": "P0 = Critical (Revenue/Conversion Blocking), P1 = High, P2 = Medium, P3 = Low, P4 = Very Low",
+  "lastUpdated": "2025-01-22",
+  "mappings": {
+    "ecommerce": {
+      "checkout": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Revenue Blocking",
+        "description": "Checkout flow - directly impacts revenue"
+      },
+      "cart": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Revenue Blocking",
+        "description": "Shopping cart - critical for conversions"
+      },
+      "product_detail": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Core Conversion",
+        "description": "Product detail pages - primary conversion driver"
+      },
+      "product_listing": {
+        "priority": "P2",
+        "score": 8,
+        "label": "Medium - Discovery",
+        "description": "Product listings - important for discovery"
+      },
+      "category_page": {
+        "priority": "P2",
+        "score": 8,
+        "label": "Medium - Navigation",
+        "description": "Category pages - navigation and browsing"
+      },
+      "search_results": {
+        "priority": "P2",
+        "score": 8,
+        "label": "Medium - Discovery",
+        "description": "Search results - product discovery"
+      },
+      "home": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Entry Point",
+        "description": "Homepage - primary entry point"
+      },
+      "login": {
+        "priority": "P1",
+        "score": 8,
+        "label": "High - Authentication",
+        "description": "Login - required for checkout"
+      },
+      "register": {
+        "priority": "P1",
+        "score": 7,
+        "label": "High - User Acquisition",
+        "description": "Registration - new user acquisition"
+      },
+      "account": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Account Management",
+        "description": "Account dashboard"
+      },
+      "orders": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Order Management",
+        "description": "Order history and tracking"
+      },
+      "wishlist": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Engagement",
+        "description": "Wishlist - engagement feature"
+      },
+      "blog": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Content",
+        "description": "Blog content - SEO and engagement"
+      },
+      "article": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Content",
+        "description": "Articles and content"
+      },
+      "reviews": {
+        "priority": "P3",
+        "score": 6,
+        "label": "Low - Social Proof",
+        "description": "Product reviews - influences purchase"
+      },
+      "about": {
+        "priority": "P4",
+        "score": 3,
+        "label": "Very Low - Informational",
+        "description": "About page"
+      },
+      "contact": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Support",
+        "description": "Contact page - customer support"
+      },
+      "faq": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Support",
+        "description": "FAQ - customer support"
+      },
+      "help": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Support",
+        "description": "Help center"
+      },
+      "terms": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Legal",
+        "description": "Terms and conditions"
+      },
+      "privacy": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Legal",
+        "description": "Privacy policy"
+      },
+      "returns": {
+        "priority": "P3",
+        "score": 6,
+        "label": "Low - Policy",
+        "description": "Returns policy - affects purchase decision"
+      },
+      "shipping": {
+        "priority": "P3",
+        "score": 6,
+        "label": "Low - Policy",
+        "description": "Shipping information"
+      },
+      "profile": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - User Profile",
+        "description": "User profile page"
+      },
+      "accessibility": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Accessibility",
+        "description": "Accessibility information"
+      },
+      "quote": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Quote Request",
+        "description": "Quote request page"
+      },
+      "pricing": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Pricing",
+        "description": "Pricing information"
+      },
+      "investment": {
+        "priority": "P4",
+        "score": 3,
+        "label": "Very Low - Investment",
+        "description": "Investor relations"
+      },
+      "social_media": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Social Media",
+        "description": "Social media links/pages"
+      },
+      "external": {
+        "priority": "P4",
+        "score": 1,
+        "label": "Very Low - External",
+        "description": "External website links"
+      },
+      "other": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Other",
+        "description": "Uncategorized pages"
+      }
+    },
+    "travel": {
+      "home": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Entry Point",
+        "description": "Homepage - search entry point"
+      },
+      "search_results": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Core Search",
+        "description": "Search results - primary conversion driver"
+      },
+      "product_detail": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Hotel/Flight Details",
+        "description": "Hotel or flight details page"
+      },
+      "checkout": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Booking Flow",
+        "description": "Checkout/booking - revenue critical"
+      },
+      "cart": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Booking Cart",
+        "description": "Booking cart"
+      },
+      "login": {
+        "priority": "P1",
+        "score": 8,
+        "label": "High - Authentication",
+        "description": "Login for booking"
+      },
+      "register": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Registration",
+        "description": "Account registration"
+      },
+      "account": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Account",
+        "description": "Account management"
+      },
+      "orders": {
+        "priority": "P2",
+        "score": 8,
+        "label": "Medium - Bookings",
+        "description": "Booking history and management"
+      },
+      "reviews": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Social Proof",
+        "description": "Reviews - influence booking decisions"
+      },
+      "blog": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Content",
+        "description": "Travel blog"
+      },
+      "contact": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Support",
+        "description": "Customer support"
+      },
+      "faq": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Support",
+        "description": "FAQ"
+      },
+      "terms": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Legal",
+        "description": "Terms and conditions"
+      },
+      "privacy": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Legal",
+        "description": "Privacy policy"
+      },
+      "product_listing": {
+        "priority": "P1",
+        "score": 8,
+        "label": "High - Hotel/Flight Listings",
+        "description": "Hotel or flight listings"
+      },
+      "category_page": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Destination Categories",
+        "description": "Destination categories"
+      },
+      "wishlist": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Saved Trips",
+        "description": "Saved trips and wishlist"
+      },
+      "article": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Travel Articles",
+        "description": "Travel guides and articles"
+      },
+      "about": {
+        "priority": "P4",
+        "score": 3,
+        "label": "Very Low - About",
+        "description": "About page"
+      },
+      "help": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Help",
+        "description": "Help center"
+      },
+      "returns": {
+        "priority": "P3",
+        "score": 6,
+        "label": "Low - Cancellation Policy",
+        "description": "Cancellation and refund policy"
+      },
+      "shipping": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Shipping",
+        "description": "Not applicable for travel"
+      },
+      "profile": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Traveler Profile",
+        "description": "Traveler profile"
+      },
+      "accessibility": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Accessibility",
+        "description": "Accessibility information"
+      },
+      "quote": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Quote Request",
+        "description": "Group booking quotes"
+      },
+      "pricing": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Pricing Info",
+        "description": "Pricing information"
+      },
+      "investment": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Investment",
+        "description": "Investor relations"
+      },
+      "social_media": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Social Media",
+        "description": "Social media links"
+      },
+      "external": {
+        "priority": "P4",
+        "score": 1,
+        "label": "Very Low - External",
+        "description": "External links"
+      },
+      "other": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Other",
+        "description": "Other pages"
+      }
+    },
+    "food_delivery": {
+      "home": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Entry Point",
+        "description": "Homepage"
+      },
+      "product_listing": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Restaurant Listings",
+        "description": "Restaurant listings"
+      },
+      "product_detail": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Menu",
+        "description": "Restaurant menu page"
+      },
+      "cart": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Order Cart",
+        "description": "Order cart"
+      },
+      "checkout": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Order Checkout",
+        "description": "Order checkout and payment"
+      },
+      "login": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Authentication",
+        "description": "Login"
+      },
+      "account": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Account",
+        "description": "Account management"
+      },
+      "orders": {
+        "priority": "P2",
+        "score": 8,
+        "label": "Medium - Order History",
+        "description": "Order tracking and history"
+      },
+      "search_results": {
+        "priority": "P1",
+        "score": 8,
+        "label": "High - Search",
+        "description": "Restaurant search results"
+      },
+      "category_page": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Cuisine Categories",
+        "description": "Cuisine and restaurant categories"
+      },
+      "register": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Registration",
+        "description": "User registration"
+      },
+      "wishlist": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Favorites",
+        "description": "Favorite restaurants"
+      },
+      "reviews": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Reviews",
+        "description": "Restaurant reviews"
+      },
+      "blog": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Blog",
+        "description": "Food blog"
+      },
+      "article": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Articles",
+        "description": "Food articles"
+      },
+      "about": {
+        "priority": "P4",
+        "score": 3,
+        "label": "Very Low - About",
+        "description": "About page"
+      },
+      "contact": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Contact",
+        "description": "Customer support"
+      },
+      "faq": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - FAQ",
+        "description": "FAQ"
+      },
+      "help": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Help",
+        "description": "Help center"
+      },
+      "terms": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Terms",
+        "description": "Terms and conditions"
+      },
+      "privacy": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Privacy",
+        "description": "Privacy policy"
+      },
+      "returns": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Returns",
+        "description": "Not applicable"
+      },
+      "shipping": {
+        "priority": "P3",
+        "score": 6,
+        "label": "Low - Delivery",
+        "description": "Delivery information"
+      },
+      "profile": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - User Profile",
+        "description": "User profile"
+      },
+      "accessibility": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Accessibility",
+        "description": "Accessibility"
+      },
+      "quote": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Catering Quote",
+        "description": "Catering quotes"
+      },
+      "pricing": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Pricing",
+        "description": "Menu pricing"
+      },
+      "investment": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Investment",
+        "description": "Investor relations"
+      },
+      "social_media": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Social Media",
+        "description": "Social media"
+      },
+      "external": {
+        "priority": "P4",
+        "score": 1,
+        "label": "Very Low - External",
+        "description": "External links"
+      },
+      "other": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Other",
+        "description": "Other pages"
+      }
+    },
+    "streaming": {
+      "home": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Entry Point",
+        "description": "Homepage - content discovery"
+      },
+      "product_detail": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Content Page",
+        "description": "Movie/show/song detail page"
+      },
+      "search_results": {
+        "priority": "P2",
+        "score": 8,
+        "label": "Medium - Search",
+        "description": "Content search results"
+      },
+      "category_page": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Browse",
+        "description": "Category/genre browsing"
+      },
+      "login": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Authentication",
+        "description": "Login - required for streaming"
+      },
+      "register": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Subscription",
+        "description": "Registration/subscription signup"
+      },
+      "account": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Account",
+        "description": "Account settings"
+      },
+      "checkout": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Subscription Payment",
+        "description": "Subscription checkout"
+      },
+      "cart": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Cart",
+        "description": "Not applicable for streaming"
+      },
+      "product_listing": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Content Listings",
+        "description": "Content listings"
+      },
+      "wishlist": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Watchlist",
+        "description": "Watchlist/favorites"
+      },
+      "orders": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Watch History",
+        "description": "Watch history"
+      },
+      "reviews": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Reviews",
+        "description": "Content reviews"
+      },
+      "blog": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Blog",
+        "description": "Content blog"
+      },
+      "article": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Articles",
+        "description": "Articles"
+      },
+      "about": {
+        "priority": "P4",
+        "score": 3,
+        "label": "Very Low - About",
+        "description": "About"
+      },
+      "contact": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Contact",
+        "description": "Support"
+      },
+      "faq": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - FAQ",
+        "description": "FAQ"
+      },
+      "help": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Help",
+        "description": "Help"
+      },
+      "terms": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Terms",
+        "description": "Terms"
+      },
+      "privacy": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Privacy",
+        "description": "Privacy"
+      },
+      "returns": {
+        "priority": "P4",
+        "score": 1,
+        "label": "Very Low - Returns",
+        "description": "Not applicable"
+      },
+      "shipping": {
+        "priority": "P4",
+        "score": 1,
+        "label": "Very Low - Shipping",
+        "description": "Not applicable"
+      },
+      "profile": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - User Profile",
+        "description": "User profile"
+      },
+      "accessibility": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Accessibility",
+        "description": "Accessibility"
+      },
+      "quote": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Quote",
+        "description": "Not applicable"
+      },
+      "pricing": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Subscription Pricing",
+        "description": "Subscription plans"
+      },
+      "investment": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Investment",
+        "description": "Investor relations"
+      },
+      "social_media": {
+        "priority": "P4",
+        "score": 2,
+        "label": "Very Low - Social Media",
+        "description": "Social media"
+      },
+      "external": {
+        "priority": "P4",
+        "score": 1,
+        "label": "Very Low - External",
+        "description": "External"
+      },
+      "other": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Other",
+        "description": "Other pages"
+      }
+    },
+    "news_media": {
+      "home": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Homepage",
+        "description": "News homepage - primary traffic driver"
+      },
+      "article": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Article",
+        "description": "News articles - core content"
+      },
+      "category_page": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Section",
+        "description": "News sections/categories"
+      },
+      "search_results": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Search",
+        "description": "Article search"
+      },
+      "login": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Subscription",
+        "description": "Login for subscriber content"
+      },
+      "register": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Subscription",
+        "description": "Subscription signup"
+      },
+      "blog": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Opinion",
+        "description": "Opinion/blog content"
+      },
+      "other": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Other",
+        "description": "Other pages"
+      }
+    },
+    "saas": {
+      "home": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Homepage",
+        "description": "Product homepage"
+      },
+      "pricing": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Pricing",
+        "description": "Pricing page - conversion critical"
+      },
+      "register": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Signup",
+        "description": "Signup/registration"
+      },
+      "login": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Login",
+        "description": "Login to application"
+      },
+      "account": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Account",
+        "description": "Account dashboard"
+      },
+      "checkout": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Payment",
+        "description": "Subscription checkout"
+      },
+      "blog": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Content",
+        "description": "Product blog"
+      },
+      "contact": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Sales",
+        "description": "Contact/sales page"
+      },
+      "other": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Other",
+        "description": "Other pages"
+      }
+    },
+    "social_media": {
+      "home": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Feed",
+        "description": "Homepage/feed"
+      },
+      "login": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Authentication",
+        "description": "Login - required for platform"
+      },
+      "register": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Signup",
+        "description": "User registration"
+      },
+      "profile": {
+        "priority": "P1",
+        "score": 8,
+        "label": "High - Profile",
+        "description": "User profiles"
+      },
+      "account": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Settings",
+        "description": "Account settings"
+      },
+      "other": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Other",
+        "description": "Other pages"
+      }
+    },
+    "healthcare": {
+      "home": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Homepage",
+        "description": "Homepage"
+      },
+      "product_detail": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Medication/Service",
+        "description": "Medication or service details"
+      },
+      "cart": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Cart",
+        "description": "Prescription cart"
+      },
+      "checkout": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Checkout",
+        "description": "Prescription checkout"
+      },
+      "login": {
+        "priority": "P1",
+        "score": 8,
+        "label": "High - Patient Login",
+        "description": "Patient login"
+      },
+      "register": {
+        "priority": "P1",
+        "score": 8,
+        "label": "High - Patient Registration",
+        "description": "New patient registration"
+      },
+      "account": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Patient Portal",
+        "description": "Patient account"
+      },
+      "contact": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Contact",
+        "description": "Contact healthcare provider"
+      },
+      "other": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Other",
+        "description": "Other pages"
+      }
+    },
+    "education": {
+      "home": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Homepage",
+        "description": "Homepage"
+      },
+      "product_listing": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Course Catalog",
+        "description": "Course listings"
+      },
+      "product_detail": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Course Page",
+        "description": "Course detail page"
+      },
+      "register": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Enrollment",
+        "description": "Student registration/enrollment"
+      },
+      "login": {
+        "priority": "P1",
+        "score": 8,
+        "label": "High - Student Login",
+        "description": "Student login"
+      },
+      "checkout": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Payment",
+        "description": "Course payment"
+      },
+      "account": {
+        "priority": "P2",
+        "score": 7,
+        "label": "Medium - Student Portal",
+        "description": "Student dashboard"
+      },
+      "other": {
+        "priority": "P3",
+        "score": 5,
+        "label": "Low - Other",
+        "description": "Other pages"
+      }
+    },
+    "fintech": {
+      "home": {
+        "priority": "P1",
+        "score": 9,
+        "label": "High - Homepage",
+        "description": "Homepage"
+      },
+      "login": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Authentication",
+        "description": "Secure login"
+      },
+      "register": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Account Creation",
+        "description": "Account registration"
+      },
+      "account": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Account Dashboard",
+        "description": "Account dashboard and transactions"
+      },
+      "checkout": {
+        "priority": "P0",
+        "score": 10,
+        "label": "Critical - Transactions",
+        "description": "Payment/transaction flow"
+      },
+      "contact": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Support",
+        "description": "Customer support"
+      },
+      "other": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Other",
+        "description": "Other pages"
+      }
+    },
+    "unknown": {
+      "home": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Homepage",
+        "description": "Homepage (unknown business type)"
+      },
+      "login": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Authentication",
+        "description": "Login"
+      },
+      "register": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Registration",
+        "description": "Registration"
+      },
+      "checkout": {
+        "priority": "P1",
+        "score": 7,
+        "label": "High - Checkout",
+        "description": "Checkout flow (likely important)"
+      },
+      "cart": {
+        "priority": "P1",
+        "score": 7,
+        "label": "High - Cart",
+        "description": "Shopping cart (likely important)"
+      },
+      "product_detail": {
+        "priority": "P2",
+        "score": 6,
+        "label": "Medium - Detail Page",
+        "description": "Detail page"
+      },
+      "product_listing": {
+        "priority": "P2",
+        "score": 5,
+        "label": "Medium - Listing",
+        "description": "Listing page"
+      },
+      "account": {
+        "priority": "P2",
+        "score": 5,
+        "label": "Medium - Account",
+        "description": "Account page"
+      },
+      "other": {
+        "priority": "P3",
+        "score": 4,
+        "label": "Low - Other",
+        "description": "Other pages"
+      }
+    }
+  }
+}

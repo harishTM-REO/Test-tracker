@@ -388,9 +388,26 @@ const datasetController = {
 
         // Start background scraping if companies are available
         let scrapingInitiated = false;
+        let optimizelyEdgeInitiated = false;
+
         if (datasetData.companies && datasetData.companies.length > 0) {
-          console.log(`Initiating background scraping for dataset: ${savedDataset._id}`);
-          scrapingInitiated = await BackgroundScrapingService.startScrapingForDataset(savedDataset._id);
+          // Check if this is an Optimizely Edge dataset
+          if (datasetData.toolType === 'Optimizely Edge') {
+            console.log(`Initiating Optimizely Edge URL collection for dataset: ${savedDataset._id}`);
+            const optimizelyEdgeJobService = require('../services/optimizelyEdgeJobService');
+
+            try {
+              const result = await optimizelyEdgeJobService.startUrlCollection(savedDataset._id.toString());
+              optimizelyEdgeInitiated = result.success;
+              console.log(`✅ Optimizely Edge job started: ${optimizelyEdgeInitiated}`);
+            } catch (edgeError) {
+              console.error(`❌ Failed to start Optimizely Edge job:`, edgeError.message);
+            }
+          } else {
+            // For other tool types, use normal background scraping
+            console.log(`Initiating background scraping for dataset: ${savedDataset._id}`);
+            scrapingInitiated = await BackgroundScrapingService.startScrapingForDataset(savedDataset._id);
+          }
         }
 
         res.status(201).json({
@@ -398,7 +415,8 @@ const datasetController = {
           message: 'Dataset created successfully',
           data: savedDataset,
           companiesExtracted: datasetData.companies ? datasetData.companies.length : 0,
-          scrapingInitiated: scrapingInitiated
+          scrapingInitiated: scrapingInitiated,
+          optimizelyEdgeInitiated: optimizelyEdgeInitiated
         });
 
         console.log('Dataset created successfully');

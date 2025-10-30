@@ -1,2 +1,20 @@
 node_modules/
-package.lock.json
+package-lock.json
+.env
+```
+
+**Changes:**
+1. **`package-lock.json`** not `package.lock.json` — the hyphen matters. The correct npm lockfile is `package-lock.json`
+2. **`.env`** is correct as-is (no trailing slash needed for files)
+
+**Optional additions** you might want to consider:
+```
+node_modules/
+package-lock.json
+.env
+.env.local
+.env.*.local
+dist/
+build/
+.DS_Store
+*.log

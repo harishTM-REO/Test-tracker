@@ -25,6 +25,9 @@ const abTastyRoutes = require('./routes/abTastyRoutes');
 const adobeTargetRoutes = require('./routes/adobeRoutes');
 const pageCrawlerRoutes = require('./routes/pageCrawlerRoutes');
 const experimentsRoutes = require('./routes/experimentsRoutes');
+const urlCollectorRoutes = require('./routes/urlCollectorRoutes');
+const optimizelyEdgeRoutes = require('./routes/optimizelyEdgeRoutes');
+const sitemapRoutes = require('./routes/sitemapRoutes');
 // Trust proxy for rate limiting (needed when behind reverse proxy/load balancer)
 app.set('trust proxy', 1);
 
@@ -95,6 +98,15 @@ app.use('/api/experiments', experimentsRoutes);
 
 // Change Detection Routes
 app.use('/api/change-detection', changeDetectionRoutes);
+
+// URL Collector Routes
+app.use('/api/url-collector', urlCollectorRoutes);
+
+// Optimizely Edge Routes (URL Collection & Categorization)
+app.use('/api/optimizely-edge', optimizelyEdgeRoutes);
+
+// Sitemap Routes (Phase 1: Sitemap Support)
+app.use('/api/sitemap', sitemapRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

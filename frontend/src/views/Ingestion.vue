@@ -3,7 +3,7 @@
     <h4 class="heading">File Data Dashboard</h4>
     <v-col class="type-select">
       <h5 class="sub-heading">Please select a testing tool</h5>
-      <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely', 'Adobe Target']"  variant="solo"></v-select>
+      <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely','Optimizely Edge', 'Adobe Target']"  variant="solo"></v-select>
     </v-col>
     <!-- File Upload Section -->
     <v-card class="upload-card" elevation="2" v-if="selectedToolType">
@@ -932,9 +932,15 @@ export default {
 
         this.saving = false;
 
-        // Redirect to datasets page after successful upload
+        // Redirect based on tool type
         setTimeout(() => {
-          this.$router.push('/datasets');
+          if (this.selectedToolType === 'Optimizely Edge') {
+            // Redirect to Optimizely Edge dashboard
+            this.$router.push(`/optimizely-edge/${result.data._id}`);
+          } else {
+            // Redirect to datasets page for other tool types
+            this.$router.push('/datasets');
+          }
         }, 2000); // 2 second delay to show success message
       } catch (err) {
         this.error = `Failed to save dataset: ${err.message}`;

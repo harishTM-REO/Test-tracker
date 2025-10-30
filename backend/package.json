@@ -14,6 +14,7 @@
     "@sparticuz/chromium": "^138.0.2",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
+    "cheerio": "^1.1.2",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
     "crawlee": "^3.12.2",
@@ -27,11 +28,16 @@
     "mongoose": "^8.16.2",
     "multer": "^2.0.1",
     "node-cron": "^4.2.1",
+    "node-fetch": "^3.3.2",
     "nodemailer": "^7.0.5",
+    "playwright": "^1.56.1",
+    "playwright-extra": "^4.3.6",
     "puppeteer": "^24.16.0",
     "puppeteer-core": "^24.15.0",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "uuid": "^11.1.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

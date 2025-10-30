@@ -430,6 +430,9 @@ class BackgroundScrapingService {
       } else {
         console.log(`ℹ️ Skipping auto-trigger: Tool type is ${dataset.toolType}, not Adobe Target`);
       }
+      if(dataset.toolType = 'Optimizely Edge'){
+          console.log('Optimizely Edge has been choosen')
+      }
 
     } catch (error) {
       console.error(`Error during scraping for dataset ${datasetId}:`, error);

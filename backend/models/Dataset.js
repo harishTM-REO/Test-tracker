@@ -104,6 +104,77 @@ const datasetSchema = new mongoose.Schema({
         },
         message: 'Company URL must be a valid HTTP/HTTPS URL'
       }
+    },
+    // Optimizely Edge URL Collection fields
+    urlCollection: {
+      status: {
+        type: String,
+        enum: ['not_started', 'pending', 'in_progress', 'completed', 'failed'],
+        default: 'not_started'
+      },
+      totalUrls: {
+        type: Number,
+        default: 0
+      },
+      categorizedUrls: {
+        type: Number,
+        default: 0
+      },
+      progress: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100
+      },
+      startedAt: {
+        type: Date,
+        default: null
+      },
+      completedAt: {
+        type: Date,
+        default: null
+      },
+      error: {
+        type: String,
+        default: null
+      },
+      // Category breakdown
+      categories: {
+        homepage: { type: Number, default: 0 },
+        product_listing: { type: Number, default: 0 },
+        product_detail: { type: Number, default: 0 },
+        category: { type: Number, default: 0 },
+        search: { type: Number, default: 0 },
+        cart: { type: Number, default: 0 },
+        checkout: { type: Number, default: 0 },
+        account: { type: Number, default: 0 },
+        about: { type: Number, default: 0 },
+        contact: { type: Number, default: 0 },
+        blog: { type: Number, default: 0 },
+        reviews: { type: Number, default: 0 },
+        other: { type: Number, default: 0 }
+      },
+      // Collected URLs with categories
+      urls: [{
+        url: {
+          type: String,
+          required: true
+        },
+        category: {
+          type: String,
+          required: true
+        },
+        confidence: {
+          type: Number,
+          default: 0,
+          min: 0,
+          max: 1
+        },
+        collectedAt: {
+          type: Date,
+          default: Date.now
+        }
+      }]
     }
   }],
   

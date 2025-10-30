@@ -9,6 +9,7 @@ import ExperimentChanges from '@/views/ExperimentChanges.vue'
 import DatasetsList from '@/views/DatasetsList.vue'
 import DatasetDetails from '@/views/DatasetDetails.vue'
 import ChangeHistory from '@/views/ChangeHistory.vue'
+import OptimizelyEdgeDashboard from '@/views/OptimizelyEdgeDashboard.vue'
 
 const routes = [
   {
@@ -60,6 +61,11 @@ const routes = [
     path: '/dataset/:id/change-history',
     name: 'ChangeHistory',
     component: ChangeHistory
+  },
+  {
+    path: '/optimizely-edge/:id',
+    name: 'OptimizelyEdgeDashboard',
+    component: OptimizelyEdgeDashboard
   }
 ]
 
