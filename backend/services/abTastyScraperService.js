@@ -39,11 +39,33 @@ class AbTastyScraperService {
 
   /**
    * Main function to scrape AbTasty experiments from a URL
+   * Wraps internal scraping with timeout protection to prevent batch hanging
    * @param {string} url - The website URL to scrape
    * @param {Object} res - Express response object (optional)
    * @returns {Object} Scraping results
    */
   async scrapeAbTastyExperiments(url, res = null) {
+    // Wrap entire scraping operation with timeout to prevent hanging URLs
+    const overallTimeout = parseInt(process.env.OVERALL_SCRAPE_TIMEOUT) || 30000; // 30 seconds default
+
+    return Promise.race([
+      this.scrapeAbTastyExperimentsInternal(url, res),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`AbTasty scraping timeout after ${overallTimeout / 1000} seconds`)),
+          overallTimeout
+        )
+      )
+    ]);
+  }
+
+  /**
+   * Internal scraping logic (wrapped by timeout in scrapeAbTastyExperiments)
+   * @param {string} url - The website URL to scrape
+   * @param {Object} res - Express response object (optional)
+   * @returns {Object} Scraping results
+   */
+  async scrapeAbTastyExperimentsInternal(url, res = null) {
     const startTime = Date.now();
     let savedData = null;
     try {
@@ -54,7 +76,7 @@ class AbTastyScraperService {
       try {
         // website = await this.getOrCreateWebsite(url);
         // console.log(`Processing request for: ${website.name} (${url})`);
-        
+
         // Create a mock website object if service not available
         website = {
           _id: 'mock-id',
@@ -81,7 +103,7 @@ class AbTastyScraperService {
       return this.formatResponse(url, website, experimentData, savedData, startTime);
 
     } catch (error) {
-      console.error('Error in scrapeAbTastyExperiments:', error);
+      console.error('Error in scrapeAbTastyExperimentsInternal:', error);
       throw error;
     }
   }
@@ -175,10 +197,12 @@ class AbTastyScraperService {
   async navigateToPage(page, url) {
     try {
       console.log(`Navigating to: ${url}`);
-      
-      await page.goto(url, { 
+
+      const navigationTimeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 15000; // 15 seconds default
+
+      await page.goto(url, {
         waitUntil: 'domcontentloaded',
-        timeout: process.env.TIME_OUT_TIME || 2700000, // 45 minutes timeout
+        timeout: navigationTimeout,
       });
 
       console.log("Page loaded successfully");
@@ -800,10 +824,31 @@ async extractAbTastySync(page) {
   }
   /**
    * Main function to scrape experiments from a page
+   * Wraps with timeout to prevent hanging on slow/unresponsive sites
    * @param {string} url - URL to scrape
    * @returns {Object} Experiment data including cookie info
    */
   async scrapeExperimentsFromPage(url) {
+    // Wrap with timeout to prevent individual URLs from hanging
+    const pageTimeout = parseInt(process.env.PAGE_SCRAPE_TIMEOUT) || 25000; // 25 seconds default
+
+    return Promise.race([
+      this.scrapeExperimentsFromPageInternal(url),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Page scraping timeout after ${pageTimeout / 1000} seconds`)),
+          pageTimeout
+        )
+      )
+    ]);
+  }
+
+  /**
+   * Internal page scraping logic (wrapped by timeout)
+   * @param {string} url - URL to scrape
+   * @returns {Object} Experiment data including cookie info
+   */
+  async scrapeExperimentsFromPageInternal(url) {
     let browser = null;
     let page = null;
     let navigationDetected = false; // Declare at function level
@@ -813,17 +858,17 @@ async extractAbTastySync(page) {
       browser = await this.launchBrowser();
 
       // browser = await this.connectWithRetry();
-      
+
       // Create and configure page
       page = await this.createPage(browser);
-      
+
       // Navigate to URL
       await this.navigateToPage(page, url);
       // captcha check
       const captchaCheck = await this.detectCaptcha(page);
       if (captchaCheck.detected) {
         // If captcha is found, return early with the specific flag.
-        return { 
+        return {
           captchaDetected: true,
           captchaStatus: 'captcha_blocked',
           hasAbtasty: false, // AB Tasty status is unknown
@@ -838,10 +883,10 @@ async extractAbTastySync(page) {
       await page.reload({ waitUntil: ['domcontentloaded'] });
       // Extract AbTasty data with intelligent waiting
       const experimentData = await this.extractAbTastyData(page);
-      
+
       // Add cookie type to response
       experimentData.cookieType = cookieType;
-      
+
       return experimentData;
 
     } catch (error) {
