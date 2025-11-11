@@ -124,29 +124,32 @@ app.listen(port, async () => {
   await connectDB();
   
   // Start cron jobs after server starts
-  try {
-    CronJobService.startCronJobs();
-    console.log('✅ Cron jobs initialized successfully');
-  } catch (error) {
-    console.error('❌ Failed to start cron jobs:', error);
-  }
+  // ❌ DISABLED - All cron jobs have been disabled
+  // try {
+  //   CronJobService.startCronJobs();
+  //   console.log('✅ Cron jobs initialized successfully');
+  // } catch (error) {
+  //   console.error('❌ Failed to start cron jobs:', error);
+  // }
 
   // Initialize background scraping service with job queue
-  try {
-    BackgroundScrapingService.initialize();
-    console.log('✅ Background scraping service initialized successfully');
-  } catch (error) {
-    console.error('❌ Failed to initialize background scraping service:', error);
-  }
+  // ❌ DISABLED - Background tasks have been disabled
+  // try {
+  //   BackgroundScrapingService.initialize();
+  //   console.log('✅ Background scraping service initialized successfully');
+  // } catch (error) {
+  //   console.error('❌ Failed to initialize background scraping service:', error);
+  // }
 
   // Start periodic cleanup for stuck scraping jobs
-  setInterval(async () => {
-    try {
-      await BackgroundScrapingService.checkPendingJobs();
-    } catch (error) {
-      console.error('Error in periodic scraping cleanup:', error);
-    }
-  }, 10 * 60 * 1000); // Check every 10 minutes
+  // ❌ DISABLED - Background cleanup interval has been disabled
+  // setInterval(async () => {
+  //   try {
+  //     await BackgroundScrapingService.checkPendingJobs();
+  //   } catch (error) {
+  //     console.error('Error in periodic scraping cleanup:', error);
+  //   }
+  // }, 10 * 60 * 1000); // Check every 10 minutes
 });
 
 app.get("/getWebsites", async (req, res) => {

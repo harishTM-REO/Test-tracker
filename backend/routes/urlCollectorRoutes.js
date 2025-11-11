@@ -329,4 +329,82 @@ router.post('/live-crawl-and-prioritize', urlCollectorController.liveCrawlAndPri
  */
 router.get('/list', urlCollectorController.listCollectedUrls);
 
+/**
+ * POST /api/url-collector/categorize-urls-dynamic
+ * Dynamically categorize URLs from live-crawl-and-prioritize response
+ * Works across all domain types (e-commerce, travel, banking, healthcare, etc.)
+ *
+ * Accepts two formats:
+ * 1. Direct prioritizedUrls array
+ * 2. Full response object from live-crawl-and-prioritize endpoint
+ *
+ * Body: { prioritizedUrls: [...] } OR { response: {...} }
+ *
+ * Example request (Format 1 - Direct):
+ * {
+ *   "prioritizedUrls": [
+ *     {
+ *       "url": "https://example.com/payment",
+ *       "topChildren": [
+ *         { "url": "...", "children": [...], "wasCollected": true }
+ *       ]
+ *     },
+ *     {
+ *       "url": "https://example.com/account",
+ *       "topChildren": [...]
+ *     }
+ *   ]
+ * }
+ *
+ * Example request (Format 2 - Full Response):
+ * {
+ *   "response": {
+ *     "success": true,
+ *     "url": "https://example.com",
+ *     "totalUrlsCollected": 150,
+ *     "prioritizedUrls": [...],
+ *     "metadata": { "crawlDuration": "...", "timestamp": "..." }
+ *   }
+ * }
+ *
+ * Response:
+ * {
+ *   "success": true,
+ *   "message": "Dynamic URL categorization completed successfully",
+ *   "domain": "https://example.com",
+ *   "data": {
+ *     "totalUrlsCollected": 150,
+ *     "totalUrlsFiltered": 5,
+ *     "totalUrlsCategorized": 145,
+ *     "categories": [
+ *       {
+ *         "category": "Payment & Financial",
+ *         "urls": ["https://example.com/payment", "https://example.com/billing"],
+ *         "count": 2,
+ *         "keywords": ["billing", "payment"],
+ *         "urlPatterns": ["/payment", "/payment/*", "/billing", "/billing/*"]
+ *       },
+ *       {
+ *         "category": "Account & User Functions",
+ *         "urls": ["https://example.com/account"],
+ *         "count": 1,
+ *         "keywords": ["account", "login", "profile"],
+ *         "urlPatterns": ["/account", "/account/*"]
+ *       },
+ *       ...more categories
+ *     ],
+ *     "summary": {
+ *       "topCategories": [
+ *         { "category": "Payment & Financial", "count": 2 },
+ *         { "category": "Account & User Functions", "count": 1 }
+ *       ],
+ *       "totalCategories": 8,
+ *       "averageUrlsPerCategory": 18
+ *     }
+ *   },
+ *   "timestamp": "2025-11-10T15:30:00.000Z"
+ * }
+ */
+router.post('/categorize-urls-dynamic', urlCollectorController.categorizeDynamicUrls);
+
 module.exports = router;

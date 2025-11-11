@@ -2,6 +2,7 @@ const urlCollectorService = require('../services/urlCollectorService');
 const urlCategorizationService = require('../services/urlCategorizationService');
 const playwrightCrawlerService = require('../services/playwrightCrawlerService');
 const urlCollectionOrchestrator = require('../services/urlCollectionOrchestrator');
+const urlDynamicCategorizationService = require('../services/urlDynamicCategorizationService');
 
 /**
  * Helper function to validate URL format
@@ -1225,6 +1226,120 @@ async function liveCrawlAndPrioritize(req, res) {
     }
 }
 
+/**
+ * POST /api/url-collector/categorize-urls-dynamic
+ * Dynamically categorize URLs from live-crawl-and-prioritize response
+ * Works across all domain types (e-commerce, travel, banking, healthcare, etc.)
+ *
+ * Body: { prioritizedUrls: [...] } OR { response: {...} }
+ *
+ * Example request (direct prioritizedUrls):
+ * {
+ *   "prioritizedUrls": [
+ *     {
+ *       "url": "https://example.com/payment",
+ *       "topChildren": [...]
+ *     },
+ *     ...
+ *   ]
+ * }
+ *
+ * Example request (full response):
+ * {
+ *   "response": {
+ *     "url": "https://example.com",
+ *     "prioritizedUrls": [...],
+ *     "metadata": {...}
+ *   }
+ * }
+ */
+async function categorizeDynamicUrls(req, res) {
+    try {
+        const { prioritizedUrls, response } = req.body;
+
+        console.log(`🎯 Received dynamic categorization request`);
+
+        // Validate input
+        let urlsToProcess = null;
+
+        if (response && response.prioritizedUrls) {
+            // Full response format
+            urlsToProcess = response.prioritizedUrls;
+            console.log(`📦 Processing full response with ${response.prioritizedUrls.length} prioritized URLs`);
+        } else if (prioritizedUrls && Array.isArray(prioritizedUrls)) {
+            // Direct prioritizedUrls format
+            urlsToProcess = prioritizedUrls;
+            console.log(`📦 Processing direct prioritizedUrls array with ${prioritizedUrls.length} entries`);
+        } else {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid request format. Expected either "prioritizedUrls" array or "response" object containing prioritizedUrls.',
+                example: {
+                    format1: {
+                        "prioritizedUrls": [
+                            {
+                                "url": "https://example.com/payment",
+                                "topChildren": [
+                                    {
+                                        "url": "https://example.com",
+                                        "children": ["https://example.com/payment"],
+                                        "wasCollected": false
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    format2: {
+                        "response": {
+                            "success": true,
+                            "url": "https://example.com",
+                            "prioritizedUrls": [],
+                            "metadata": {
+                                "crawlDuration": "5000ms",
+                                "timestamp": "2025-11-10T00:00:00.000Z"
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Perform dynamic categorization
+        console.log(`🔍 Starting dynamic URL categorization...`);
+        const categorizedResult = urlDynamicCategorizationService.categorizeDynamically(urlsToProcess);
+
+        // Add metadata
+        const finalResult = {
+            success: true,
+            message: 'Dynamic URL categorization completed successfully',
+            data: categorizedResult,
+            timestamp: new Date().toISOString()
+        };
+
+        // Include original response metadata if available
+        if (response && response.metadata) {
+            finalResult.originalMetadata = response.metadata;
+        }
+
+        if (response && response.url) {
+            finalResult.domain = response.url;
+        }
+
+        console.log(`✅ Categorization complete: ${categorizedResult.categories.length} categories found`);
+
+        res.status(200).json(finalResult);
+
+    } catch (error) {
+        console.error('Error in categorizeDynamicUrls controller:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to categorize URLs dynamically',
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+}
+
 module.exports = {
     collectUrls,
     collectMultipleUrls,
@@ -1238,5 +1353,6 @@ module.exports = {
     enrichUrlCollection,
     listCollectedUrls,
     liveCrawl,
-    liveCrawlAndPrioritize
+    liveCrawlAndPrioritize,
+    categorizeDynamicUrls
 };
