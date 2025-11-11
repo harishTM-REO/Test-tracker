@@ -1,10 +1,10 @@
 // routes/optimizelyRoutes.js - Enhanced routes
 const express = require('express');
 const router = express.Router();
-const { 
-  scrapeExperiments, 
-  batchScrapeExperiments, 
-  scrapeFromDataset, 
+const {
+  scrapeExperiments,
+  batchScrapeExperiments,
+  scrapeFromDataset,
   getJobStatus,
   getAllJobs,
   healthCheck,
@@ -12,6 +12,7 @@ const {
   getWebsitesWithOptimizely,
   getWebsitesWithoutOptimizely,
   getFailedWebsites,
+  getAbTastyDocuments,
   scrapeFromDatasetBrowserLess
 } = require('../controller/abTastyController');
 
@@ -124,5 +125,17 @@ router.get('/websites-without-optimizely/:datasetId', getWebsitesWithoutOptimize
  * @features List of websites where scraping failed with error details
  */
 router.get('/failed-websites/:datasetId', getFailedWebsites);
+
+/**
+ * @route   GET /api/abtasty/documents/:datasetId
+ * @desc    Get complete ABTasty document for a dataset
+ * @access  Public
+ * @param   datasetId - Dataset ID
+ * @query   summary - (optional) Set to 'true' to get summary view instead of full document
+ * @example GET /api/abtasty/documents/691301c38b09a64cbbed9e1d
+ * @example GET /api/abtasty/documents/691301c38b09a64cbbed9e1d?summary=true
+ * @features Returns complete ABTasty document with all experiments and results
+ */
+router.get('/documents/:datasetId', getAbTastyDocuments);
 
 module.exports = router;

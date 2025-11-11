@@ -1315,10 +1315,25 @@ async extractAbTastySync(page) {
     try {
       const results = await AbTastyResult.findOne({ datasetId: datasetId });
       if (!results) return [];
-      
+
       return results.failedWebsites;
     } catch (error) {
       console.error('Error getting failed websites:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get complete ABTasty document for a dataset
+   * @param {string} datasetId - Dataset ID
+   * @returns {Object} Complete ABTasty document
+   */
+  async getAbTastyDocuments(datasetId) {
+    try {
+      const results = await AbTastyResult.findOne({ datasetId: datasetId });
+      return results;
+    } catch (error) {
+      console.error('Error getting ABTasty documents:', error);
       throw error;
     }
   }

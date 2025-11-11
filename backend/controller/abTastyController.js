@@ -488,10 +488,85 @@ async function getFailedWebsites(req, res) {
 
   } catch (error) {
     console.error('Error in getFailedWebsites controller:', error);
-    
+
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve failed websites',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+
+/**
+ * GET /api/abtasty/documents/:datasetId
+ * Get complete ABTasty document for a dataset
+ * Query params: summary=true (for summary view)
+ */
+async function getAbTastyDocuments(req, res) {
+  try {
+    const { datasetId } = req.params;
+    const { summary } = req.query;
+
+    if (!datasetId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Dataset ID is required'
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(datasetId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid dataset ID format'
+      });
+    }
+
+    const documents = await AbTastyScraperService.getAbTastyDocuments(datasetId);
+
+    if (!documents) {
+      return res.status(404).json({
+        success: false,
+        message: 'No ABTasty documents found for this dataset'
+      });
+    }
+
+    // If summary view is requested
+    if (summary === 'true') {
+      const summaryData = {
+        datasetId: documents.datasetId,
+        datasetName: documents.datasetName,
+        totalUrls: documents.totalUrls,
+        successfulScrapes: documents.successfulScrapes,
+        failedScrapes: documents.failedScrapes,
+        totalExperiments: documents.totalExperiments,
+        abTastyDetectedCount: documents.optimizelyDetectedCount,
+        stats: documents.scrapingStats,
+        websiteResultsCount: documents.websiteResults.length,
+        websitesWithoutAbTastyCount: documents.websitesWithoutAbTasty.length,
+        failedWebsitesCount: documents.failedWebsites.length
+      };
+
+      return res.status(200).json({
+        success: true,
+        message: 'ABTasty document summary retrieved successfully',
+        data: summaryData
+      });
+    }
+
+    // Return full document
+    res.status(200).json({
+      success: true,
+      message: 'ABTasty document retrieved successfully',
+      data: documents
+    });
+
+  } catch (error) {
+    console.error('Error in getAbTastyDocuments controller:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve ABTasty documents',
       error: error.message,
       timestamp: new Date().toISOString()
     });
@@ -855,6 +930,7 @@ module.exports = {
   getWebsitesWithOptimizely,
   getWebsitesWithoutOptimizely,
   getFailedWebsites,
+  getAbTastyDocuments,
   isValidUrl,
   scrapeFromDatasetBrowserLess
 };
