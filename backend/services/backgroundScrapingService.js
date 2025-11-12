@@ -2,6 +2,7 @@
 const axios = require('axios');
 const Dataset = require('../models/Dataset');
 const jobQueue = require('./jobQueue');
+const browserPool = require('./browserPoolService'); // Import browser pool for resource management
 
 class BackgroundScrapingService {
   
@@ -18,15 +19,27 @@ class BackgroundScrapingService {
   }
   
   /**
-   * Initialize the job queue worker
+   * Initialize the job queue worker and browser pool
    */
-  static initialize() {
-    // Register the dataset scraping worker
-    jobQueue.registerWorker('dataset-scraping', async (jobData, progressCallback) => {
-      return await this.performDatasetScraping(jobData, progressCallback);
-    });
-    
-    console.log('BackgroundScrapingService initialized with job queue worker');
+  static async initialize() {
+    try {
+      // Initialize browser pool for resource management
+      // This prevents "pthread_create: Resource temporarily unavailable" errors
+      // when scraping large numbers of URLs (e.g., 12,000 URLs)
+      console.log('\n🌐 Initializing browser pool for large-scale scraping...');
+      await browserPool.initialize();
+      console.log('✅ Browser pool initialized successfully\n');
+
+      // Register the dataset scraping worker
+      jobQueue.registerWorker('dataset-scraping', async (jobData, progressCallback) => {
+        return await this.performDatasetScraping(jobData, progressCallback);
+      });
+
+      console.log('✅ BackgroundScrapingService initialized with job queue worker');
+    } catch (error) {
+      console.error('❌ Failed to initialize BackgroundScrapingService:', error);
+      throw error;
+    }
   }
 
   /**
@@ -115,12 +128,12 @@ class BackgroundScrapingService {
       }
       
       progressCallback(100, { message: 'Job completed successfully' });
-      
+
       return finalResult;
-      
+
     } catch (error) {
       console.error(`Error in dataset scraping job:`, error);
-      
+
       // Update dataset with error
       try {
         const dataset = await Dataset.findById(datasetId);
@@ -130,8 +143,19 @@ class BackgroundScrapingService {
       } catch (updateError) {
         console.error('Error updating dataset with failure:', updateError);
       }
-      
+
       throw error;
+    } finally {
+      // Clean up: Close browser pool to release resources
+      // This is important for server stability when running multiple scraping jobs
+      console.log('\n🛑 Scraping job finished, cleaning up browser pool...');
+      try {
+        browserPool.printStats(); // Print final statistics
+        await browserPool.closeAll(); // Close all browsers
+        console.log('✅ Browser pool cleaned up successfully\n');
+      } catch (cleanupError) {
+        console.error('⚠️  Error during browser pool cleanup:', cleanupError.message);
+      }
     }
   }
   
@@ -196,16 +220,25 @@ class BackgroundScrapingService {
         
         // Update progress
         const progress = Math.min(80, Math.floor((results.length / totalUrls) * 80) + 10);
-        progressCallback(progress, { 
+        progressCallback(progress, {
           message: `Processed ${results.length}/${totalUrls} URLs`,
           completedUrls: results.length,
-          totalUrls: totalUrls
+          totalUrls: totalUrls,
+          poolStats: browserPool.getStats() // Include pool stats in progress
         });
-        
-        // Add delay between batches
-        if (i + batchSize < urls.length && delay > 0) {
-          console.log(`Waiting ${delay}ms before next batch...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+
+        // CRITICAL FIX: Add longer delay between batches for browser pool recovery
+        // This allows:
+        // - Browsers to fully cleanup pages
+        // - OS to reclaim thread resources
+        // - Memory to be released
+        // Without this, large batches (1000+ URLs) will cause resource exhaustion
+        if (i + batchSize < urls.length) {
+          // Use at least 2 seconds, or respect the configured delay (minimum 2 seconds)
+          const betweenBatchDelay = Math.max(2000, delay);
+          console.log(`⏱️  Waiting ${betweenBatchDelay}ms between batches for resource recovery...`);
+          console.log(`   Pool Status: ${browserPool.getStats().inUse} in use, ${browserPool.getStats().available} available`);
+          await new Promise(resolve => setTimeout(resolve, betweenBatchDelay));
         }
         
       } catch (error) {

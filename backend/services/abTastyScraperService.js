@@ -11,6 +11,7 @@ try {
 }
 // const ExperimentService = require('./experimentService'); // Comment out if not available
 const AbTastyResult = require('../models/AbTastyResult');
+const browserPool = require('./browserPoolService'); // Import browser pool service
 
 const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
 class AbTastyScraperService {
@@ -845,25 +846,31 @@ async extractAbTastySync(page) {
 
   /**
    * Internal page scraping logic (wrapped by timeout)
+   * Now accepts browser from pool instead of launching new one
    * @param {string} url - URL to scrape
+   * @param {Object} browserInstance - Browser instance from pool (optional, uses pool if not provided)
    * @returns {Object} Experiment data including cookie info
    */
-  async scrapeExperimentsFromPageInternal(url) {
-    let browser = null;
+  async scrapeExperimentsFromPageInternal(url, browserInstance = null) {
     let page = null;
     let navigationDetected = false; // Declare at function level
+    let browser = browserInstance; // Use provided browser or acquire from pool
+    let shouldReleaseBrowser = false; // Track if we acquired browser from pool
 
     try {
-      // Launch browser
-      browser = await this.launchBrowser();
-
-      // browser = await this.connectWithRetry();
+      // If no browser provided, acquire from pool
+      if (!browser) {
+        browser = await browserPool.acquireBrowser();
+        shouldReleaseBrowser = true;
+        console.log(`🔗 Acquired browser from pool for: ${url}`);
+      }
 
       // Create and configure page
       page = await this.createPage(browser);
 
       // Navigate to URL
       await this.navigateToPage(page, url);
+
       // captcha check
       const captchaCheck = await this.detectCaptcha(page);
       if (captchaCheck.detected) {
@@ -877,10 +884,16 @@ async extractAbTastySync(page) {
           error: `Scraping blocked by captcha (${captchaCheck.reason})`
         };
       }
+
       // Handle cookie consent with detection
       const cookieType = await this.handleCookieConsent(page);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      await page.reload({ waitUntil: ['domcontentloaded'] });
+
+      // CRITICAL FIX: Instead of page.reload() which strains resources,
+      // just wait for ABTasty scripts to load naturally
+      // This reduces memory pressure and system resource exhaustion
+      console.log('⏳ Waiting for ABTasty scripts to load (no reload)...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
       // Extract AbTasty data with intelligent waiting
       const experimentData = await this.extractAbTastyData(page);
 
@@ -893,18 +906,19 @@ async extractAbTastySync(page) {
       console.error('Error scraping experiments from page:', error);
       throw error;
     } finally {
-      // Clean up
+      // Clean up page
       if (page) {
         try {
-        // TODO
           await page.close();
         } catch (e) {
           console.warn('Error closing page:', e.message);
         }
       }
-      if (browser) {
-        // TODO
-        await this.closeBrowser(browser);
+
+      // Release browser back to pool if we acquired it
+      if (shouldReleaseBrowser && browser) {
+        browserPool.releaseBrowser(browser);
+        console.log(`♻️  Released browser back to pool`);
       }
     }
   }
@@ -1146,20 +1160,20 @@ async extractAbTastySync(page) {
         try {
           page = await this.createPage(browser);
           pages.push(page);
-          
+
           // Navigate and scrape
           await this.navigateToPage(page, url);
           const cookieType = await this.handleCookieConsent(page);
-          
-          // Reload page after handling cookies to ensure all scripts load properly
-          console.log('Reloading page after cookie consent...');
-          await page.reload({ waitUntil: 'domcontentloaded' });
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
+
+          // CRITICAL FIX: No page reload - just wait for scripts to load naturally
+          // This reduces memory pressure significantly
+          console.log('⏳ Waiting for ABTasty scripts to load (no reload)...');
+          await new Promise(resolve => setTimeout(resolve, 3000));
+
           const experimentData = await this.extractAbTastyData(page);
-          
+
           experimentData.cookieType = cookieType;
-          
+
           return { url, success: true, data: experimentData };
         } catch (error) {
           console.error(`Error processing ${url}:`, error);

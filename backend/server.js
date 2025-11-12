@@ -132,14 +132,15 @@ app.listen(port, async () => {
   //   console.error('❌ Failed to start cron jobs:', error);
   // }
 
-  // Initialize background scraping service with job queue
-  // ❌ DISABLED - Background tasks have been disabled
-  // try {
-  //   BackgroundScrapingService.initialize();
-  //   console.log('✅ Background scraping service initialized successfully');
-  // } catch (error) {
-  //   console.error('❌ Failed to initialize background scraping service:', error);
-  // }
+  // Initialize background scraping service with job queue and browser pool
+  // This is required for large-scale scraping (e.g., 12,000+ URLs)
+  try {
+    await BackgroundScrapingService.initialize();
+    console.log('✅ Background scraping service initialized with browser pool');
+  } catch (error) {
+    console.error('❌ Failed to initialize background scraping service:', error);
+    // Don't crash the server, but log the error
+  }
 
   // Start periodic cleanup for stuck scraping jobs
   // ❌ DISABLED - Background cleanup interval has been disabled
