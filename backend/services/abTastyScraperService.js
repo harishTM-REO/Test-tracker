@@ -166,13 +166,14 @@ class AbTastyScraperService {
   /**
    * Create and configure a new page with your optimizations
    * IMPROVED: Better timeout handling with protocol configuration
+   * CRITICAL: Includes better error recovery to prevent browser getting stuck
    * @param {Object} browser - Puppeteer browser instance
    * @returns {Object} Configured page instance
    */
   async createPage(browser) {
     try {
-      // Add protocol timeout to prevent hangs
-      const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 15000; // 15 seconds
+      // Add protocol timeout to prevent hangs - increased to 20 seconds
+      const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 20000; // 20 seconds
 
       const pagePromise = browser.newPage();
 
@@ -180,7 +181,7 @@ class AbTastyScraperService {
       const page = await Promise.race([
         pagePromise,
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Page creation timeout after ${pageCreationTimeout}ms`)), pageCreationTimeout)
+          setTimeout(() => reject(new Error(`Page creation timeout after ${pageCreationTimeout}ms - browser may be unresponsive`)), pageCreationTimeout)
         )
       ]);
 
@@ -198,10 +199,10 @@ class AbTastyScraperService {
         }
       });
 
-      console.log('Page configured successfully');
+      console.log('✅ Page configured successfully');
       return page;
     } catch (error) {
-      console.error('Error creating page:', error);
+      console.error('❌ Error creating page:', error.message);
       // Re-throw so caller knows page creation failed
       throw new Error(`Failed to create page: ${error.message}`);
     }
@@ -866,6 +867,7 @@ async extractAbTastySync(page) {
   /**
    * Internal page scraping logic (wrapped by timeout)
    * Now accepts browser from pool instead of launching new one
+   * IMPROVED: Better error handling to prevent browser getting stuck
    * @param {string} url - URL to scrape
    * @param {Object} browserInstance - Browser instance from pool (optional, uses pool if not provided)
    * @returns {Object} Experiment data including cookie info
@@ -885,7 +887,23 @@ async extractAbTastySync(page) {
       }
 
       // Create and configure page
-      page = await this.createPage(browser);
+      try {
+        page = await this.createPage(browser);
+        // CRITICAL: Increment page count for resource tracking
+        // This helps detect when browser memory accumulation requires restart
+        if (shouldReleaseBrowser) {
+          const pageCount = browserPool.incrementPageCount(browser);
+          console.log(`📄 Browser page count: ${pageCount}`);
+        }
+      } catch (pageError) {
+        console.error(`❌ Failed to create page for ${url}: ${pageError.message}`);
+        // If page creation fails, still release the browser
+        if (shouldReleaseBrowser && browser) {
+          browserPool.releaseBrowser(browser);
+          console.log(`♻️  Released browser back to pool (after page creation failure)`);
+        }
+        throw pageError;
+      }
 
       // Navigate to URL
       await this.navigateToPage(page, url);
@@ -922,22 +940,34 @@ async extractAbTastySync(page) {
       return experimentData;
 
     } catch (error) {
-      console.error('Error scraping experiments from page:', error);
+      console.error(`❌ Error scraping experiments from page (${url}):`, error.message);
       throw error;
     } finally {
-      // Clean up page
+      // Clean up page - CRITICAL: use timeout to prevent hanging
       if (page) {
         try {
-          await page.close();
+          // Force page close with timeout to prevent blocking
+          await Promise.race([
+            page.close(),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Page close timeout')), 5000)
+            )
+          ]);
         } catch (e) {
-          console.warn('Error closing page:', e.message);
+          console.warn(`⚠️  Error closing page: ${e.message}`);
+          // Even if close fails, try to release browser
         }
       }
 
-      // Release browser back to pool if we acquired it
+      // CRITICAL: Release browser back to pool ALWAYS, even if page close fails
+      // This ensures the browser is not stuck in the pool
       if (shouldReleaseBrowser && browser) {
-        browserPool.releaseBrowser(browser);
-        console.log(`♻️  Released browser back to pool`);
+        try {
+          browserPool.releaseBrowser(browser);
+          console.log(`♻️  Released browser back to pool`);
+        } catch (releaseError) {
+          console.error(`❌ Error releasing browser: ${releaseError.message}`);
+        }
       }
     }
   }
@@ -1216,6 +1246,11 @@ async extractAbTastySync(page) {
         try {
           page = await this.createPage(browser);
           pages.push(page);
+
+          // Track page count for this browser
+          // This helps detect resource accumulation across batches
+          const pageCount = browserPool.incrementPageCount(browser);
+          console.log(`📄 Browser page count: ${pageCount}`);
 
           // Navigate and scrape
           await this.navigateToPage(page, url);
