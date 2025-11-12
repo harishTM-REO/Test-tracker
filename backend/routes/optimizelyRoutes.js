@@ -1,10 +1,10 @@
 // routes/optimizelyRoutes.js - Enhanced routes
 const express = require('express');
 const router = express.Router();
-const { 
-  scrapeExperiments, 
-  batchScrapeExperiments, 
-  scrapeFromDataset, 
+const {
+  scrapeExperiments,
+  batchScrapeExperiments,
+  scrapeFromDataset,
   getJobStatus,
   getAllJobs,
   healthCheck,
@@ -12,7 +12,8 @@ const {
   getWebsitesWithOptimizely,
   getWebsitesWithoutOptimizely,
   getFailedWebsites,
-  scrapeFromDatasetBrowserLess
+  scrapeFromDatasetBrowserLess,
+  checkOptimizelyStatus
 } = require('../controller/optimizelyController');
 
 /**
@@ -24,6 +25,17 @@ const {
  * @features Enhanced cookie consent handling, better Optimizely detection
  */
 router.get('/scrape', scrapeExperiments);
+
+/**
+ * @route   GET /api/optimizely/check
+ * @desc    Quick validation check for domain, captcha, and Optimizely presence
+ * @access  Public
+ * @query   url - Website URL to check
+ * @example GET /api/optimizely/check?url=https://example.com
+ * @returns {object} Domain validity, captcha detection, Optimizely presence, cookie consent type
+ * @features Lightweight endpoint for validation without full scraping
+ */
+router.get('/check', checkOptimizelyStatus);
 
 /**
  * @route   POST /api/optimizely/batch-scrape

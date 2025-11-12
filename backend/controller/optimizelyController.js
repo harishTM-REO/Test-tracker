@@ -844,6 +844,97 @@ async function scrapeFromDatasetBrowserLess(req, res){
   }
 }
 
+/**
+ * GET /api/optimizely/check?url=example.com
+ * Quick validation check for domain, captcha, and Optimizely presence
+ * Uses existing scrapeExperiments logic but returns only validation results
+ */
+async function checkOptimizelyStatus(req, res) {
+  try {
+    const { url } = req.query;
+    console.log(`📋 Received check request for URL: ${url}`);
+
+    // Validate URL parameter
+    if (!url) {
+      return res.status(400).json({
+        success: false,
+        message: 'URL parameter is required',
+        example: '/api/optimizely/check?url=https://example.com'
+      });
+    }
+
+    // Validate URL format
+    if (!isValidUrl(url)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid URL format',
+        provided: url,
+        isValid: false,
+        checks: {
+          urlValid: false,
+          pageLoaded: false,
+          httpStatusCode: null,
+          captchaDetected: null,
+          captchaType: null,
+          optimizelyPresent: null,
+          cookieConsentType: null
+        }
+      });
+    }
+
+    console.log(`✅ URL is valid: ${url}`);
+
+    // Use the existing scrapeExperiments logic to get all validation data
+    console.log(`🔍 Starting validation check using scrape service...`);
+    const result = await OptimizelyScraperService.scrapeOptimizelyExperiments(url);
+
+    // Extract only the validation/check information
+    return res.status(200).json({
+      success: true,
+      message: 'Check completed successfully',
+      url: url,
+      timestamp: new Date().toISOString(),
+      checks: {
+        urlValid: true,
+        pageLoaded: result.pageLoadSuccess !== false,
+        httpStatusCode: result.httpStatusCode,
+        captchaDetected: result.optimizely.captchaDetected || false,
+        captchaType: result.optimizely.captchaStatus || null,
+        optimizelyPresent: result.optimizely.detected || false,
+        cookieConsentType: result.optimizely.cookieType || null
+      },
+      processingTime: result.duration,
+      summary: {
+        domainValid: true,
+        pageAccessible: result.pageLoadSuccess !== false,
+        blockingIssues: {
+          captchaBlocking: result.optimizely.captchaDetected || false,
+          optimizelyPresent: result.optimizely.detected || false
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in checkOptimizelyStatus controller:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to check Optimizely status',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+      checks: {
+        urlValid: null,
+        pageLoaded: null,
+        httpStatusCode: null,
+        captchaDetected: null,
+        captchaType: null,
+        optimizelyPresent: null,
+        cookieConsentType: null
+      }
+    });
+  }
+}
+
 module.exports = {
   scrapeExperiments,
   batchScrapeExperiments,
@@ -856,5 +947,6 @@ module.exports = {
   getWebsitesWithoutOptimizely,
   getFailedWebsites,
   isValidUrl,
-  scrapeFromDatasetBrowserLess
+  scrapeFromDatasetBrowserLess,
+  checkOptimizelyStatus
 };

@@ -736,6 +736,186 @@ const closeBrowser = async(browser)=> {
 }
 
 
+// ===== NEW SANITIZATION UTILITY FUNCTIONS =====
+
+/**
+ * Normalize URL - handle missing protocols, lowercase, trim spaces
+ * @param {string} url - URL to normalize
+ * @returns {string} Normalized URL
+ */
+const normalizeUrl = (url) => {
+    try {
+        if (!url || typeof url !== 'string') return null;
+
+        let normalized = url.trim().toLowerCase();
+
+        // Add protocol if missing
+        if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+            normalized = 'https://' + normalized;
+        }
+
+        // Validate URL format
+        const urlObj = new URL(normalized);
+        return urlObj.toString();
+    } catch (error) {
+        console.warn(`Failed to normalize URL ${url}: ${error.message}`);
+        return null;
+    }
+};
+
+/**
+ * Extract registrable domain (handles .co.uk, .ac.in, etc.)
+ * For now, using a simple approach - can be enhanced with tldjs library
+ * @param {string} url - URL to extract domain from
+ * @returns {string} Base domain
+ */
+const extractRegistrableDomain = (url) => {
+    try {
+        const urlObj = new URL(url);
+        let hostname = urlObj.hostname || '';
+
+        // Remove 'www.' prefix if present
+        if (hostname.startsWith('www.')) {
+            hostname = hostname.substring(4);
+        }
+
+        return hostname.toLowerCase();
+    } catch (error) {
+        console.warn(`Failed to extract domain from ${url}: ${error.message}`);
+        return null;
+    }
+};
+
+/**
+ * Deduplicate URLs based on registrable domain
+ * @param {Array} urls - Array of URLs to deduplicate
+ * @returns {Object} { unique: [...], duplicates: [...] }
+ */
+const deduplicateUrls = (urls) => {
+    const seen = new Map();
+    const unique = [];
+    const duplicates = [];
+
+    urls.forEach(url => {
+        const domain = extractRegistrableDomain(url);
+
+        if (!domain) {
+            duplicates.push(url);
+            return;
+        }
+
+        if (seen.has(domain)) {
+            duplicates.push(url);
+        } else {
+            seen.set(domain, url);
+            unique.push(url);
+        }
+    });
+
+    return { unique, duplicates };
+};
+
+/**
+ * DNS Lookup - check if domain resolves
+ * @param {string} url - URL to check DNS
+ * @returns {Promise<boolean>} True if DNS resolves
+ */
+const dnsLookup = async (url) => {
+    try {
+        const dns = require('dns').promises;
+        const domain = extractRegistrableDomain(url);
+
+        if (!domain) return false;
+
+        const result = await dns.resolve4(domain);
+        return result && result.length > 0;
+    } catch (error) {
+        console.warn(`DNS lookup failed for ${url}: ${error.message}`);
+        return false;
+    }
+};
+
+/**
+ * HTTP Check - test if site is reachable with quick HEAD request
+ * @param {string} url - URL to check
+ * @param {number} timeout - Timeout in ms (default 3000)
+ * @returns {Promise<{isValid: boolean, status: number, error: string}>}
+ */
+const httpCheck = async (url, timeout = 3000) => {
+    try {
+        const axios = require('axios');
+
+        const response = await axios.head(url, {
+            timeout,
+            maxRedirects: 2,
+            validateStatus: (status) => status < 500 // Accept up to 499
+        });
+
+        // Accept 2xx and 3xx status codes
+        const isValid = response.status >= 200 && response.status < 400;
+
+        return {
+            isValid,
+            status: response.status,
+            error: null
+        };
+    } catch (error) {
+        return {
+            isValid: false,
+            status: null,
+            error: error.message || 'Connection failed'
+        };
+    }
+};
+
+/**
+ * Batch DNS and HTTP checks in parallel
+ * @param {Array} urls - URLs to check
+ * @param {number} batchSize - Parallel batch size (default 50)
+ * @param {Function} progressCallback - Callback for progress updates
+ * @returns {Promise<Array>} Array of URLs with validation results
+ */
+const batchValidateUrls = async (urls, batchSize = 50, progressCallback = null) => {
+    const results = [];
+
+    for (let i = 0; i < urls.length; i += batchSize) {
+        const batch = urls.slice(i, i + batchSize);
+
+        const batchResults = await Promise.all(
+            batch.map(async (url) => {
+                const dnsValid = await dnsLookup(url);
+
+                if (!dnsValid) {
+                    return {
+                        url,
+                        valid: false,
+                        reason: 'DNS_FAILED'
+                    };
+                }
+
+                const httpResult = await httpCheck(url);
+
+                return {
+                    url,
+                    valid: httpResult.isValid,
+                    reason: httpResult.isValid ? null : 'HTTP_FAILED',
+                    details: httpResult.error || `HTTP ${httpResult.status}`
+                };
+            })
+        );
+
+        results.push(...batchResults);
+
+        // Progress callback
+        if (progressCallback) {
+            const progress = Math.round(((i + batchSize) / urls.length) * 100);
+            progressCallback(Math.min(progress, 100), results.filter(r => r.valid).length);
+        }
+    }
+
+    return results;
+};
+
 module.exports = {
     formatFileSize,
     ensureDirectoryExists,
@@ -751,5 +931,12 @@ module.exports = {
     navigateToPage,
     detectCaptcha,
     handleCookieConsent,
-    closeBrowser
+    closeBrowser,
+    // New sanitization utilities
+    normalizeUrl,
+    extractRegistrableDomain,
+    deduplicateUrls,
+    dnsLookup,
+    httpCheck,
+    batchValidateUrls
 };

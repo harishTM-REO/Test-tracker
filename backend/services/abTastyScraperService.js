@@ -165,16 +165,28 @@ class AbTastyScraperService {
 
   /**
    * Create and configure a new page with your optimizations
+   * IMPROVED: Better timeout handling with protocol configuration
    * @param {Object} browser - Puppeteer browser instance
    * @returns {Object} Configured page instance
    */
   async createPage(browser) {
     try {
-      const page = await browser.newPage();
-      
+      // Add protocol timeout to prevent hangs
+      const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 15000; // 15 seconds
+
+      const pagePromise = browser.newPage();
+
+      // Race between page creation and timeout
+      const page = await Promise.race([
+        pagePromise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Page creation timeout after ${pageCreationTimeout}ms`)), pageCreationTimeout)
+        )
+      ]);
+
       // Set smaller viewport as in your working code
       await page.setViewport({ width: 800, height: 600 });
-      
+
       // Your optimized request interception
       await page.setRequestInterception(true);
       page.on('request', (req) => {
@@ -190,6 +202,7 @@ class AbTastyScraperService {
       return page;
     } catch (error) {
       console.error('Error creating page:', error);
+      // Re-throw so caller knows page creation failed
       throw new Error(`Failed to create page: ${error.message}`);
     }
   }

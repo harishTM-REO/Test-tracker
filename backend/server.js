@@ -15,10 +15,13 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const datasetRoutes = require('./routes/datasetRoutes');
+const datasetUploadRoutes = require('./routes/datasetUploadRoutes');
 const changeDetectionRoutes = require('./routes/changeDetectionRoutes');
 const { errorHandler, requestLogger } = require('./middleware/errorHandler');
 const CronJobService = require('./services/cronJobService');
 const BackgroundScrapingService = require('./services/backgroundScrapingService');
+const { initializeDatasetJobs } = require('./services/DatasetJobsInitializer');
+const jobQueue = require('./services/jobQueue');
 
 const optimizelyRoutes = require('./routes/optimizelyRoutes');
 const abTastyRoutes = require('./routes/abTastyRoutes');
@@ -78,8 +81,16 @@ app.use(requestLogger);
 
 // Routes
 
-// Dataset Routes
+// Dataset Routes (traditional CRUD operations)
 app.use('/api/datasets', datasetRoutes);
+
+// Dataset Upload Routes
+// - POST /upload -> mounted at /api/dataset-upload/upload
+// - GET /:datasetId -> mounted at /api/dataset/:datasetId
+// - POST /:datasetId/start-scraping -> mounted at /api/dataset/:datasetId/start-scraping
+// - POST /:datasetId/cancel -> mounted at /api/dataset/:datasetId/cancel
+app.use('/api/dataset-upload', datasetUploadRoutes);
+app.use('/api/dataset', datasetUploadRoutes);
 
 // Optimizely Routes[batch scrape, etc.]
 app.use('/api/optimizely', optimizelyRoutes);
@@ -131,6 +142,15 @@ app.listen(port, async () => {
   // } catch (error) {
   //   console.error('❌ Failed to start cron jobs:', error);
   // }
+
+  // Initialize dataset background jobs (sanitization & scraping workers)
+  try {
+    initializeDatasetJobs(jobQueue);
+    console.log('✅ Dataset jobs initialized (sanitization & scraping workers registered)');
+  } catch (error) {
+    console.error('❌ Failed to initialize dataset jobs:', error);
+    // Don't crash the server, but log the error
+  }
 
   // Initialize background scraping service with job queue and browser pool
   // This is required for large-scale scraping (e.g., 12,000+ URLs)

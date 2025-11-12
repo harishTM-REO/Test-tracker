@@ -263,6 +263,66 @@ const datasetSchema = new mongoose.Schema({
   },
   
   // Scraping Status
+  // ===== NEW SANITIZATION PHASE (For Dataset Upload Flow) =====
+  sanitization: {
+    status: {
+      type: String,
+      enum: ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED'],
+      default: 'PENDING'
+    },
+    startedAt: Date,
+    completedAt: Date,
+    progress: {
+      current: { type: Number, default: 0 },
+      total: { type: Number, default: 0 },
+      percentage: { type: Number, default: 0 }
+    },
+    currentPhase: {
+      type: String,
+      enum: ['NORMALIZE', 'DEDUPLICATE', 'DNS_LOOKUP', 'HTTP_CHECK', 'COMPLETED'],
+      default: 'NORMALIZE'
+    },
+    phases: {
+      normalize: { completed: { type: Boolean, default: false } },
+      deduplicate: {
+        completed: { type: Boolean, default: false },
+        removed: { type: Number, default: 0 }
+      },
+      dns_lookup: {
+        completed: { type: Boolean, default: false },
+        failed: { type: Number, default: 0 },
+        processed: { type: Number, default: 0 }
+      },
+      http_check: {
+        completed: { type: Boolean, default: false },
+        failed: { type: Number, default: 0 },
+        processed: { type: Number, default: 0 }
+      }
+    },
+    report: {
+      originalCount: { type: Number, default: 0 },
+      cleanedCount: { type: Number, default: 0 },
+      breakdown: {
+        duplicates: { type: Number, default: 0 },
+        invalidFormat: { type: Number, default: 0 },
+        dnsFailures: { type: Number, default: 0 },
+        httpFailures: { type: Number, default: 0 }
+      }
+    },
+    removedUrls: [{
+      url: String,
+      reason: { type: String, enum: ['DUPLICATE', 'INVALID_FORMAT', 'DNS_FAILED', 'HTTP_FAILED'] },
+      details: String
+    }],
+    error: String,
+    retryCount: { type: Number, default: 0 }
+  },
+
+  // Stored URLs for sanitization
+  originalUploadedUrls: [{ type: String }],
+  cleanedUrls: [{ type: String }],
+
+  // ===== LEGACY SCRAPING STATUS (Kept for backward compatibility) =====
   scrapingStatus: {
     type: String,
     enum: {

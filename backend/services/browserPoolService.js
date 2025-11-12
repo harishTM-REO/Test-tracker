@@ -94,6 +94,10 @@ class BrowserPoolService {
       // Modern Chrome headless mode with improved bot detection evasion
       headless: 'new',
       ignoreHTTPSErrors: true,
+      // CRITICAL: protocolTimeout prevents CDP communication hangs
+      // When set too low, browsers can't respond to page creation requests
+      protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000, // 60 seconds for CDP communication
+      timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000, // 30 seconds for browser launch
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -118,8 +122,7 @@ class BrowserPoolService {
         '--disable-features=IsolateOrigins,site-per-process',
         '--disable-sync',
         '--disable-default-apps'
-      ],
-      timeout: 30000
+      ]
     };
 
     try {
@@ -136,10 +139,18 @@ class BrowserPoolService {
 
   /**
    * Acquire a browser from the pool
-   * If all browsers busy, wait in queue
+   * If all browsers busy, wait in queue with timeout to detect stuck browsers
    */
   async acquireBrowser() {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      const queueTimeout = parseInt(process.env.QUEUE_TIMEOUT) || 40000; // 40 seconds max wait
+      let timeoutHandle;
+
+      const requestHandler = (browser) => {
+        clearTimeout(timeoutHandle);
+        resolve(browser);
+      };
+
       if (this.availableBrowsers.length > 0) {
         const browser = this.availableBrowsers.pop();
         this.busyBrowsers.add(browser);
@@ -153,8 +164,20 @@ class BrowserPoolService {
         resolve(browser);
       } else {
         // All browsers busy, add to queue
-        this.waitingQueue.push(resolve);
+        this.waitingQueue.push(requestHandler);
         console.log(`⏳ All ${this.poolSize} browsers busy, queuing request (queue length: ${this.waitingQueue.length})`);
+
+        // Set timeout - if not acquired in 40s, browsers are likely stuck
+        timeoutHandle = setTimeout(() => {
+          // Remove from queue if still waiting
+          const index = this.waitingQueue.indexOf(requestHandler);
+          if (index > -1) {
+            this.waitingQueue.splice(index, 1);
+            console.error(`❌ Browser acquisition timeout after ${queueTimeout}ms - browsers may be stuck!`);
+            console.error(`📊 Pool status: ${this.busyBrowsers.size} in use, ${this.availableBrowsers.length} available, ${this.waitingQueue.length} waiting`);
+            reject(new Error(`Browser pool timeout - all ${this.poolSize} browsers unresponsive after ${queueTimeout}ms`));
+          }
+        }, queueTimeout);
       }
     });
   }

@@ -21,6 +21,10 @@ const CHECKPOINT_INTERVAL = parseInt(process.env.CHECKPOINT_INTERVAL) || 500;
 const CHECKPOINT_DIR = process.env.CHECKPOINT_DIR || './backend/checkpoints';
 
 class OptimizelyScraperService {
+  constructor() {
+    this.browserPool = browserPool;
+  }
+
   /**
    * function to connect browserless.io
    */
@@ -202,12 +206,24 @@ class OptimizelyScraperService {
 
   /**
    * Create and configure a new page with your optimizations
+   * IMPROVED: Better timeout handling with protocol configuration
    * @param {Object} browser - Puppeteer browser instance
    * @returns {Object} Configured page instance
    */
   async createPage(browser) {
     try {
-      const page = await browser.newPage();
+      // Add protocol timeout to prevent hangs
+      const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 15000; // 15 seconds
+
+      const pagePromise = browser.newPage();
+
+      // Race between page creation and timeout
+      const page = await Promise.race([
+        pagePromise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Page creation timeout after ${pageCreationTimeout}ms`)), pageCreationTimeout)
+        )
+      ]);
 
       // Set smaller viewport as in your working code
       await page.setViewport({ width: 1080, height: 1024 });
@@ -227,6 +243,7 @@ class OptimizelyScraperService {
       return page;
     } catch (error) {
       console.error('Error creating page:', error);
+      // Re-throw so caller knows page creation failed
       throw new Error(`Failed to create page: ${error.message}`);
     }
   }
@@ -1759,6 +1776,237 @@ class OptimizelyScraperService {
       // Don't throw error as this is additional functionality - the main scraping should not fail
       console.warn('Initial version creation failed, but scraping results are still saved');
       return null;
+    }
+  }
+
+  /**
+   * Quick status check for a single URL
+   * Validates domain, detects captcha, and checks for Optimizely presence
+   * Lightweight version without full experiment extraction
+   */
+  async checkOptimizelyStatus(url) {
+    const startTime = Date.now();
+    let browser;
+    let page;
+
+    try {
+      // Get browser from pool
+      console.log(`📊 [1/7] Acquiring browser from pool...`);
+      browser = await this.browserPool.acquireBrowser();
+      console.log(`📊 [2/7] Browser acquired, creating new page...`);
+      page = await browser.newPage();
+
+      // Set realistic user agent
+      console.log(`📊 [3/7] Setting user agent and headers...`);
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+      await page.setViewport({ width: 1080, height: 1024 });
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Referer': 'https://www.google.com/'
+      });
+
+      let httpStatusCode = null;
+      let pageLoaded = false;
+      let navigationError = null;
+
+      try {
+        console.log(`📊 [4/7] Attempting to load URL: ${url}`);
+        const response = await page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 20000
+        });
+
+        if (response) {
+          httpStatusCode = response.status();
+          pageLoaded = httpStatusCode >= 200 && httpStatusCode < 400;
+          console.log(`✅ Page loaded with status: ${httpStatusCode}`);
+        } else {
+          navigationError = 'No response from server';
+          pageLoaded = false;
+        }
+      } catch (error) {
+        navigationError = error.message;
+        console.error(`❌ Navigation error: ${error.message}`);
+
+        // Try to get content anyway
+        try {
+          const content = await page.content();
+          if (content && content.length > 100) {
+            console.log(`⚠️ Page has content despite error, continuing...`);
+            pageLoaded = true;
+            httpStatusCode = 200;
+          }
+        } catch (e) {
+          console.error(`Cannot get page content: ${e.message}`);
+        }
+      }
+
+      console.log(`📊 [5/7] Detecting captcha...`);
+      // Detect captcha
+      let captchaDetection = { detected: null, type: null };
+      try {
+        captchaDetection = await this.detectCaptchaOnPage(page);
+        console.log(`📊 Captcha detection result:`, captchaDetection);
+      } catch (error) {
+        console.warn(`⚠️ Error detecting captcha: ${error.message}`);
+      }
+
+      console.log(`📊 [6/7] Detecting cookie consent...`);
+      // Detect cookie consent
+      let cookieType = null;
+      if (pageLoaded && !captchaDetection.detected) {
+        try {
+          cookieType = await this.detectCookieConsentType(page);
+          console.log(`📊 Cookie consent type: ${cookieType || 'none detected'}`);
+        } catch (error) {
+          console.warn(`⚠️ Error detecting cookie: ${error.message}`);
+        }
+      }
+
+      console.log(`📊 [7/7] Checking Optimizely presence...`);
+      // Check Optimizely presence
+      let optimizelyDetected = false;
+      if (pageLoaded && !captchaDetection.detected) {
+        try {
+          optimizelyDetected = await page.evaluate(() => {
+            return typeof window.optimizely !== 'undefined' && window.optimizely !== null;
+          });
+          console.log(`✅ Optimizely check complete: ${optimizelyDetected}`);
+        } catch (error) {
+          console.warn(`⚠️ Error checking Optimizely: ${error.message}`);
+        }
+      } else {
+        console.log(`⏭️ Skipping Optimizely check (pageLoaded: ${pageLoaded}, captchaDetected: ${captchaDetection.detected})`);
+      }
+
+      const duration = Date.now() - startTime;
+      console.log(`✅ Check completed in ${duration}ms`);
+
+      return {
+        url,
+        pageLoaded,
+        httpStatusCode,
+        captchaDetected: captchaDetection.detected,
+        captchaType: captchaDetection.type || null,
+        optimizelyDetected,
+        cookieType,
+        duration: `${duration}ms`,
+        navigationError: navigationError ? `Navigation error: ${navigationError}` : null
+      };
+
+    } catch (error) {
+      console.error(`🔴 Error in checkOptimizelyStatus:`, error.message);
+      const duration = Date.now() - startTime;
+
+      return {
+        url,
+        pageLoaded: false,
+        httpStatusCode: null,
+        captchaDetected: null,
+        captchaType: null,
+        optimizelyDetected: false,
+        cookieType: null,
+        duration: `${duration}ms`,
+        error: error.message
+      };
+
+    } finally {
+      console.log(`📊 Cleaning up browser and page...`);
+      if (page) {
+        try {
+          await page.close();
+        } catch (error) {
+          console.warn(`⚠️ Error closing page: ${error.message}`);
+        }
+      }
+      if (browser) {
+        await this.browserPool.releaseBrowser(browser);
+      }
+    }
+  }
+
+  /**
+   * Detect cookie consent type on page (shared utility)
+   */
+  async detectCookieConsentType(page) {
+    try {
+      const cookieProviders = {
+        'onetrust': ['.onetrust-button-group', '.ot-sdk', '[data-testid="banner-wrapper"]'],
+        'cookiebot': ['#CybotCookiebotDialog', '.CybotCookiebotDialog'],
+        'cookie-law': ['#cookie-consent', '.cookie-consent-banner'],
+        'gdpr': ['.gdpr-banner', '[data-gdpr]'],
+        'evidon': ['.evidon-banner', '#evidon-banner'],
+        'quantcast': ['.qc-cmp2-container', '#__cmpLocator'],
+        'iubenda': ['.iubenda-cs-container', '.iubenda-banner']
+      };
+
+      for (const [provider, selectors] of Object.entries(cookieProviders)) {
+        for (const selector of selectors) {
+          const exists = await page.evaluate((sel) => {
+            return document.querySelector(sel) !== null;
+          }, selector);
+
+          if (exists) {
+            return provider;
+          }
+        }
+      }
+
+      // No known provider detected
+      return null;
+
+    } catch (error) {
+      console.warn('Error detecting cookie consent type:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Detect captcha on page (shared utility)
+   */
+  async detectCaptchaOnPage(page) {
+    try {
+      // Check for common captcha indicators
+      const captchaSelectors = {
+        'recaptcha': ['[data-testid="recaptcha-anchor"]', '.g-recaptcha', '#g-recaptcha', '[src*="recaptcha"]'],
+        'hcaptcha': ['.h-captcha', '[data-sitekey*="hcaptcha"]'],
+        'turnstile': ['[data-sitekey*="turnstile"]', '.cf-turnstile'],
+        'cloudflare': ['iframe[src*="challenges.cloudflare"]', '.no-js']
+      };
+
+      for (const [captchaType, selectors] of Object.entries(captchaSelectors)) {
+        for (const selector of selectors) {
+          const detected = await page.evaluate((sel) => {
+            return document.querySelector(sel) !== null;
+          }, selector);
+
+          if (detected) {
+            return { detected: true, type: captchaType };
+          }
+        }
+      }
+
+      // Also check for common captcha text patterns
+      const pageText = await page.evaluate(() => document.body.innerText);
+      const captchaPatterns = [
+        /i'm not a robot/i,
+        /please verify you're human/i,
+        /challenge/i,
+        /verify/i
+      ];
+
+      for (const pattern of captchaPatterns) {
+        if (pattern.test(pageText)) {
+          return { detected: true, type: 'unknown' };
+        }
+      }
+
+      return { detected: false, type: null };
+
+    } catch (error) {
+      console.warn('Error detecting captcha:', error.message);
+      return { detected: null, type: null };
     }
   }
 }
