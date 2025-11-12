@@ -12,8 +12,12 @@ try {
 // const ExperimentService = require('./experimentService'); // Comment out if not available
 const AbTastyResult = require('../models/AbTastyResult');
 const browserPool = require('./browserPoolService'); // Import browser pool service
+const CheckpointService = require('./checkpointService'); // Import checkpoint service
 
 const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
+const CHECKPOINT_ENABLED = process.env.CHECKPOINT_ENABLED === 'true';
+const CHECKPOINT_INTERVAL = parseInt(process.env.CHECKPOINT_INTERVAL) || 500;
+const CHECKPOINT_DIR = process.env.CHECKPOINT_DIR || './backend/checkpoints';
 class AbTastyScraperService {
   /**
    * function to connect browserless.io
@@ -199,7 +203,9 @@ class AbTastyScraperService {
     try {
       console.log(`Navigating to: ${url}`);
 
-      const navigationTimeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 15000; // 15 seconds default
+      // Increased from 15s to 30s to handle slow sites
+      // This reduces timeouts for legitimate slow-loading pages
+      const navigationTimeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000; // 30 seconds default
 
       await page.goto(url, {
         waitUntil: 'domcontentloaded',
@@ -1003,37 +1009,74 @@ async extractAbTastySync(page) {
   async batchScrapeUrls(urls, options = {}) {
     const jobQueue = require('./jobQueue');
     const adaptiveOptions = jobQueue.getAdaptiveScrapeOptions();
-    
-    const { 
+
+    const {
       concurrent = adaptiveOptions.concurrent,
-      delay = adaptiveOptions.delay, 
+      delay = adaptiveOptions.delay || parseInt(process.env.BATCH_DELAY) || 2000,
       batchSize = adaptiveOptions.concurrent,
-      maxTabs = adaptiveOptions.maxTabs 
+      maxTabs = adaptiveOptions.maxTabs,
+      jobId = `scrape-${Date.now()}`
     } = options;
-    
+
+    // Initialize checkpoint service if enabled
+    const checkpoint = CHECKPOINT_ENABLED ? new CheckpointService(jobId, CHECKPOINT_DIR) : null;
+    let urlsToProcess = urls;
+
+    if (checkpoint) {
+      const isResuming = checkpoint.initialize(urls.length);
+      urlsToProcess = isResuming ? checkpoint.getUrlsToProcess(urls) : urls;
+    }
+
     console.log(`🎯 Using adaptive settings for ${adaptiveOptions.loadLevel} load level`);
-    
+
     const results = [];
-    console.log(`Starting optimized batch scrape of ${urls.length} URLs`);
+    console.log(`Starting optimized batch scrape of ${urlsToProcess.length} URLs`);
     console.log(`Config: ${concurrent} concurrent, ${batchSize} batch size, ${maxTabs} max tabs per browser`);
 
     // Process URLs in chunks
-    for (let i = 0; i < urls.length; i += batchSize) {
-      const chunk = urls.slice(i, i + batchSize);
-      console.log(`Processing chunk ${Math.floor(i / batchSize) + 1}: URLs ${i + 1}-${Math.min(i + batchSize, urls.length)}`);
-      
+    for (let i = 0; i < urlsToProcess.length; i += batchSize) {
+      const chunk = urlsToProcess.slice(i, i + batchSize);
+      const chunkNumber = Math.floor(i / batchSize) + 1;
+      const totalChunks = Math.ceil(urlsToProcess.length / batchSize);
+      console.log(`Processing chunk ${chunkNumber}/${totalChunks}: URLs ${i + 1}-${Math.min(i + batchSize, urlsToProcess.length)}`);
+
       const chunkResults = await this.processUrlChunk(chunk, { concurrent, maxTabs });
       results.push(...chunkResults);
 
+      // Record results in checkpoint
+      if (checkpoint) {
+        chunkResults.forEach(result => {
+          if (result.success) {
+            checkpoint.recordSuccess(result.url, result.data);
+          } else {
+            const isTimeout = result.error?.includes('timeout');
+            checkpoint.recordFailure(result.url, result.error, isTimeout);
+          }
+        });
+
+        // Save checkpoint at intervals
+        if (checkpoint.shouldSave(CHECKPOINT_INTERVAL)) {
+          checkpoint.save();
+          checkpoint.printProgress();
+        }
+      }
+
       // Add delay between chunks
-      if (i + batchSize < urls.length && delay > 0) {
-        console.log(`Waiting ${delay}ms before next chunk...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+      const batchDelay = parseInt(process.env.BATCH_DELAY) || 2000;
+      if (i + batchSize < urlsToProcess.length && batchDelay > 0) {
+        console.log(`⏱️  Waiting ${batchDelay}ms before next chunk for resource recovery...`);
+        await new Promise(resolve => setTimeout(resolve, batchDelay));
       }
     }
 
+    // Final checkpoint save
+    if (checkpoint) {
+      checkpoint.save();
+      checkpoint.generateReport();
+    }
+
     const successful = results.filter(r => r.success).length;
-    console.log(`Batch scrape completed: ${successful}/${urls.length} successful`);
+    console.log(`Batch scrape completed: ${successful}/${urlsToProcess.length} successful`);
     return results;
   }
 

@@ -289,7 +289,13 @@ const datasetSchema = new mongoose.Schema({
     failedScans: { type: Number, default: 0 },
     optimizelyDetected: { type: Number, default: 0 },
     totalExperiments: { type: Number, default: 0 },
-    duration: { type: String, default: null }
+    duration: { type: String, default: null },
+    currentPass: { type: String, default: null }, // 'Pass 1/3', 'Pass 2/3', 'Pass 3/3'
+    processedUrls: { type: Number, default: 0 } // URLs processed so far
+  },
+  scrapingLastUpdate: {
+    type: Date,
+    default: null
   },
 
   // Experiment Detection Status (Phase 2)

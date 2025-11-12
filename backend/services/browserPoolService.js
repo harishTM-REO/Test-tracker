@@ -11,11 +11,21 @@
  */
 
 const chromium = require('@sparticuz/chromium');
+
+// Import puppeteer with Stealth Plugin for better bot detection evasion
 let puppeteer;
+let StealthPlugin;
 try {
-  puppeteer = require('puppeteer');
+  puppeteer = require('puppeteer-extra');
+  StealthPlugin = require('puppeteer-extra-plugin-stealth');
+  puppeteer.use(StealthPlugin());
 } catch (e) {
-  puppeteer = require('puppeteer-core');
+  // Fallback if puppeteer-extra not available
+  try {
+    puppeteer = require('puppeteer');
+  } catch (e2) {
+    puppeteer = require('puppeteer-core');
+  }
 }
 
 class BrowserPoolService {
@@ -72,14 +82,17 @@ class BrowserPoolService {
   }
 
   /**
-   * Launch a single browser instance with optimized settings
+   * Launch a single browser instance with optimized settings and stealth mode
+   * Uses headless: 'new' for better bot detection evasion
    * @param {number} browserNumber - Browser number for logging
    */
   async launchBrowser(browserNumber = 0) {
     const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
 
     const browserOptions = {
-      headless: true,
+      // headless: 'new' provides better stealth than headless: true
+      // Modern Chrome headless mode with improved bot detection evasion
+      headless: 'new',
       ignoreHTTPSErrors: true,
       args: [
         '--no-sandbox',
@@ -90,14 +103,21 @@ class BrowserPoolService {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote', // Prevents fork issues
-        '--single-process', // Reduces process creation overhead
+        // REMOVED: '--single-process' - Causes browser instability with multiple pages
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
+
+        // Anti-bot detection flags
         '--disable-blink-features=AutomationControlled',
         '--disable-web-security',
         '--allow-running-insecure-content',
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+
+        // Additional stealth flags for better detection evasion
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-sync',
+        '--disable-default-apps'
       ],
       timeout: 30000
     };

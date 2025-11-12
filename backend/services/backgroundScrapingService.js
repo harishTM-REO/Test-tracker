@@ -5,7 +5,7 @@ const jobQueue = require('./jobQueue');
 const browserPool = require('./browserPoolService'); // Import browser pool for resource management
 
 class BackgroundScrapingService {
-  
+
   /**
    * Helper function to validate URL format
    */
@@ -16,6 +16,103 @@ class BackgroundScrapingService {
     } catch (error) {
       return false;
     }
+  }
+
+  /**
+   * Classify error to determine if it's retryable or permanent
+   * RETRYABLE: Transient issues that might succeed on retry
+   * PERMANENT: Bot detection, blocking, or URL issues
+   */
+  static classifyError(error) {
+    const errorMsg = (error.message || '').toLowerCase();
+    const errorString = (error.toString || '').toLowerCase();
+    const fullError = `${errorMsg} ${errorString}`;
+
+    // PERMANENT FAILURES - Don't retry
+    const permanentPatterns = [
+      'captcha detected',
+      'captcha_blocked',
+      'captcha',
+      'geoblocked',
+      'geo-blocked',
+      'access denied',
+      'http 403',
+      'forbidden',
+      'http 404',
+      'not found',
+      'invalid url',
+      'malformed',
+      'unsupported protocol'
+    ];
+
+    for (const pattern of permanentPatterns) {
+      if (fullError.includes(pattern)) {
+        return {
+          retryable: false,
+          reason: pattern,
+          type: 'PERMANENT'
+        };
+      }
+    }
+
+    // RETRYABLE FAILURES - Should retry
+    const retryablePatterns = [
+      'timeout',
+      'econnrefused',
+      'enotfound',
+      'socket hang up',
+      'econnreset',
+      'err_failed',
+      'page crashed',
+      'execution context was destroyed',
+      'target closed',
+      'frame was detached',  // Browser connection lost during navigation
+      'protocol error',
+      'net::err_temporarily_throttled',
+      'net::err_network_changed',
+      'connection reset',
+      'temporarily unavailable',
+      'temporarily blocked',
+      'too many requests',
+      'rate limit',
+      'service unavailable',
+      'bad gateway',
+      'gateway timeout',
+      'connection closed'  // Browser/page connection dropped
+    ];
+
+    for (const pattern of retryablePatterns) {
+      if (fullError.includes(pattern)) {
+        return {
+          retryable: true,
+          reason: pattern,
+          type: 'TRANSIENT'
+        };
+      }
+    }
+
+    // Default: Treat as retryable (better to retry than lose data)
+    return {
+      retryable: true,
+      reason: 'unknown',
+      type: 'UNKNOWN'
+    };
+  }
+
+  /**
+   * Get exponential backoff delay in milliseconds
+   * Attempt 2: 1 second
+   * Attempt 3: 2 seconds
+   * Attempt 4: 4 seconds (if implemented)
+   */
+  static getBackoffDelay(attemptNumber) {
+    const delayMap = {
+      2: 1000,   // 1 second before attempt 2
+      3: 2000,   // 2 seconds before attempt 3
+      4: 4000    // 4 seconds before attempt 4 (if needed)
+    };
+
+    return delayMap[attemptNumber] || 1000; // Default 1 second
   }
   
   /**
@@ -43,56 +140,244 @@ class BackgroundScrapingService {
   }
 
   /**
-   * Worker function for dataset scraping jobs
+   * Worker function for dataset scraping jobs with 3-pass retry logic
+   * Pass 1: Process all URLs
+   * Pass 2: Retry failed URLs from Pass 1
+   * Pass 3: Retry failed URLs from Pass 2
    */
   static async performDatasetScraping(jobData, progressCallback) {
     const { datasetId, datasetName, urls, options } = jobData;
-    
+
     try {
-      console.log(`Starting background dataset scraping for: ${datasetName} (${urls.length} URLs)`);
-      
+      console.log(`\n🚀 Starting dataset scraping for: ${datasetName} (${urls.length} URLs)`);
+      console.log(`📋 Retry strategy: 3-pass with exponential backoff (1s, 2s, 4s)\n`);
+
       // Update dataset status to scraping
       const dataset = await Dataset.findById(datasetId);
       if (dataset) {
         await dataset.startScraping();
       }
-      
-      progressCallback(5, { message: 'Dataset scraping started' });
-      
+
+      progressCallback(5, { message: 'Dataset scraping started - Pass 1 of 3' });
+
+      // Set initial heartbeat timestamp so client knows job is running
+      try {
+        dataset.scrapingLastUpdate = new Date();
+        await dataset.save();
+        console.log('✅ Initial heartbeat set for dataset');
+      } catch (heartbeatError) {
+        console.warn('⚠️  Failed to set initial heartbeat:', heartbeatError.message);
+        // Don't crash the job if heartbeat save fails
+      }
+
       const startTime = new Date();
-      
-      // Import the OptimizelyScraperService
-      const OptimizelyScraperService = require('./optimizelyScraperService');
-      
-      // Perform batch scraping with progress updates
-      const results = await this.batchScrapeWithProgress(urls, options, progressCallback);
-      
+      const retryStats = {
+        pass1: { urlsProcessed: 0, successful: 0, failed: 0 },
+        pass2: { urlsProcessed: 0, successful: 0, failed: 0 },
+        pass3: { urlsProcessed: 0, successful: 0, failed: 0 }
+      };
+      const failedUrls = [];
+
+      // ========== PASS 1: Process all URLs (Attempt 1) ==========
+      console.log(`\n📍 PASS 1: Processing ${urls.length} URLs (Attempt 1)`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      const pass1Results = await this.batchScrapeWithProgress(
+        urls,
+        options.toolType || 'AbTasty',
+        options,
+        (progress, details) => {
+          progressCallback(Math.floor(progress * 0.33), {
+            ...details,
+            pass: 'Pass 1/3',
+            message: `Pass 1: ${details.message}`
+          });
+        }
+      );
+
+      // Separate successful from failed
+      const pass1Successful = pass1Results.filter(r => r.success);
+      const pass1Failed = pass1Results.filter(r => !r.success);
+
+      retryStats.pass1.urlsProcessed = pass1Results.length;
+      retryStats.pass1.successful = pass1Successful.length;
+      retryStats.pass1.failed = pass1Failed.length;
+
+      console.log(`\n✅ PASS 1 Complete:`);
+      console.log(`   Processed: ${pass1Results.length}`);
+      console.log(`   Successful: ${pass1Successful.length}`);
+      console.log(`   Failed: ${pass1Failed.length}`);
+      console.log(`   Success Rate: ${((pass1Successful.length / pass1Results.length) * 100).toFixed(1)}%\n`);
+
+      // ========== PASS 2: Retry failed URLs from Pass 1 (Attempt 2) ==========
+      console.log(`📍 PASS 2: Retrying ${pass1Failed.length} failed URLs (Attempt 2)`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      const pass2Results = [];
+      const pass2UrlsToProcess = pass1Failed.map(r => r.url);
+
+      if (pass2UrlsToProcess.length > 0) {
+        // Wait before retrying (backoff)
+        const backoffDelay = this.getBackoffDelay(2); // 1 second
+        console.log(`⏱️  Waiting ${backoffDelay}ms before retry...\n`);
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+
+        const pass2BatchResults = await this.batchScrapeWithProgress(
+          pass2UrlsToProcess,
+          options.toolType || 'AbTasty',
+          options,
+          (progress, details) => {
+            progressCallback(33 + Math.floor(progress * 0.33), {
+              ...details,
+              pass: 'Pass 2/3',
+              message: `Pass 2: ${details.message}`
+            });
+          }
+        );
+
+        pass2Results.push(...pass2BatchResults);
+      }
+
+      const pass2Successful = pass2Results.filter(r => r.success);
+      const pass2Failed = pass2Results.filter(r => !r.success);
+
+      retryStats.pass2.urlsProcessed = pass2Results.length;
+      retryStats.pass2.successful = pass2Successful.length;
+      retryStats.pass2.failed = pass2Failed.length;
+
+      console.log(`\n✅ PASS 2 Complete:`);
+      console.log(`   Processed: ${pass2Results.length}`);
+      console.log(`   Successful: ${pass2Successful.length}`);
+      console.log(`   Failed: ${pass2Failed.length}`);
+      if (pass2Results.length > 0) {
+        console.log(`   Success Rate: ${((pass2Successful.length / pass2Results.length) * 100).toFixed(1)}%\n`);
+      }
+
+      // ========== PASS 3: Retry failed URLs from Pass 2 (Attempt 3) ==========
+      console.log(`📍 PASS 3: Retrying ${pass2Failed.length} failed URLs (Attempt 3)`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      const pass3Results = [];
+      const pass3UrlsToProcess = pass2Failed.map(r => r.url);
+
+      if (pass3UrlsToProcess.length > 0) {
+        // Wait before retrying (backoff)
+        const backoffDelay = this.getBackoffDelay(3); // 2 seconds
+        console.log(`⏱️  Waiting ${backoffDelay}ms before retry...\n`);
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+
+        const pass3BatchResults = await this.batchScrapeWithProgress(
+          pass3UrlsToProcess,
+          options.toolType || 'AbTasty',
+          options,
+          (progress, details) => {
+            progressCallback(66 + Math.floor(progress * 0.33), {
+              ...details,
+              pass: 'Pass 3/3',
+              message: `Pass 3: ${details.message}`
+            });
+          }
+        );
+
+        pass3Results.push(...pass3BatchResults);
+      }
+
+      const pass3Successful = pass3Results.filter(r => r.success);
+      const pass3Failed = pass3Results.filter(r => !r.success);
+
+      retryStats.pass3.urlsProcessed = pass3Results.length;
+      retryStats.pass3.successful = pass3Successful.length;
+      retryStats.pass3.failed = pass3Failed.length;
+
+      console.log(`\n✅ PASS 3 Complete:`);
+      console.log(`   Processed: ${pass3Results.length}`);
+      console.log(`   Successful: ${pass3Successful.length}`);
+      console.log(`   Failed (PERMANENT): ${pass3Failed.length}`);
+      if (pass3Results.length > 0) {
+        console.log(`   Success Rate: ${((pass3Successful.length / pass3Results.length) * 100).toFixed(1)}%\n`);
+      }
+
+      // ========== MERGE ALL RESULTS ==========
+      console.log(`\n📊 Merging results from all passes...`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      const allSuccessfulResults = [
+        ...pass1Successful,
+        ...pass2Successful,
+        ...pass3Successful
+      ];
+
+      // Add permanent failures with retry details
+      const permanentFailures = pass3Failed.map(result => ({
+        ...result,
+        failureDetails: {
+          attempts: 3,
+          error: result.error,
+          classification: this.classifyError(new Error(result.error))
+        }
+      }));
+
+      const allResults = [...allSuccessfulResults, ...permanentFailures];
+
       progressCallback(85, { message: 'Scraping completed, saving results...' });
-      
-      // Save results to database
-      const savedResults = await OptimizelyScraperService.saveBatchResults(
-        datasetId, 
-        datasetName, 
-        results, 
+
+      // Update heartbeat before save (save operation can be long)
+      try {
+        const datasetBeforeSave = await Dataset.findById(datasetId);
+        if (datasetBeforeSave) {
+          datasetBeforeSave.scrapingLastUpdate = new Date();
+          await datasetBeforeSave.save();
+          console.log('✅ Heartbeat updated before saving results');
+        }
+      } catch (heartbeatError) {
+        console.warn('⚠️  Failed to update heartbeat before save:', heartbeatError.message);
+      }
+
+      // ========== SAVE TO DATABASE ==========
+      console.log(`💾 Saving ${allResults.length} results to database...`);
+
+      const AbTastyScraperService = require('./abTastyScraperService');
+      const savedResults = await AbTastyScraperService.saveBatchResults(
+        datasetId,
+        datasetName,
+        allResults,
         startTime
       );
-      
-      // Calculate final statistics
-      const successful = results.filter(r => r.success);
-      const withOptimizely = successful.filter(r => r.data?.optimizely?.detected);
-      const withExperiments = successful.filter(r => r.data?.optimizely?.experiments?.length > 0);
-      
-      console.log(`📊 Scraping Results Summary:`);
-      console.log(`Total results: ${results.length}`);
-      console.log(`Successful: ${successful.length}`);
-      console.log(`With Optimizely: ${withOptimizely.length}`);
-      console.log(`With Experiments: ${withExperiments.length}`);
-      
-      // Debug: Show sample result structure
-      if (results.length > 0) {
-        console.log(`📋 Sample result structure:`, JSON.stringify(results[0], null, 2));
+
+      // Update heartbeat after save
+      try {
+        const datasetAfterSave = await Dataset.findById(datasetId);
+        if (datasetAfterSave) {
+          datasetAfterSave.scrapingLastUpdate = new Date();
+          await datasetAfterSave.save();
+          console.log('✅ Heartbeat updated after saving results');
+        }
+      } catch (heartbeatError) {
+        console.warn('⚠️  Failed to update heartbeat after save:', heartbeatError.message);
       }
-      
+
+      // ========== GENERATE FINAL STATISTICS ==========
+      console.log(`\n📈 Final Statistics:`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log(`Total URLs processed: ${urls.length}`);
+      console.log(`Success on attempt 1: ${retryStats.pass1.successful} (${((retryStats.pass1.successful / urls.length) * 100).toFixed(1)}%)`);
+      console.log(`Success on attempt 2: ${retryStats.pass2.successful} (${((retryStats.pass2.successful / urls.length) * 100).toFixed(1)}%)`);
+      console.log(`Success on attempt 3: ${retryStats.pass3.successful} (${((retryStats.pass3.successful / urls.length) * 100).toFixed(1)}%)`);
+      console.log(`Permanent failures: ${permanentFailures.length} (${((permanentFailures.length / urls.length) * 100).toFixed(1)}%)`);
+      console.log(`Overall success rate: ${((allSuccessfulResults.length / urls.length) * 100).toFixed(1)}%`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      // Collect failed URLs info
+      for (const result of permanentFailures) {
+        failedUrls.push({
+          url: result.url,
+          failureReason: result.failureDetails.classification.reason,
+          attempts: 3,
+          lastError: result.error,
+          failedAt: new Date().toISOString()
+        });
+      }
+
       const finalResult = {
         dataset: {
           id: datasetId,
@@ -100,54 +385,69 @@ class BackgroundScrapingService {
         },
         summary: {
           totalUrls: urls.length,
-          successful: successful.length,
-          failed: results.length - successful.length,
-          withOptimizely: withOptimizely.length,
-          withExperiments: withExperiments.length,
-          optimizelyRate: `${((withOptimizely.length / urls.length) * 100).toFixed(1)}%`,
-          experimentRate: `${((withExperiments.length / urls.length) * 100).toFixed(1)}%`
+          successful: allSuccessfulResults.length,
+          failed: permanentFailures.length,
+          successRate: `${((allSuccessfulResults.length / urls.length) * 100).toFixed(1)}%`
         },
+        retryStatistics: retryStats,
+        failedUrls: failedUrls,
         savedResults: {
           id: savedResults._id,
           totalExperiments: savedResults.totalExperiments,
-          optimizelyDetectedCount: savedResults.optimizelyDetectedCount,
-          failedWebsitesCount: savedResults.failedWebsites?.length || 0
+          abTastyDetectedCount: savedResults.abTastyDetectedCount,
+          failedWebsitesCount: permanentFailures.length
         },
         completedAt: new Date().toISOString()
       };
-      
+
       // Update dataset with completion
       if (dataset) {
         await dataset.completeScraping({
           totalUrls: urls.length,
-          successfulScans: successful.length,
-          failedScans: results.length - successful.length,
-          optimizelyDetected: withOptimizely.length,
+          successfulScans: allSuccessfulResults.length,
+          failedScans: permanentFailures.length,
+          abTastyDetected: savedResults.abTastyDetectedCount,
           totalExperiments: savedResults.totalExperiments
         });
       }
-      
+
       progressCallback(100, { message: 'Job completed successfully' });
 
       return finalResult;
 
     } catch (error) {
-      console.error(`Error in dataset scraping job:`, error);
+      console.error(`❌ Error in dataset scraping job:`, error);
 
-      // Update dataset with error
-      try {
-        const dataset = await Dataset.findById(datasetId);
-        if (dataset) {
-          await dataset.failScraping(error.message);
+      // Update dataset with error - use retry logic to ensure it gets set even if DB is experiencing issues
+      const maxRetries = 3;
+      let updateAttempt = 0;
+
+      while (updateAttempt < maxRetries) {
+        try {
+          const dataset = await Dataset.findById(datasetId);
+          if (dataset) {
+            await dataset.failScraping(error.message);
+            console.log(`✅ Successfully marked dataset ${datasetId} as failed in scraping job`);
+            break;
+          } else {
+            console.warn(`Dataset ${datasetId} not found when trying to mark as failed`);
+            break;
+          }
+        } catch (updateError) {
+          updateAttempt++;
+          console.error(`⚠️  Attempt ${updateAttempt}/${maxRetries} to update dataset status failed:`, updateError.message);
+
+          if (updateAttempt < maxRetries) {
+            const delay = Math.pow(2, updateAttempt) * 1000; // Exponential backoff: 2s, 4s, 8s
+            console.log(`⏱️  Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
         }
-      } catch (updateError) {
-        console.error('Error updating dataset with failure:', updateError);
       }
 
       throw error;
     } finally {
       // Clean up: Close browser pool to release resources
-      // This is important for server stability when running multiple scraping jobs
       console.log('\n🛑 Scraping job finished, cleaning up browser pool...');
       try {
         browserPool.printStats(); // Print final statistics
@@ -227,6 +527,22 @@ class BackgroundScrapingService {
           poolStats: browserPool.getStats() // Include pool stats in progress
         });
 
+        // Send heartbeat to indicate job is still running (for client-side polling detection)
+        try {
+          if (options.datasetId) {
+            const freshDataset = await Dataset.findById(options.datasetId);
+            if (freshDataset) {
+              freshDataset.scrapingLastUpdate = new Date();
+              if (!freshDataset.scrapingStats) freshDataset.scrapingStats = {};
+              freshDataset.scrapingStats.processedUrls = results.length;
+              await freshDataset.save();
+            }
+          }
+        } catch (heartbeatError) {
+          console.warn('Failed to update heartbeat:', heartbeatError.message);
+          // Don't fail the scraping job if heartbeat update fails
+        }
+
         // CRITICAL FIX: Add longer delay between batches for browser pool recovery
         // This allows:
         // - Browsers to fully cleanup pages
@@ -291,10 +607,12 @@ class BackgroundScrapingService {
 
   static async performScraping(datasetId) {
     let dataset = null;
-    
+    const maxRetries = 3;
+    let retryCount = 0;
+
     try {
       console.log(`Performing scraping for dataset: ${datasetId}`);
-      
+
       // Get dataset and mark as in progress
       dataset = await Dataset.findById(datasetId);
       if (!dataset) {
@@ -339,21 +657,33 @@ class BackgroundScrapingService {
         console.log(`Scraping progress: ${progress}%`);
       });
       
+      // Update heartbeat before save (save operation can be long)
+      try {
+        const datasetBeforeSave = await Dataset.findById(datasetId);
+        if (datasetBeforeSave) {
+          datasetBeforeSave.scrapingLastUpdate = new Date();
+          await datasetBeforeSave.save();
+          console.log('✅ Heartbeat updated before saving results');
+        }
+      } catch (heartbeatError) {
+        console.warn('⚠️  Failed to update heartbeat before save:', heartbeatError.message);
+      }
+
       // Save results to database
       let savedResults=null;
       if(dataset.toolType ==='Optimizely'){
       savedResults = await OptimizelyScraperService.saveBatchResults(
-        datasetId, 
-        dataset.name, 
-        results, 
+        datasetId,
+        dataset.name,
+        results,
         startTime
       );
       }
       if(dataset.toolType ==='AbTasty'){
       savedResults = await AbTastyyScraperService.saveBatchResults(
-        datasetId, 
-        dataset.name, 
-        results, 
+        datasetId,
+        dataset.name,
+        results,
         startTime
       );
       }
@@ -361,14 +691,26 @@ class BackgroundScrapingService {
       console.log(`🔍 [Background] Calling Adobe Target saveBatchResults for dataset: ${dataset.name}`);
       console.log(`🔍 [Background] Results summary:`, results.map(r => ({ url: r.url, success: r.success, detected: r.data?.adobeTarget?.detected })));
       savedResults = await AdobeScraperService.saveBatchResults(
-        datasetId, 
-        dataset.name, 
+        datasetId,
+        dataset.name,
         results, 
         startTime
       );
       console.log(`🔍 [Background] Adobe Target saveBatchResults completed. Saved ID: ${savedResults?._id}`);
       }
-      
+
+      // Update heartbeat after save
+      try {
+        const datasetAfterSave = await Dataset.findById(datasetId);
+        if (datasetAfterSave) {
+          datasetAfterSave.scrapingLastUpdate = new Date();
+          await datasetAfterSave.save();
+          console.log('✅ Heartbeat updated after saving results');
+        }
+      } catch (heartbeatError) {
+        console.warn('⚠️  Failed to update heartbeat after save:', heartbeatError.message);
+      }
+
       // Calculate final statistics
       const successful = results.filter(r => r.success);
       console.log('Results are ::::::::::');
@@ -376,7 +718,7 @@ class BackgroundScrapingService {
       const withOptimizely = successful.filter(r => r.data?.optimizely?.detected);
       const withAbTasty = successful.filter(r => r.data?.abTasty?.detected);
       const withAdobeTarget = successful.filter(r => r.data?.adobeTarget?.detected);
-      
+
       const stats = {
         totalUrls: urls.length,
         successfulScans: successful.length,
@@ -470,8 +812,34 @@ class BackgroundScrapingService {
     } catch (error) {
       console.error(`Error during scraping for dataset ${datasetId}:`, error);
 
-      if (dataset) {
-        await dataset.failScraping(error.message);
+      // Try to update dataset status to failed with retry logic
+      // This is critical - if we don't update the status, the client will keep polling indefinitely
+      retryCount = 0;
+      while (retryCount < maxRetries) {
+        try {
+          // Fetch fresh dataset record to ensure we have the latest state
+          const freshDataset = await Dataset.findById(datasetId);
+          if (freshDataset) {
+            await freshDataset.failScraping(error.message);
+            console.log(`✅ Successfully marked dataset ${datasetId} as failed after attempt ${retryCount + 1}`);
+            break;
+          } else {
+            console.warn(`Dataset ${datasetId} not found for status update`);
+            break;
+          }
+        } catch (updateError) {
+          retryCount++;
+          console.error(`⚠️  Failed to update dataset status (attempt ${retryCount}/${maxRetries}):`, updateError.message);
+
+          if (retryCount < maxRetries) {
+            // Wait before retrying (exponential backoff)
+            const delay = Math.pow(2, retryCount) * 1000; // 2s, 4s, 8s
+            console.log(`⏱️  Waiting ${delay}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          } else {
+            console.error(`❌ Failed to update dataset status after ${maxRetries} attempts - dataset may remain in 'in_progress' state`);
+          }
+        }
       }
     }
   }

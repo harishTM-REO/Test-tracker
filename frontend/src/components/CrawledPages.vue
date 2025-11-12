@@ -288,6 +288,11 @@ export default {
 
       // Polling interval for status updates
       statusPollingInterval: null,
+      pollingStartTime: null,
+      lastStatusUpdateTime: null,
+      lastStatusValue: null,
+      noUpdateTimeoutMs: 600000, // 10 minutes - if no heartbeat in 10 min, process is stuck
+      stuckWarningTimeoutMs: 300000, // 5 minutes - warn user after 5 minutes of no updates
 
       // API base URL
       apiBaseUrl: import.meta.env.VITE_APP_TITLE_BACKEND_URL || 'http://localhost:3000',
@@ -341,9 +346,20 @@ export default {
           this.crawlingStartedAt = response.data.startedAt
           this.crawlingCompletedAt = response.data.completedAt
           this.crawlingError = response.data.error
+
+          // Log completion status for debugging
+          if (response.data.isComplete) {
+            console.log(`✅ Crawling ${this.crawlingStatus} for dataset ${this.datasetId} after ${response.data.elapsedTimeSeconds}s`)
+          }
         }
+        // Return response data so polling logic can access isStuck and other flags
+        return response.data
       } catch (error) {
         console.error('Error loading crawling status:', error)
+        // If we can't reach the API, assume crawling is complete to stop polling
+        this.crawlingStatus = 'failed'
+        this.crawlingError = 'Unable to check crawling status: ' + error.message
+        return null
       }
     },
 
@@ -456,13 +472,57 @@ export default {
 
     startStatusPolling() {
       this.stopStatusPolling()
-      this.statusPollingInterval = setInterval(async () => {
-        await this.loadCrawlingStatus()
+      this.pollingStartTime = Date.now()
+      this.lastStatusUpdateTime = Date.now()
+      this.lastStatusValue = this.crawlingStatus
+      let warningAlreadyShown = false
 
-        // Stop polling if crawling is complete
+      this.statusPollingInterval = setInterval(async () => {
+        const elapsedMs = Date.now() - this.pollingStartTime
+        const timeSinceLastUpdateMs = Date.now() - this.lastStatusUpdateTime
+        const elapsedMinutes = Math.floor(elapsedMs / 60000)
+        const timeSinceLastUpdateMinutes = Math.floor(timeSinceLastUpdateMs / 60000)
+
+        const statusResponse = await this.loadCrawlingStatus()
+
+        // Track if status has changed
+        if (this.crawlingStatus !== this.lastStatusValue) {
+          this.lastStatusUpdateTime = Date.now()
+          this.lastStatusValue = this.crawlingStatus
+          warningAlreadyShown = false // Reset warning flag when status changes
+          console.log(`✅ Status updated to: ${this.crawlingStatus} after ${elapsedMinutes} minutes`)
+        }
+
+        // CRITICAL: Stop polling if crawling is complete (completed, failed, or other non-in_progress status)
         if (this.crawlingStatus !== 'in_progress') {
+          console.log(`✅ Polling stopped - Status is now: ${this.crawlingStatus}`)
           this.stopStatusPolling()
           await this.loadPages() // Refresh pages when complete
+          return
+        }
+
+        // Backend detected stuck status - stop polling immediately
+        if (statusResponse?.isStuck) {
+          console.error(`❌ BACKEND DETECTED STUCK: No updates for ${statusResponse.timeSinceLastUpdateSeconds} seconds`)
+          this.crawlingStatus = 'failed'
+          this.crawlingError = `Crawling process appears to be stuck on server (no heartbeat updates for ${Math.floor(statusResponse.timeSinceLastUpdateSeconds / 60)} minutes). Please check server logs or restart the process.`
+          this.stopStatusPolling()
+          this.$emit('message', {
+            type: 'error',
+            text: `❌ Backend detected stuck process (no updates for ${Math.floor(statusResponse.timeSinceLastUpdateSeconds / 60)} minutes). Check server logs.`
+          })
+          return
+        }
+
+        // WARNING: If crawling is taking longer than expected, inform user (but don't stop)
+        if (!warningAlreadyShown && elapsedMs > this.stuckWarningTimeoutMs) {
+          warningAlreadyShown = true
+          const processedUrls = statusResponse?.stats?.processedUrls || 'unknown'
+          console.warn(`ℹ️  Long-running crawl: ${elapsedMinutes} minutes elapsed, ${processedUrls} URLs processed`)
+          this.$emit('message', {
+            type: 'info',
+            text: `ℹ️ Crawling is taking longer than expected (${elapsedMinutes} minutes). Processing ${processedUrls} URLs. If no updates for 10 minutes, process will be marked stuck.`
+          })
         }
       }, 5000) // Poll every 5 seconds
     },

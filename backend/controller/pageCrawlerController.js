@@ -344,7 +344,7 @@ async function getCrawlingStatus(req, res) {
 
         // Get dataset with crawling status
         const dataset = await Dataset.findById(datasetId).select(
-            'name scrapingStatus scrapingStartedAt scrapingCompletedAt scrapingError scrapingStats'
+            'name scrapingStatus scrapingStartedAt scrapingCompletedAt scrapingError scrapingStats scrapingLastUpdate'
         );
 
         if (!dataset) {
@@ -358,6 +358,21 @@ async function getCrawlingStatus(req, res) {
         // Get current page count
         const pageCount = await CrawledPages.countDocuments({ datasetId: datasetId });
 
+        // Determine if polling should continue
+        // Stop polling if status is 'completed' or 'failed'
+        const isComplete = dataset.scrapingStatus === 'completed' || dataset.scrapingStatus === 'failed';
+        const elapsedTime = dataset.scrapingStartedAt ?
+            Math.round((new Date() - dataset.scrapingStartedAt) / 1000) : 0;
+
+        // Check if job is still actively working
+        // Job is considered "stuck" if it's been in_progress but hasn't updated in > 10 minutes
+        let isStuck = false;
+        let timeSinceLastUpdateSeconds = 0;
+        if (dataset.scrapingStatus === 'in_progress' && dataset.scrapingLastUpdate) {
+            timeSinceLastUpdateSeconds = Math.round((new Date() - dataset.scrapingLastUpdate) / 1000);
+            isStuck = timeSinceLastUpdateSeconds > 600; // 10 minutes
+        }
+
         res.status(200).json({
             success: true,
             message: 'Crawling status retrieved successfully',
@@ -369,6 +384,11 @@ async function getCrawlingStatus(req, res) {
             error: dataset.scrapingError,
             stats: dataset.scrapingStats,
             currentPageCount: pageCount,
+            isComplete: isComplete,  // Signal to client when to stop polling
+            isStuck: isStuck, // Signal if job appears stuck (no updates for 15 min)
+            elapsedTimeSeconds: elapsedTime,
+            timeSinceLastUpdateSeconds: timeSinceLastUpdateSeconds,
+            lastUpdateAt: dataset.scrapingLastUpdate,
             timestamp: new Date().toISOString()
         });
 
@@ -378,6 +398,7 @@ async function getCrawlingStatus(req, res) {
             success: false,
             message: 'Failed to retrieve crawling status',
             error: error.message,
+            isComplete: true,  // Signal to client to stop polling on error
             timestamp: new Date().toISOString()
         });
     }
