@@ -468,11 +468,14 @@ class BackgroundScrapingService {
     const AdobeScraperService = require('./adobeScraperService');
     const jobQueue = require('./jobQueue');
     
-    // Get adaptive options based on current system load
-    const adaptiveOptions = jobQueue.getAdaptiveScrapeOptions();
-    const { concurrent = adaptiveOptions.concurrent, delay = adaptiveOptions.delay } = options;
-    
-    console.log(`🔧 Adaptive scraping mode: ${adaptiveOptions.loadLevel} load`);
+    // Get concurrent setting from environment or options
+    // CRITICAL FIX: Use CONCURRENT_URLS from .env to enforce controlled resource usage
+    const envConcurrent = parseInt(process.env.CONCURRENT_URLS);
+    const concurrent = !isNaN(envConcurrent) ? envConcurrent : (options.concurrent || 2);
+    const envDelay = parseInt(process.env.BATCH_DELAY);
+    const delay = !isNaN(envDelay) ? envDelay : (options.delay || 2000);
+
+    console.log(`🔧 Processing mode: ${concurrent} concurrent URLs, ${delay}ms batch delay`);
     console.log(`Processing ${urls.length} URLs with ${concurrent} concurrent requests, ${delay}ms delay`);
     
     const results = [];

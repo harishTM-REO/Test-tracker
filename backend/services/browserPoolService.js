@@ -546,6 +546,7 @@ class BrowserPoolService {
    * Force immediate restart of a specific browser
    * Called when a browser becomes unresponsive (page creation timeout)
    * CRITICAL: Prevents stuck browsers from being returned to pool
+   * CRITICAL FIX: Add timeout to launch to prevent infinite hangs on resource-starved systems
    */
   async forceRestartBrowser(browser) {
     try {
@@ -559,9 +560,11 @@ class BrowserPoolService {
 
       // Remove from busy set
       this.busyBrowsers.delete(browser);
-      this.browserAcquisitionTimes.delete(browser);
+      if (this.browserAcquisitionTimes) {
+        this.browserAcquisitionTimes.delete(browser);
+      }
 
-      // Close the old browser
+      // Close the old browser with timeout
       try {
         await Promise.race([
           browser.close(),
@@ -569,21 +572,38 @@ class BrowserPoolService {
             setTimeout(() => reject(new Error('Close timeout')), 5000)
           )
         ]);
+        console.log(`✅ Old browser ${browserIndex + 1} closed`);
       } catch (closeError) {
-        console.warn(`⚠️  Could not gracefully close browser: ${closeError.message}`);
+        console.warn(`⚠️  Could not gracefully close browser ${browserIndex + 1}: ${closeError.message}`);
+        // Continue anyway - don't block the restart
       }
 
-      // Launch new browser
-      const newBrowser = await this.launchBrowser(browserIndex + 1);
-      this.browsers[browserIndex] = newBrowser;
-      this.pageCountPerBrowser.delete(browser);
-      this.pageCountPerBrowser.set(newBrowser, 0);
-      this.availableBrowsers.push(newBrowser);
-      this.stats.totalBrowserRestarts++;
+      // CRITICAL FIX: Launch new browser WITH TIMEOUT to prevent hanging
+      // On resource-starved systems, launch can hang indefinitely
+      let newBrowser;
+      try {
+        newBrowser = await Promise.race([
+          this.launchBrowser(browserIndex + 1),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Launch timeout after 15s')), 15000)
+          )
+        ]);
 
-      console.log(`✅ Browser ${browserIndex + 1} force-restarted successfully after timeout`);
+        this.browsers[browserIndex] = newBrowser;
+        this.pageCountPerBrowser.delete(browser);
+        this.pageCountPerBrowser.set(newBrowser, 0);
+        this.availableBrowsers.push(newBrowser);
+        this.stats.totalBrowserRestarts++;
+
+        console.log(`✅ Browser ${browserIndex + 1} force-restarted successfully`);
+      } catch (launchError) {
+        console.error(`❌ Failed to launch new browser ${browserIndex + 1}: ${launchError.message}`);
+        console.warn(`⚠️  Browser ${browserIndex + 1} will be retried on next acquisition`);
+        // Don't crash - just log and let the next acquisition handle it
+        // This prevents the restart from hanging the entire scraping process
+      }
     } catch (error) {
-      console.error(`❌ Failed to force-restart browser: ${error.message}`);
+      console.error(`❌ Unexpected error in forceRestartBrowser: ${error.message}`);
     }
   }
 }

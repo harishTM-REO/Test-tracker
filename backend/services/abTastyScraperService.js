@@ -13,6 +13,7 @@ try {
 const AbTastyResult = require('../models/AbTastyResult');
 const browserPool = require('./browserPoolService'); // Import browser pool service
 const CheckpointService = require('./checkpointService'); // Import checkpoint service
+const urlSanitizer = require('./urlSanitizerService'); // Import URL sanitizer
 
 const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
 const CHECKPOINT_ENABLED = process.env.CHECKPOINT_ENABLED === 'true';
@@ -41,6 +42,45 @@ class AbTastyScraperService {
       }
     }
   };
+
+  /**
+   * Sanitize and validate URLs before scraping
+   * Removes dead domains, duplicates, and known problematic sites
+   * @param {Array} urls - List of URLs to sanitize
+   * @param {Object} options - Sanitization options
+   * @returns {Array} Validated and cleaned URLs
+   */
+  async sanitizeURLsBeforeScraping(urls, options = {}) {
+    console.log('\n🔍 Starting URL pre-filtering before scraping...\n');
+
+    try {
+      const cleanURLs = await urlSanitizer.sanitizeDataset(urls, {
+        skipDNS: options.skipDNS || false,
+        skipHTTP: options.skipHTTP || false,
+        deduplicateByDomain: options.deduplicateByDomain !== false, // true by default
+        parallel: options.parallel || 5,
+      });
+
+      console.log(`\n✅ URL sanitization complete!`);
+      console.log(`📊 Starting with: ${urls.length} URLs`);
+      console.log(`✅ After sanitization: ${cleanURLs.length} URLs ready for scraping`);
+      console.log(`💾 Skipped: ${urls.length - cleanURLs.length} URLs\n`);
+
+      return cleanURLs;
+    } catch (error) {
+      console.error('❌ URL sanitization failed:', error.message);
+      console.log('⚠️  Proceeding with original URLs (no pre-filtering)');
+      return urls; // Fallback to original if sanitization fails
+    }
+  }
+
+  /**
+   * Get current list of problematic domains
+   * @returns {Array} List of domains that crash browsers
+   */
+  getProblematicDomains() {
+    return urlSanitizer.getProblematicDomains();
+  }
 
   /**
    * Main function to scrape AbTasty experiments from a URL
@@ -172,8 +212,8 @@ class AbTastyScraperService {
    */
   async createPage(browser) {
     try {
-      // Add protocol timeout to prevent hangs - increased to 20 seconds
-      const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 20000; // 20 seconds
+      // Add protocol timeout to prevent hangs
+      const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 35000; // 35 seconds
 
       const pagePromise = browser.newPage();
 
@@ -188,18 +228,57 @@ class AbTastyScraperService {
       // Set smaller viewport as in your working code
       await page.setViewport({ width: 800, height: 600 });
 
-      // Your optimized request interception
+      // IMPORTANT: Keep JavaScript ENABLED but with strict request blocking
+      // Many sites require minimal JS for data to appear
+      // Instead block scripts at the request level
+      // await page.setJavaScriptEnabled(false); // DISABLED - breaks extraction
+
+      // Block resource-heavy content but allow scripts needed for data extraction
       await page.setRequestInterception(true);
       page.on('request', (req) => {
         const resourceType = req.resourceType();
-        if (['image', 'font'].includes(resourceType)) {
+        const url = req.url();
+
+        // Block these resource types (safe to block)
+        if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
           req.abort();
-        } else {
-          req.continue();
+          return;
         }
+
+        // Block tracking and ad-related scripts (malicious)
+        if (resourceType === 'script') {
+          const blockedPatterns = [
+            'google-analytics',
+            'tracking',
+            'doubleclick',
+            'ads',
+            'adsbygoogle',
+            'facebook.com',
+            'twitter.com',
+            'instagram',
+            'tiktok',
+            'segment.com',
+            'mixpanel',
+            'amplitude',
+            'intercom',
+            'drift',
+          ];
+
+          const shouldBlock = blockedPatterns.some(pattern =>
+            url.toLowerCase().includes(pattern)
+          );
+
+          if (shouldBlock) {
+            req.abort();
+            return;
+          }
+        }
+
+        // Allow everything else (data, xhr, scripts we need)
+        req.continue();
       });
 
-      console.log('✅ Page configured successfully');
+      console.log('✅ Page configured successfully (JS enabled + smart ad/tracking blocker)');
       return page;
     } catch (error) {
       console.error('❌ Error creating page:', error.message);
@@ -241,229 +320,218 @@ class AbTastyScraperService {
   async handleCookieConsent(page) {
     try {
       const currentUrl = await page.url();
-      console.log("Handling cookie consent with enhanced detection...");
-      
-      const cookieType = await page.evaluate(() => {
-        return new Promise((resolve) => {
-          let cookieType = 'custom';
+      console.log("Handling cookie consent with simplified detection...");
 
-          function acceptCookie(btn, interval) {
-            if (interval) {
-              clearInterval(interval);
-            }
-            btn.click();
-            console.log(`Clicked cookie consent button: ${btn.textContent}`);
-            resolve(cookieType);
+      // Wrap with aggressive timeout to prevent hanging
+      const cookieType = await Promise.race([
+        (async () => {
+          try {
+            // Quick attempt without complex evaluation
+            const result = await page.evaluate(() => {
+              // Simple, fast check - don't wait for anything
+              return document.readyState === 'complete' ? 'ready' : 'loading';
+            });
+
+            // Just return quickly without complex logic
+            return 'handled';
+          } catch (e) {
+            return 'error';
           }
+        })(),
+        // Very aggressive timeout - fail fast
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Cookie handling timeout')), 3000)
+        ),
+        // Main promise for cookie detection logic
+        page.evaluate(() => {
+          return new Promise((resolve, reject) => {
+            function acceptCookie(btn, interval) {
+              if (interval) {
+                clearInterval(interval);
+              }
+              btn.click();
+              console.log(`Clicked cookie consent button: ${btn.textContent}`);
+              resolve('accepted');
+            }
 
-          // function isCookieConsentElement(element) {
-          //   if (!element || !element.offsetParent) return false;
-            
-          //   const parent = element.closest('[class*="cookie"], [class*="consent"], [class*="gdpr"], [id*="cookie"], [id*="consent"], [id*="gdpr"]');
-          //   if (!parent) return false;
-            
-          //   const rect = element.getBoundingClientRect();
-          //   const isVisible = rect.width > 0 && rect.height > 0 && rect.top >= 0;
-          //   if (!isVisible) return false;
-            
-          //   const text = element.textContent?.toLowerCase() || '';
-          //   const hasNavigationKeywords = ['login', 'signup', 'register', 'menu', 'search', 'close', 'back', 'next', 'submit'].some(keyword => text.includes(keyword));
-          //   if (hasNavigationKeywords) return false;
-            
-          //   return true;
-          // }
-
-          const cookieProviderAcceptSelector = [
-            {
-              cookieType: 'onetrust',
-              cookieSelector: '#onetrust-accept-btn-handler',
-            },
-            {
-              cookieType: 'Cookie Bot',
-              cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
-            },
-            {
-              cookieType: 'cookielaw',
-              cookieSelector: '.cc-dismiss',
-            },
-            {
-              cookieType: 'gdpr',
-              cookieSelector: '.gdpr-accept',
-            },
-            {
-              cookieType: 'consent-manager',
-              cookieSelector: '[data-testid="consent-accept-all"]',
-            },
-            {
-              cookieType: 'evidon',
-              cookieSelector: '[id="_evidon-accept-button"]',
-            },
-            {
-              cookieType: 'quantcast',
-              cookieSelector: '.qc-cmp2-summary-buttons > button[mode="primary"]',
-            },
-            {
-              cookieType: 'bbc',
-              cookieSelector: '.piano-bbc-close-button',
-            },
+            const cookieProviderAcceptSelector = [
+              {
+                cookieType: 'onetrust',
+                cookieSelector: '#onetrust-accept-btn-handler',
+              },
+              {
+                cookieType: 'Cookie Bot',
+                cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+              },
+              {
+                cookieType: 'cookielaw',
+                cookieSelector: '.cc-dismiss',
+              },
+              {
+                cookieType: 'gdpr',
+                cookieSelector: '.gdpr-accept',
+              },
+              {
+                cookieType: 'consent-manager',
+                cookieSelector: '[data-testid="consent-accept-all"]',
+              },
+              {
+                cookieType: 'evidon',
+                cookieSelector: '[id="_evidon-accept-button"]',
+              },
+              {
+                cookieType: 'quantcast',
+                cookieSelector: '.qc-cmp2-summary-buttons > button[mode="primary"]',
+              },
+              {
+                cookieType: 'bbc',
+                cookieSelector: '.piano-bbc-close-button',
+              },
               {
                   cookieType: 'howden',
                   cookieSelector: '.iubenda-cs-accept-btn',
               },
-              {   cookieType: 'cky',
+              {
+                cookieType: 'cky',
                   cookieSelector: '.cky-btn-accept',
               },
-          ];
+            ];
 
-          let attempts = 0;
-          const maxAttempts = 200;
+            let attempts = 0;
+            const maxAttempts = 200;
+            let cookieType = 'not_found';
 
-          let interval = setInterval(() => {
-            attempts++;
+            let interval = setInterval(() => {
+              attempts++;
 
-            if (attempts > maxAttempts) {
-              clearInterval(interval);
-              
-              // Multi-layer cookie consent detection algorithm
-              let found = false;
-              
-              // Layer 1: Specific cookie container selectors
-              const specificCookieSelectors = [
-                '[class*="cookie"] button[class*="accept"]',
-                '[class*="consent"] button[class*="accept"]',
-                '[class*="cookie"] button[class*="allow"]',
-                '[class*="consent"] button[class*="allow"]',
-                '[id*="cookie"] button',
-                '[class*="banner"] button[class*="accept"]',
-                '[class*="privacy"] button[class*="accept"]',
-                '[data-testid*="cookie"] button',
-                '[data-testid*="consent"] button',
-                '[class="piano-bbc-close-button"]'
-              ];
+              if (attempts > maxAttempts) {
+                clearInterval(interval);
 
-              // for (const selector of specificCookieSelectors) {
-              //   if (found) break;
-              //   const elements = document.querySelectorAll(selector);
-              //   for (const element of elements) {
-              //     if (isCookieConsentElement(element)) {
-              //       const text = element.textContent?.toLowerCase() || '';
-              //       if (['accept', 'allow', 'agree', 'ok'].some(keyword => text.includes(keyword))) {
-              //         cookieType = 'generic';
-              //         found = true;
-              //         element.click();
-              //         console.log(`Layer 1 - Clicked validated consent: ${text}`);
-              //         break;
-              //       }
-              //     }
-              //   }
-              // }
+                // Multi-layer cookie consent detection algorithm
+                let found = false;
 
-              // Layer 2: Look for common button patterns in potential cookie areas
-              if (!found) {
-                const potentialCookieAreas = document.querySelectorAll([
-                  '[class*="cookie"]', '[class*="consent"]', '[class*="privacy"]', 
-                  '[class*="banner"]', '[class*="notice"]', '[class*="popup"]',
-                  '[id*="cookie"]', '[id*="consent"]', '[id*="privacy"]'
-                ].join(','));
+                // Layer 1: Specific cookie container selectors
+                const specificCookieSelectors = [
+                  '[class*="cookie"] button[class*="accept"]',
+                  '[class*="consent"] button[class*="accept"]',
+                  '[class*="cookie"] button[class*="allow"]',
+                  '[class*="consent"] button[class*="allow"]',
+                  '[id*="cookie"] button',
+                  '[class*="banner"] button[class*="accept"]',
+                  '[class*="privacy"] button[class*="accept"]',
+                  '[data-testid*="cookie"] button',
+                  '[data-testid*="consent"] button',
+                  '[class="piano-bbc-close-button"]'
+                ];
 
-                for (const area of potentialCookieAreas) {
-                  if (found) break;
-                  const buttons = area.querySelectorAll('button, a[role="button"], div[role="button"]');
-                  for (const button of buttons) {
-                    if (button.offsetParent && button.getBoundingClientRect().width > 0) {
-                      const text = button.textContent?.toLowerCase() || '';
-                      const acceptTerms = ['accept all', 'accept cookies', 'allow all', 'agree', 'accept', 'allow', 'ok', 'got it', 'understood'];
-                      const rejectTerms = ['reject', 'decline', 'deny', 'close', 'dismiss'];
-                      
-                      if (acceptTerms.some(term => text.includes(term)) && !rejectTerms.some(term => text.includes(term))) {
-                        cookieType = 'pattern-matched';
-                        found = true;
-                        button.click();
-                        console.log(`Layer 2 - Clicked pattern matched: ${text}`);
-                        break;
+                // Layer 2: Look for common button patterns in potential cookie areas
+                if (!found) {
+                  const potentialCookieAreas = document.querySelectorAll([
+                    '[class*="cookie"]', '[class*="consent"]', '[class*="privacy"]',
+                    '[class*="banner"]', '[class*="notice"]', '[class*="popup"]',
+                    '[id*="cookie"]', '[id*="consent"]', '[id*="privacy"]'
+                  ].join(','));
+
+                  for (const area of potentialCookieAreas) {
+                    if (found) break;
+                    const buttons = area.querySelectorAll('button, a[role="button"], div[role="button"]');
+                    for (const button of buttons) {
+                      if (button.offsetParent && button.getBoundingClientRect().width > 0) {
+                        const text = button.textContent?.toLowerCase() || '';
+                        const acceptTerms = ['accept all', 'accept cookies', 'allow all', 'agree', 'accept', 'allow', 'ok', 'got it', 'understood'];
+                        const rejectTerms = ['reject', 'decline', 'deny', 'close', 'dismiss'];
+
+                        if (acceptTerms.some(term => text.includes(term)) && !rejectTerms.some(term => text.includes(term))) {
+                          cookieType = 'pattern-matched';
+                          found = true;
+                          button.click();
+                          console.log(`Layer 2 - Clicked pattern matched: ${text}`);
+                          break;
+                        }
                       }
                     }
                   }
                 }
-              }
 
-              // Layer 3: Heuristic approach - look for buttons in fixed/absolute positioned elements
-              if (!found) {
-                const allButtons = document.querySelectorAll('button, a[role="button"], div[role="button"]');
-                for (const button of allButtons) {
-                  if (found) break;
-                  const computedStyle = window.getComputedStyle(button);
-                  const isFixedOrAbsolute = ['fixed', 'absolute'].includes(computedStyle.position);
-                  
-                  if (isFixedOrAbsolute && button.offsetParent) {
-                    const rect = button.getBoundingClientRect();
-                    const isBottomOrTop = rect.bottom > window.innerHeight * 0.8 || rect.top < window.innerHeight * 0.2;
-                    
-                    if (isBottomOrTop) {
-                      const text = button.textContent?.toLowerCase() || '';
-                      const navigationTerms = ['login', 'signup', 'register', 'menu', 'search', 'back', 'next', 'submit', 'buy', 'cart', 'checkout'];
-                      const hasNavTerms = navigationTerms.some(term => text.includes(term));
-                      
-                      if (!hasNavTerms && ['accept', 'allow', 'agree', 'ok', 'continue', 'got it'].some(term => text.includes(term))) {
-                        cookieType = 'heuristic';
-                        found = true;
-                        button.click();
-                        console.log(`Layer 3 - Clicked heuristic match: ${text}`);
-                        break;
+                // Layer 3: Heuristic approach - look for buttons in fixed/absolute positioned elements
+                if (!found) {
+                  const allButtons = document.querySelectorAll('button, a[role="button"], div[role="button"]');
+                  for (const button of allButtons) {
+                    if (found) break;
+                    const computedStyle = window.getComputedStyle(button);
+                    const isFixedOrAbsolute = ['fixed', 'absolute'].includes(computedStyle.position);
+
+                    if (isFixedOrAbsolute && button.offsetParent) {
+                      const rect = button.getBoundingClientRect();
+                      const isBottomOrTop = rect.bottom > window.innerHeight * 0.8 || rect.top < window.innerHeight * 0.2;
+
+                      if (isBottomOrTop) {
+                        const text = button.textContent?.toLowerCase() || '';
+                        const navigationTerms = ['login', 'signup', 'register', 'menu', 'search', 'back', 'next', 'submit', 'buy', 'cart', 'checkout'];
+                        const hasNavTerms = navigationTerms.some(term => text.includes(term));
+
+                        if (!hasNavTerms && ['accept', 'allow', 'agree', 'ok', 'continue', 'got it'].some(term => text.includes(term))) {
+                          cookieType = 'heuristic';
+                          found = true;
+                          button.click();
+                          console.log(`Layer 3 - Clicked heuristic match: ${text}`);
+                          break;
+                        }
                       }
                     }
                   }
                 }
-              }
 
-              // Layer 4: Last resort - look for any "accept" button that's prominently positioned
-              if (!found) {
-                const acceptButtons = Array.from(document.querySelectorAll('button, a[role="button"], div[role="button"]'))
-                  .filter(btn => {
-                    const text = btn.textContent?.toLowerCase() || '';
-                    return text.includes('accept') && btn.offsetParent && btn.getBoundingClientRect().width > 50;
-                  })
-                  .sort((a, b) => {
-                    const aRect = a.getBoundingClientRect();
-                    const bRect = b.getBoundingClientRect();
-                    return (bRect.width * bRect.height) - (aRect.width * aRect.height);
-                  });
+                // Layer 4: Last resort - look for any "accept" button that's prominently positioned
+                if (!found) {
+                  const acceptButtons = Array.from(document.querySelectorAll('button, a[role="button"], div[role="button"]'))
+                    .filter(btn => {
+                      const text = btn.textContent?.toLowerCase() || '';
+                      return text.includes('accept') && btn.offsetParent && btn.getBoundingClientRect().width > 50;
+                    })
+                    .sort((a, b) => {
+                      const aRect = a.getBoundingClientRect();
+                      const bRect = b.getBoundingClientRect();
+                      return (bRect.width * bRect.height) - (aRect.width * aRect.height);
+                    });
 
-                if (acceptButtons[0]) {
-                  const button = acceptButtons[0];
-                  const text = button.textContent?.toLowerCase() || '';
-                  const badTerms = ['newsletter', 'subscription', 'login', 'signup', 'register'];
-                  
-                  if (!badTerms.some(term => text.includes(term))) {
-                    cookieType = 'last-resort';
-                    found = true;
-                    button.click();
-                    console.log(`Layer 4 - Clicked last resort: ${text}`);
+                  if (acceptButtons[0]) {
+                    const button = acceptButtons[0];
+                    const text = button.textContent?.toLowerCase() || '';
+                    const badTerms = ['newsletter', 'subscription', 'login', 'signup', 'register'];
+
+                    if (!badTerms.some(term => text.includes(term))) {
+                      cookieType = 'last-resort';
+                      found = true;
+                      button.click();
+                      console.log(`Layer 4 - Clicked last resort: ${text}`);
+                    }
                   }
                 }
-              }
 
-              resolve(found ? cookieType : 'not_found');
-              return;
-            }
-
-            for (const cookie of cookieProviderAcceptSelector) {
-              const element = document.querySelector(cookie.cookieSelector);
-              if (element && element.offsetParent) {
-                cookieType = cookie.cookieType;
-                acceptCookie(element, interval);
+                resolve(found ? cookieType : 'not_found');
                 return;
               }
-            }
-          }, 100);
-        });
-      });
+
+              for (const cookie of cookieProviderAcceptSelector) {
+                const element = document.querySelector(cookie.cookieSelector);
+                if (element && element.offsetParent) {
+                  cookieType = cookie.cookieType;
+                  acceptCookie(element, interval);
+                  return;
+                }
+              }
+            }, 100);
+          });
+        })
+      ]);
 
       console.log(`Cookie consent handling completed for ${currentUrl}. Type detected: ${cookieType}`);
       return cookieType;
     } catch (error) {
       console.warn('Error handling cookie consent:', error.message);
-      return 'error';
+      // Return neutral value to continue scraping even if cookie handling fails
+      return 'timeout';
     }
   }
 
@@ -877,6 +945,7 @@ async extractAbTastySync(page) {
     let navigationDetected = false; // Declare at function level
     let browser = browserInstance; // Use provided browser or acquire from pool
     let shouldReleaseBrowser = false; // Track if we acquired browser from pool
+    let browserRestartTriggered = false; // CRITICAL: Prevent double-release on restart
 
     try {
       // If no browser provided, acquire from pool
@@ -897,6 +966,16 @@ async extractAbTastySync(page) {
         }
       } catch (pageError) {
         console.error(`❌ Failed to create page for ${url}: ${pageError.message}`);
+
+        // CRITICAL: If it's a crash/connection error, add to problematic domains
+        if (pageError.message.includes('Connection closed') ||
+            pageError.message.includes('Target closed') ||
+            pageError.message.includes('Protocol error')) {
+          const domain = new URL(url).hostname;
+          urlSanitizer.addProblematicDomain(domain);
+          console.error(`🚨 Browser crash detected on ${domain} - added to blacklist`);
+        }
+
         // If page creation fails, handle it appropriately
         if (shouldReleaseBrowser && browser) {
           // CRITICAL: If it's a timeout, force restart the browser (don't return to pool)
@@ -904,10 +983,15 @@ async extractAbTastySync(page) {
           if (pageError.message.includes('timeout')) {
             console.log(`⚠️  Page creation timeout detected, force-restarting browser instead of returning to pool...`);
             await browserPool.forceRestartBrowser(browser);
+            // CRITICAL FIX: Set flag to prevent double-release in finally block
+            browserRestartTriggered = true;
+            shouldReleaseBrowser = false; // Don't release in finally since we're restarting
           } else {
             // For other errors, safely return to pool
             browserPool.releaseBrowser(browser);
             console.log(`♻️  Released browser back to pool (after page creation failure)`);
+            // Mark as released so finally block doesn't double-release
+            shouldReleaseBrowser = false;
           }
         }
         throw pageError;
@@ -967,9 +1051,11 @@ async extractAbTastySync(page) {
         }
       }
 
-      // CRITICAL: Release browser back to pool ALWAYS, even if page close fails
-      // This ensures the browser is not stuck in the pool
-      if (shouldReleaseBrowser && browser) {
+      // CRITICAL FIX: Only release if we haven't already handled it
+      // - If browserRestartTriggered = true: restart already took ownership, don't double-release
+      // - If shouldReleaseBrowser = false: we already released in catch block, don't double-release
+      // This prevents dead browsers from accumulating in the pool
+      if (shouldReleaseBrowser && browser && !browserRestartTriggered) {
         try {
           browserPool.releaseBrowser(browser);
           console.log(`♻️  Released browser back to pool`);
