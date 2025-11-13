@@ -2,21 +2,7 @@
 const AbTastyScraperService = require('../services/abTastyScraperService');
 const mongoose = require('mongoose');
 const axios = require('axios');
-
-
-/**
- * Helper function to validate URL format
- * @param {string} url - URL to validate
- * @returns {boolean} True if valid URL
- */
-function isValidUrl(url) {
-  try {
-    const urlObj = new URL(url);
-    return ['http:', 'https:'].includes(urlObj.protocol);
-  } catch (error) {
-    return false;
-  }
-}
+const { isValidUrl, sanitizeUrl, validateAndSanitize } = require('../utils/urlValidator');
 
 /**
  * GET /api/abtasty/scrape?url=example.com
@@ -919,6 +905,103 @@ async function scrapeFromDatasetBrowserLess(req, res){
   }
 }
 
+/**
+ * GET /api/abtasty/check?url=example.com
+ * Quick validation check for domain, captcha, and ABTasty presence
+ * Accepts URLs with or without protocol, with or without www
+ * Uses existing scrapeExperiments logic but returns only validation results
+ */
+async function checkAbTastyStatus(req, res) {
+  try {
+    const { url } = req.query;
+    console.log(`📋 Received check request for URL: ${url}`);
+
+    // Validate URL parameter
+    if (!url) {
+      return res.status(400).json({
+        success: false,
+        message: 'URL parameter is required',
+        example: '/api/abtasty/check?url=https://example.com'
+      });
+    }
+
+    // Sanitize and normalize the URL (handles www, protocol, whitespace, etc.)
+    const sanitized = sanitizeUrl(url);
+
+    if (!sanitized) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid URL format - cannot be sanitized',
+        provided: url,
+        isValid: false,
+        hint: 'Try providing a valid domain like "example.com" or "https://example.com"',
+        checks: {
+          urlValid: false,
+          pageLoaded: false,
+          httpStatusCode: null,
+          captchaDetected: null,
+          captchaType: null,
+          abTastyPresent: null,
+          cookieConsentType: null
+        }
+      });
+    }
+
+    // Convert sanitized domain to full URL with protocol
+    const fullUrl = `https://${sanitized}`;
+    console.log(`✅ URL cleaned and normalized: ${url} → ${fullUrl}`);
+
+    // Use the existing scrapeAbTastyExperiments logic to get all validation data
+    console.log(`🔍 Starting validation check using scrape service...`);
+    const result = await AbTastyScraperService.scrapeAbTastyExperiments(fullUrl);
+
+    // Extract only the validation/check information
+    return res.status(200).json({
+      success: true,
+      message: 'Check completed successfully',
+      url: url,
+      timestamp: new Date().toISOString(),
+      checks: {
+        urlValid: true,
+        pageLoaded: result.pageLoadSuccess !== false,
+        httpStatusCode: result.httpStatusCode,
+        captchaDetected: result.abTasty.captchaDetected || false,
+        captchaType: result.abTasty.captchaStatus || null,
+        abTastyPresent: result.abTasty.detected || false,
+        cookieConsentType: result.abTasty.cookieType || null
+      },
+      processingTime: result.duration,
+      summary: {
+        domainValid: true,
+        pageAccessible: result.pageLoadSuccess !== false,
+        blockingIssues: {
+          captchaBlocking: result.abTasty.captchaDetected || false,
+          abTastyPresent: result.abTasty.detected || false
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in checkAbTastyStatus controller:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to check ABTasty status',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+      checks: {
+        urlValid: null,
+        pageLoaded: null,
+        httpStatusCode: null,
+        captchaDetected: null,
+        captchaType: null,
+        abTastyPresent: null,
+        cookieConsentType: null
+      }
+    });
+  }
+}
+
 module.exports = {
   scrapeExperiments,
   batchScrapeExperiments,
@@ -932,5 +1015,6 @@ module.exports = {
   getFailedWebsites,
   getAbTastyDocuments,
   isValidUrl,
-  scrapeFromDatasetBrowserLess
+  scrapeFromDatasetBrowserLess,
+  checkAbTastyStatus
 };

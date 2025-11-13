@@ -1,21 +1,7 @@
 const adobeScraperService = require('../services/adobeScraperService');
 const mongoose = require('mongoose');
 const axios = require('axios');
-
-
-/**
- * Helper function to validate URL format
- * @param {string} url - URL to validate
- * @returns {boolean} True if valid URL
- */
-function isValidUrl(url) {
-    try {
-        const urlObj = new URL(url);
-        return ['http:', 'https:'].includes(urlObj.protocol);
-    } catch (error) {
-        return false;
-    }
-}
+const { isValidUrl, sanitizeUrl, validateAndSanitize } = require('../utils/urlValidator');
 
 /**
  * GET /api/adobeTarget/scrape?url=example.com

@@ -585,20 +585,65 @@ class AbTastyScraperService {
 
             function getABtastyExperimentDetails() {
               if (!window.ABTasty) {
+                console.log('ABTasty object not found on window');
                 return null;
               }
 
+              console.log('ABTasty object found, checking structure...');
+              console.log('ABTasty keys:', Object.keys(window.ABTasty));
+
               try {
-                const data = window.ABTasty.accountData;
-                if (!data || typeof data.tests !== 'object') {
-                  return null;
+                // Try multiple data structure possibilities
+                let data = window.ABTasty.accountData;
+                let experiments = null;
+
+                // Check if accountData.tests exists
+                if (data && typeof data.tests === 'object' && Object.keys(data.tests).length > 0) {
+                  console.log('Found experiments in ABTasty.accountData.tests');
+                  experiments = data.tests;
+                }
+                // Check alternative structure: ABTasty.data
+                else if (window.ABTasty.data && typeof window.ABTasty.data.tests === 'object') {
+                  console.log('Found experiments in ABTasty.data.tests');
+                  experiments = window.ABTasty.data.tests;
+                }
+                // Check if ABTasty has experiments directly
+                else if (window.ABTasty.experiments && typeof window.ABTasty.experiments === 'object') {
+                  console.log('Found experiments in ABTasty.experiments');
+                  experiments = window.ABTasty.experiments;
+                }
+                // Check accountData without tests
+                else if (data && Object.keys(data).length > 0) {
+                  console.log('ABTasty.accountData exists but no tests property. Available properties:', Object.keys(data));
+                  // ABTasty is detected, just no active experiments
+                  return {
+                    experiments: [],
+                    hasAbTasty: true,
+                    abTastyData: data,
+                    message: 'ABTasty detected but no experiments found'
+                  };
+                }
+                else {
+                  console.log('ABTasty object exists but no experiments found in any structure');
+                  return {
+                    experiments: [],
+                    hasAbTasty: true,
+                    abTastyData: window.ABTasty,
+                    message: 'ABTasty object detected but empty'
+                  };
                 }
 
-                console.log('Abtasty data found:', Object.keys(data.tests).length + ' experiments');
+                if (!experiments) {
+                  console.log('No experiments found in any expected structure');
+                  return {
+                    experiments: [],
+                    hasAbTasty: true,
+                    abTastyData: data || window.ABTasty,
+                    message: 'ABTasty detected but no experiments'
+                  };
+                }
 
-                const experiments = data.tests;
                 const experimentArray = [];
-
                 Object.entries(experiments).forEach(([id, exp]) => {
                   experimentArray.push({
                     id: id,
@@ -606,14 +651,21 @@ class AbTastyScraperService {
                   });
                 });
 
+                console.log('ABTasty experiments found:', experimentArray.length);
                 return {
                   experiments: experimentArray,
                   hasAbTasty: true,
-                  abTastyData: data
+                  abTastyData: data || window.ABTasty
                 };
               } catch (e) {
-                console.error('Error fetching AbTasty experiment details:', e);
-                return null;
+                console.error('Error fetching AbTasty experiment details:', e.message);
+                // Even if there's an error, ABTasty object exists
+                return {
+                  experiments: [],
+                  hasAbTasty: true,
+                  abTastyData: null,
+                  message: 'ABTasty detected with error: ' + e.message
+                };
               }
             }
 
@@ -630,34 +682,34 @@ class AbTastyScraperService {
 
               try {
                 const abTastyResult = getABtastyExperimentDetails();
+
                 // Success case - found experiments
                 if (abTastyResult && abTastyResult?.experiments && abTastyResult?.experiments.length) {
                   console.log('Abtasty experiments found:', abTastyResult?.experiments.length);
                   safeResolve({
-                      hasAbtasty: !!window.ABTasty|| null,
-                      experiments: abTastyResult?.experiments|| null,
-                      experimentCount: abTastyResult?.experiments.length|| null,
-                      error: null,
-                      optimizelyData: abTastyResult?.abTastyData|| null
-                    });
+                    hasAbtasty: !!window.ABTasty || null,
+                    experiments: abTastyResult?.experiments || null,
+                    experimentCount: abTastyResult?.experiments.length || null,
+                    error: null,
+                    optimizelyData: abTastyResult?.abTastyData || null
+                  });
                   return;
                 }
-                
+
                 // Check if AbTasty object exists but no experiments
                 if (window.ABTasty) {
                   console.log('AbTasty object found, checking for experiment data...');
-                  
+
                   if (attempts >= optimizelyFoundMaxAttempts) {
                     console.log(`AbTasty found but no experiments after ${optimizelyFoundMaxAttempts} attempts`);
                     safeResolve({
-                        hasAbtasty: !!window.ABTasty,
-                        experiments: [],
-                        experimentCount: 0,
-                        activeCount: 0,
-                        error: "AbTasty found but no experiments detected",
-                        optimizelyData: null
-                      }
-                    );
+                      hasAbtasty: !!window.ABTasty,
+                      experiments: [],
+                      experimentCount: 0,
+                      activeCount: 0,
+                      error: "AbTasty found but no experiments detected",
+                      optimizelyData: null
+                    });
                     return;
                   }
                 }
@@ -666,14 +718,13 @@ class AbTastyScraperService {
                 if (attempts >= maxAttempts) {
                   console.log('Max attempts reached, no AbTasty found');
                   safeResolve({
-                        hasAbtasty: false,
-                        experiments: [],
-                        experimentCount: 0,
-                        activeCount: 0,
-                        error: "AbTasty not found on page",
-                        optimizelyData: null
-                      }
-                  );
+                    hasAbtasty: false,
+                    experiments: [],
+                    experimentCount: 0,
+                    activeCount: 0,
+                    error: "AbTasty not found on page",
+                    optimizelyData: null
+                  });
                   return;
                 }
 

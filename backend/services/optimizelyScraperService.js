@@ -13,6 +13,7 @@ const ExperimentService = require('./experimentService'); // Comment out if not 
 const OptimizelyResult = require('../models/OptimizelyResult');
 const browserPool = require('./browserPoolService'); // Import browser pool service
 const CheckpointService = require('./checkpointService'); // Import checkpoint service
+const urlSanitizer = require('./urlSanitizerService'); // Import URL sanitizer
 
 const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
 // Environment variables for advanced features
@@ -47,6 +48,45 @@ class OptimizelyScraperService {
       }
     }
   };
+
+  /**
+   * Sanitize and validate URLs before scraping
+   * Removes dead domains, duplicates, and known problematic sites
+   * @param {Array} urls - List of URLs to sanitize
+   * @param {Object} options - Sanitization options
+   * @returns {Array} Validated and cleaned URLs
+   */
+  async sanitizeURLsBeforeScraping(urls, options = {}) {
+    console.log('\n🔍 Starting URL pre-filtering before scraping...\n');
+
+    try {
+      const cleanURLs = await urlSanitizer.sanitizeDataset(urls, {
+        skipDNS: options.skipDNS || false,
+        skipHTTP: options.skipHTTP || false,
+        deduplicateByDomain: options.deduplicateByDomain !== false, // true by default
+        parallel: options.parallel || 5,
+      });
+
+      console.log(`\n✅ URL sanitization complete!`);
+      console.log(`📊 Starting with: ${urls.length} URLs`);
+      console.log(`✅ After sanitization: ${cleanURLs.length} URLs ready for scraping`);
+      console.log(`💾 Skipped: ${urls.length - cleanURLs.length} URLs\n`);
+
+      return cleanURLs;
+    } catch (error) {
+      console.error('❌ URL sanitization failed:', error.message);
+      console.log('⚠️  Proceeding with original URLs (no pre-filtering)');
+      return urls; // Fallback to original if sanitization fails
+    }
+  }
+
+  /**
+   * Get current list of problematic domains
+   * @returns {Array} List of domains that crash browsers
+   */
+  getProblematicDomains() {
+    return urlSanitizer.getProblematicDomains();
+  }
 
   /**
    * WRAPPER METHOD: Main function to scrape Optimizely experiments from a URL
@@ -1008,6 +1048,7 @@ class OptimizelyScraperService {
   /**
    * INTERNAL METHOD: Internal page scraping logic (wrapped by timeout)
    * Now accepts browser from pool instead of launching new one
+   * IMPROVED: Better error handling to prevent browser getting stuck
    * @param {string} url - URL to scrape
    * @param {Object} browserInstance - Browser instance from pool (optional, uses pool if not provided)
    * @returns {Object} Experiment data including cookie info
@@ -1017,6 +1058,7 @@ class OptimizelyScraperService {
     let navigationDetected = false; // Declare at function level
     let browser = browserInstance; // Use provided browser or acquire from pool
     let shouldReleaseBrowser = false; // Track if we acquired browser from pool
+    let browserRestartTriggered = false; // CRITICAL: Prevent double-release on restart
 
     try {
       // If no browser provided, acquire from pool
@@ -1027,10 +1069,50 @@ class OptimizelyScraperService {
       }
 
       // Create and configure page
-      page = await this.createPage(browser);
+      try {
+        page = await this.createPage(browser);
+        // CRITICAL: Increment page count for resource tracking
+        // This helps detect when browser memory accumulation requires restart
+        if (shouldReleaseBrowser) {
+          const pageCount = browserPool.incrementPageCount(browser);
+          console.log(`📄 Browser page count: ${pageCount}`);
+        }
+      } catch (pageError) {
+        console.error(`❌ Failed to create page for ${url}: ${pageError.message}`);
+
+        // CRITICAL: If it's a crash/connection error, add to problematic domains
+        if (pageError.message.includes('Connection closed') ||
+            pageError.message.includes('Target closed') ||
+            pageError.message.includes('Protocol error')) {
+          const domain = new URL(url).hostname;
+          urlSanitizer.addProblematicDomain(domain);
+          console.error(`🚨 Browser crash detected on ${domain} - added to blacklist`);
+        }
+
+        // If page creation fails, handle it appropriately
+        if (shouldReleaseBrowser && browser) {
+          // CRITICAL: If it's a timeout, force restart the browser (don't return to pool)
+          // Timeout means browser is unresponsive, returning it will just cause more timeouts
+          if (pageError.message.includes('timeout')) {
+            console.log(`⚠️  Page creation timeout detected, force-restarting browser instead of returning to pool...`);
+            await browserPool.forceRestartBrowser(browser);
+            // CRITICAL FIX: Set flag to prevent double-release in finally block
+            browserRestartTriggered = true;
+            shouldReleaseBrowser = false; // Don't release in finally since we're restarting
+          } else {
+            // For other errors, safely return to pool
+            browserPool.releaseBrowser(browser);
+            console.log(`♻️  Released browser back to pool (after page creation failure)`);
+            // Mark as released so finally block doesn't double-release
+            shouldReleaseBrowser = false;
+          }
+        }
+        throw pageError;
+      }
 
       // Navigate to URL
       await this.navigateToPage(page, url);
+
       // captcha check
       const captchaCheck = await this.detectCaptcha(page);
       if (captchaCheck.detected) {
@@ -1063,22 +1145,36 @@ class OptimizelyScraperService {
       return experimentData;
 
     } catch (error) {
-      console.error('Error scraping experiments from page:', error);
+      console.error(`❌ Error scraping experiments from page (${url}):`, error.message);
       throw error;
     } finally {
-      // Clean up page
+      // Clean up page - CRITICAL: use timeout to prevent hanging
       if (page) {
         try {
-          await page.close();
+          // Force page close with timeout to prevent blocking
+          await Promise.race([
+            page.close(),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Page close timeout')), 5000)
+            )
+          ]);
         } catch (e) {
-          console.warn('Error closing page:', e.message);
+          console.warn(`⚠️  Error closing page: ${e.message}`);
+          // Even if close fails, try to release browser
         }
       }
 
-      // Release browser back to pool if we acquired it
-      if (shouldReleaseBrowser && browser) {
-        browserPool.releaseBrowser(browser);
-        console.log(`♻️  Released browser back to pool`);
+      // CRITICAL FIX: Only release if we haven't already handled it
+      // - If browserRestartTriggered = true: restart already took ownership, don't double-release
+      // - If shouldReleaseBrowser = false: we already released in catch block, don't double-release
+      // This prevents dead browsers from accumulating in the pool
+      if (shouldReleaseBrowser && browser && !browserRestartTriggered) {
+        try {
+          browserPool.releaseBrowser(browser);
+          console.log(`♻️  Released browser back to pool`);
+        } catch (releaseError) {
+          console.error(`❌ Error releasing browser: ${releaseError.message}`);
+        }
       }
     }
   }
@@ -1410,6 +1506,11 @@ class OptimizelyScraperService {
           page = await this.createPage(browser);
           pages.push(page);
 
+          // Track page count for this browser
+          // This helps detect resource accumulation across batches
+          const pageCount = browserPool.incrementPageCount(browser);
+          console.log(`📄 Browser page count: ${pageCount}`);
+
           // Navigate and scrape
           await this.navigateToPage(page, url);
           const cookieType = await this.handleCookieConsent(page);
@@ -1628,6 +1729,21 @@ class OptimizelyScraperService {
       return results.failedWebsites;
     } catch (error) {
       console.error('Error getting failed websites:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get complete Optimizely document for a dataset
+   * @param {string} datasetId - Dataset ID
+   * @returns {Object} Complete Optimizely document
+   */
+  async getOptimizelyDocuments(datasetId) {
+    try {
+      const results = await OptimizelyResult.findOne({ datasetId: datasetId });
+      return results;
+    } catch (error) {
+      console.error('Error getting Optimizely documents:', error);
       throw error;
     }
   }

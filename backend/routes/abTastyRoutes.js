@@ -13,7 +13,8 @@ const {
   getWebsitesWithoutOptimizely,
   getFailedWebsites,
   getAbTastyDocuments,
-  scrapeFromDatasetBrowserLess
+  scrapeFromDatasetBrowserLess,
+  checkAbTastyStatus
 } = require('../controller/abTastyController');
 
 /**
@@ -25,6 +26,17 @@ const {
  * @features Enhanced cookie consent handling, better Optimizely detection
  */
 router.get('/scrape', scrapeExperiments);
+
+/**
+ * @route   GET /api/abtasty/check
+ * @desc    Quick validation check for domain, captcha, and ABTasty presence
+ * @access  Public
+ * @query   url - Website URL to check
+ * @example GET /api/abtasty/check?url=https://example.com
+ * @returns {object} Domain validity, captcha detection, ABTasty presence, cookie consent type
+ * @features Lightweight endpoint for validation without full scraping
+ */
+router.get('/check', checkAbTastyStatus);
 
 /**
  * @route   POST /api/optimizely/batch-scrape

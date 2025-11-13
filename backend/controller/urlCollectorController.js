@@ -3,20 +3,7 @@ const urlCategorizationService = require('../services/urlCategorizationService')
 const playwrightCrawlerService = require('../services/playwrightCrawlerService');
 const urlCollectionOrchestrator = require('../services/urlCollectionOrchestrator');
 const urlDynamicCategorizationService = require('../services/urlDynamicCategorizationService');
-
-/**
- * Helper function to validate URL format
- * @param {string} url - URL to validate
- * @returns {boolean} True if valid URL
- */
-function isValidUrl(url) {
-    try {
-        const urlObj = new URL(url);
-        return ['http:', 'https:'].includes(urlObj.protocol);
-    } catch (error) {
-        return false;
-    }
-}
+const { isValidUrl, sanitizeUrl, validateAndSanitize } = require('../utils/urlValidator');
 
 /**
  * POST /api/url-collector/collect

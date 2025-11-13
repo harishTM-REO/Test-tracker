@@ -1,20 +1,7 @@
 const pageCrawlerService = require('../services/pageCrawlerService');
 const Dataset = require('../models/Dataset');
 const CrawledPages = require('../models/CrawledPages');
-
-/**
- * Helper function to validate URL format
- * @param {string} url - URL to validate
- * @returns {boolean} True if valid URL
- */
-function isValidUrl(url) {
-    try {
-        const urlObj = new URL(url);
-        return ['http:', 'https:'].includes(urlObj.protocol);
-    } catch (error) {
-        return false;
-    }
-}
+const { isValidUrl, sanitizeUrl, validateAndSanitize } = require('../utils/urlValidator');
 
 /**
  * POST /api/crawler/crawl-dataset
