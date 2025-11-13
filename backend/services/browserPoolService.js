@@ -541,6 +541,51 @@ class BrowserPoolService {
       }
     }
   }
+
+  /**
+   * Force immediate restart of a specific browser
+   * Called when a browser becomes unresponsive (page creation timeout)
+   * CRITICAL: Prevents stuck browsers from being returned to pool
+   */
+  async forceRestartBrowser(browser) {
+    try {
+      const browserIndex = this.browsers.indexOf(browser);
+      if (browserIndex === -1) {
+        console.warn(`⚠️  Browser not found in pool, cannot restart`);
+        return;
+      }
+
+      console.log(`🔄 Force restarting browser ${browserIndex + 1} due to timeout...`);
+
+      // Remove from busy set
+      this.busyBrowsers.delete(browser);
+      this.browserAcquisitionTimes.delete(browser);
+
+      // Close the old browser
+      try {
+        await Promise.race([
+          browser.close(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Close timeout')), 5000)
+          )
+        ]);
+      } catch (closeError) {
+        console.warn(`⚠️  Could not gracefully close browser: ${closeError.message}`);
+      }
+
+      // Launch new browser
+      const newBrowser = await this.launchBrowser(browserIndex + 1);
+      this.browsers[browserIndex] = newBrowser;
+      this.pageCountPerBrowser.delete(browser);
+      this.pageCountPerBrowser.set(newBrowser, 0);
+      this.availableBrowsers.push(newBrowser);
+      this.stats.totalBrowserRestarts++;
+
+      console.log(`✅ Browser ${browserIndex + 1} force-restarted successfully after timeout`);
+    } catch (error) {
+      console.error(`❌ Failed to force-restart browser: ${error.message}`);
+    }
+  }
 }
 
 // Create and export singleton instance

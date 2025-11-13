@@ -897,10 +897,18 @@ async extractAbTastySync(page) {
         }
       } catch (pageError) {
         console.error(`❌ Failed to create page for ${url}: ${pageError.message}`);
-        // If page creation fails, still release the browser
+        // If page creation fails, handle it appropriately
         if (shouldReleaseBrowser && browser) {
-          browserPool.releaseBrowser(browser);
-          console.log(`♻️  Released browser back to pool (after page creation failure)`);
+          // CRITICAL: If it's a timeout, force restart the browser (don't return to pool)
+          // Timeout means browser is unresponsive, returning it will just cause more timeouts
+          if (pageError.message.includes('timeout')) {
+            console.log(`⚠️  Page creation timeout detected, force-restarting browser instead of returning to pool...`);
+            await browserPool.forceRestartBrowser(browser);
+          } else {
+            // For other errors, safely return to pool
+            browserPool.releaseBrowser(browser);
+            console.log(`♻️  Released browser back to pool (after page creation failure)`);
+          }
         }
         throw pageError;
       }
