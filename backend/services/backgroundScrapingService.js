@@ -321,28 +321,60 @@ class BackgroundScrapingService {
 
       progressCallback(85, { message: 'Scraping completed, saving results...' });
 
-      // Update heartbeat before save (save operation can be long)
-      try {
-        const datasetBeforeSave = await Dataset.findById(datasetId);
-        if (datasetBeforeSave) {
-          datasetBeforeSave.scrapingLastUpdate = new Date();
-          await datasetBeforeSave.save();
-          console.log('✅ Heartbeat updated before saving results');
-        }
-      } catch (heartbeatError) {
-        console.warn('⚠️  Failed to update heartbeat before save:', heartbeatError.message);
+      // ========== STREAMING SAVE TO DATABASE ==========
+      console.log(`\n💾 Saving ${allResults.length} results to database (streaming every 500 URLs)...`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      const toolType = options.toolType || 'AbTasty';
+      let scraperService;
+
+      // Get appropriate service based on tool type
+      if (toolType === 'Optimizely') {
+        scraperService = require('./optimizelyScraperService');
+      } else if (toolType === 'AdobeTarget') {
+        scraperService = require('./adobeScraperService');
+      } else {
+        scraperService = require('./abTastyScraperService');
       }
 
-      // ========== SAVE TO DATABASE ==========
-      console.log(`💾 Saving ${allResults.length} results to database...`);
+      const STREAM_BATCH_SIZE = 500;
 
-      const AbTastyScraperService = require('./abTastyScraperService');
-      const savedResults = await AbTastyScraperService.saveBatchResults(
-        datasetId,
-        datasetName,
-        allResults,
-        startTime
-      );
+      // Save results in batches of 500 URLs
+      let savedBatchCount = 0;
+      for (let i = 0; i < allResults.length; i += STREAM_BATCH_SIZE) {
+        const streamBatch = allResults.slice(i, i + STREAM_BATCH_SIZE);
+
+        // Update heartbeat before each save
+        try {
+          const dataset = await Dataset.findById(datasetId);
+          if (dataset) {
+            dataset.scrapingLastUpdate = new Date();
+            await dataset.save();
+          }
+        } catch (heartbeatError) {
+          console.warn('⚠️  Failed to update heartbeat:', heartbeatError.message);
+        }
+
+        // Stream save this batch
+        await scraperService.saveResultsStreamingBatch(
+          datasetId,
+          datasetName,
+          streamBatch,
+          startTime,
+          urls.length  // Total URLs being processed
+        );
+
+        savedBatchCount++;
+        const progressPercent = 85 + Math.floor((savedBatchCount / Math.ceil(allResults.length / STREAM_BATCH_SIZE)) * 10);
+        progressCallback(progressPercent, {
+          message: `Saving: ${Math.min((i + STREAM_BATCH_SIZE), allResults.length)}/${allResults.length} results`
+        });
+      }
+
+      // Finalize: update all batches with final totalBatches count
+      const totalBatches = await scraperService.finalizeStreamingSave(datasetId);
+
+      console.log(`\n✅ All results saved in ${totalBatches} batches (${STREAM_BATCH_SIZE} URLs per batch)`);
 
       // Update heartbeat after save
       try {
@@ -350,7 +382,7 @@ class BackgroundScrapingService {
         if (datasetAfterSave) {
           datasetAfterSave.scrapingLastUpdate = new Date();
           await datasetAfterSave.save();
-          console.log('✅ Heartbeat updated after saving results');
+          console.log('✅ Heartbeat updated after saving all results');
         }
       } catch (heartbeatError) {
         console.warn('⚠️  Failed to update heartbeat after save:', heartbeatError.message);

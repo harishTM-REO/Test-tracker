@@ -1701,6 +1701,144 @@ class OptimizelyScraperService {
   }
 
   /**
+   * Save results incrementally (streaming) - for long-running jobs
+   * @param {string} datasetId - Dataset ID
+   * @param {string} datasetName - Dataset name
+   * @param {Array} results - Batch of results to save
+   * @param {Date} startTime - Scraping start time
+   * @param {number} totalUrls - Total URLs being scraped
+   * @returns {Object} Save result with batch number
+   */
+  async saveResultsStreamingBatch(datasetId, datasetName, results, startTime, totalUrls) {
+    try {
+      const endTime = new Date();
+      const duration = `${endTime - startTime}ms`;
+
+      const websiteResults = [];
+      const websitesWithoutOptimizely = [];
+      const failedWebsites = [];
+      let successfulScrapes = 0;
+      let optimizelyDetectedCount = 0;
+      let totalExperiments = 0;
+
+      results.forEach(result => {
+        if (result.success && result.data) {
+          successfulScrapes++;
+          const domain = this.extractDomain(result.url);
+
+          if (result.data.optimizely?.detected) {
+            const websiteResult = {
+              url: result.url,
+              domain: domain,
+              success: true,
+              optimizelyDetected: true,
+              experiments: result.data.optimizely.experiments || [],
+              experimentCount: result.data.optimizely.experimentCount || 0,
+              activeCount: result.data.optimizely.activeCount || 0,
+              cookieType: result.data.optimizely.cookieType || 'unknown',
+              error: result.data.optimizely.error,
+              scrapedAt: new Date()
+            };
+
+            optimizelyDetectedCount++;
+            totalExperiments += websiteResult.experimentCount;
+            websiteResults.push(websiteResult);
+          } else {
+            const websiteWithoutOptimizely = {
+              url: result.url,
+              domain: domain,
+              cookieType: result.data.optimizely?.cookieType || 'unknown',
+              scrapedAt: new Date()
+            };
+
+            websitesWithoutOptimizely.push(websiteWithoutOptimizely);
+          }
+        } else {
+          const domain = this.extractDomain(result.url);
+          failedWebsites.push({
+            url: result.url,
+            domain: domain,
+            error: result.error || 'Unknown error',
+            failedAt: new Date()
+          });
+        }
+      });
+
+      const failedScrapes = results.length - successfulScrapes;
+      const successRate = `${((successfulScrapes / results.length) * 100).toFixed(1)}%`;
+      const optimizelyRate = `${((optimizelyDetectedCount / results.length) * 100).toFixed(1)}%`;
+
+      // Get next batch number
+      const lastBatch = await OptimizelyResult.findOne({ datasetId: datasetId })
+        .sort({ batchNumber: -1 })
+        .select('batchNumber')
+        .lean();
+
+      const batchNumber = (lastBatch?.batchNumber || 0) + 1;
+
+      // Save this batch
+      const optimizelyResult = await OptimizelyResult.findOneAndUpdate(
+        { datasetId: datasetId, batchNumber: batchNumber },
+        {
+          datasetId: datasetId,
+          datasetName: datasetName,
+          batchNumber: batchNumber,
+          totalBatches: 999,
+          totalUrls: totalUrls,
+          successfulScrapes: successfulScrapes,
+          failedScrapes: failedScrapes,
+          optimizelyDetectedCount: optimizelyDetectedCount,
+          totalExperiments: totalExperiments,
+          websiteResults: websiteResults,
+          websitesWithoutOptimizely: websitesWithoutOptimizely,
+          failedWebsites: failedWebsites,
+          scrapingStats: {
+            startedAt: startTime,
+            completedAt: endTime,
+            duration: duration,
+            optimizelyRate: optimizelyRate,
+            successRate: successRate
+          }
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true
+        }
+      );
+
+      console.log(`  ✅ Streamed batch ${batchNumber} (${websiteResults.length} with Optimizely, ${websitesWithoutOptimizely.length} without, ${failedWebsites.length} failed)`);
+
+      return { success: true, batchNumber, websiteCount: websiteResults.length };
+    } catch (error) {
+      console.error('Error saving streaming batch results:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Finalize batch numbering - update all batches with final totalBatches count
+   * @param {string} datasetId - Dataset ID
+   * @returns {number} Total batches saved
+   */
+  async finalizeStreamingSave(datasetId) {
+    try {
+      const totalBatches = await OptimizelyResult.countDocuments({ datasetId: datasetId });
+
+      await OptimizelyResult.updateMany(
+        { datasetId: datasetId },
+        { totalBatches: totalBatches }
+      );
+
+      console.log(`✅ Finalized: Updated all ${totalBatches} batches with final count`);
+      return totalBatches;
+    } catch (error) {
+      console.error('Error finalizing streaming save:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get scraping results for a dataset
    * @param {string} datasetId - Dataset ID
    * @returns {Object} OptimizelyResult document

@@ -1586,6 +1586,148 @@ async extractAbTastySync(page) {
   }
 
   /**
+   * Save results incrementally (streaming) - for long-running jobs
+   * Saves every batch of results without waiting for all processing to complete
+   * @param {string} datasetId - Dataset ID
+   * @param {string} datasetName - Dataset name
+   * @param {Array} results - Batch of results to save
+   * @param {Date} startTime - Scraping start time
+   * @param {number} totalUrls - Total URLs being scraped (for stats)
+   * @returns {Object} Save result with batch number and status
+   */
+  async saveResultsStreamingBatch(datasetId, datasetName, results, startTime, totalUrls) {
+    try {
+      const endTime = new Date();
+      const duration = `${endTime - startTime}ms`;
+
+      // Process results
+      const websiteResults = [];
+      const websitesWithoutAbTasty = [];
+      const failedWebsites = [];
+      let successfulScrapes = 0;
+      let abTastyDetectedCount = 0;
+      let totalExperiments = 0;
+
+      results.forEach(result => {
+        if (result.success && result.data) {
+          successfulScrapes++;
+          const domain = this.extractDomain(result.url);
+
+          if (result.data.abTasty?.detected) {
+            const websiteResult = {
+              url: result.url,
+              domain: domain,
+              success: true,
+              abTastyDetected: true,
+              experiments: result.data.abTasty?.experiments || [],
+              experimentCount: result.data.abTasty?.experimentCount || 0,
+              cookieType: result.data.abTasty?.cookieType || 'unknown',
+              error: result.data.abTasty?.error,
+              scrapedAt: new Date()
+            };
+
+            abTastyDetectedCount++;
+            totalExperiments += websiteResult.experimentCount;
+            websiteResults.push(websiteResult);
+          } else {
+            const websiteWithoutAbTasty = {
+              url: result.url,
+              domain: domain,
+              cookieType: result.data.abTasty?.cookieType || 'unknown',
+              scrapedAt: new Date()
+            };
+
+            websitesWithoutAbTasty.push(websiteWithoutAbTasty);
+          }
+        } else {
+          const domain = this.extractDomain(result.url);
+          failedWebsites.push({
+            url: result.url,
+            domain: domain,
+            error: result.error || 'Unknown error',
+            failedAt: new Date()
+          });
+        }
+      });
+
+      const failedScrapes = results.length - successfulScrapes;
+      const successRate = `${((successfulScrapes / results.length) * 100).toFixed(1)}%`;
+      const abTastyRate = `${((abTastyDetectedCount / results.length) * 100).toFixed(1)}%`;
+
+      // Get next batch number
+      const lastBatch = await AbTastyResult.findOne({ datasetId: datasetId })
+        .sort({ batchNumber: -1 })
+        .select('batchNumber')
+        .lean();
+
+      const batchNumber = (lastBatch?.batchNumber || 0) + 1;
+
+      // Save this batch
+      const abTastyResult = await AbTastyResult.findOneAndUpdate(
+        { datasetId: datasetId, batchNumber: batchNumber },
+        {
+          datasetId: datasetId,
+          datasetName: datasetName,
+          batchNumber: batchNumber,
+          totalBatches: 999,  // ← Placeholder, will be updated at end
+          totalUrls: totalUrls,  // Total URLs being processed
+          successfulScrapes: successfulScrapes,
+          failedScrapes: failedScrapes,
+          abTastyDetectedCount: abTastyDetectedCount,
+          totalExperiments: totalExperiments,
+          websiteResults: websiteResults,
+          websitesWithoutAbTasty: websitesWithoutAbTasty,
+          failedWebsites: failedWebsites,
+          scrapingStats: {
+            startedAt: startTime,
+            completedAt: endTime,
+            duration: duration,
+            abTastyRate: abTastyRate,
+            successRate: successRate
+          }
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true
+        }
+      );
+
+      console.log(`  ✅ Streamed batch ${batchNumber} (${websiteResults.length} with AbTasty, ${websitesWithoutAbTasty.length} without, ${failedWebsites.length} failed)`);
+
+      return { success: true, batchNumber, websiteCount: websiteResults.length };
+    } catch (error) {
+      console.error('Error saving streaming batch results:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Finalize batch numbering - update all batches with final totalBatches count
+   * Call this after all streaming saves are complete
+   * @param {string} datasetId - Dataset ID
+   * @returns {number} Total batches saved
+   */
+  async finalizeStreamingSave(datasetId) {
+    try {
+      // Count total batches
+      const totalBatches = await AbTastyResult.countDocuments({ datasetId: datasetId });
+
+      // Update all batches with final totalBatches count
+      await AbTastyResult.updateMany(
+        { datasetId: datasetId },
+        { totalBatches: totalBatches }
+      );
+
+      console.log(`✅ Finalized: Updated all ${totalBatches} batches with final count`);
+      return totalBatches;
+    } catch (error) {
+      console.error('Error finalizing streaming save:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get scraping results for a dataset
    * @param {string} datasetId - Dataset ID
    * @returns {Object} AbTastyResult document

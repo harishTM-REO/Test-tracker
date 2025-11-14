@@ -2481,6 +2481,153 @@ class AdobeScraperService {
     }
 
     /**
+     * Save results incrementally (streaming) - for long-running jobs
+     * @param {string} datasetId - Dataset ID
+     * @param {string} datasetName - Dataset name
+     * @param {Array} results - Batch of results to save
+     * @param {Date} startTime - Scraping start time
+     * @param {number} totalUrls - Total URLs being scraped
+     * @returns {Object} Save result with batch number
+     */
+    async saveResultsStreamingBatch(datasetId, datasetName, results, startTime, totalUrls) {
+        const AdobeResult = require('../models/AdobeResult');
+
+        try {
+            const endTime = new Date();
+            const duration = `${endTime - startTime}ms`;
+
+            const websiteResults = [];
+            const websitesWithoutAdobeTarget = [];
+            const failedWebsites = [];
+            let successfulScrapes = 0;
+            let adobeTargetDetectedCount = 0;
+            let totalExperiments = 0;
+
+            results.forEach(result => {
+                if (result.success && result.data) {
+                    successfulScrapes++;
+                    const domain = this.extractDomain(result.url);
+
+                    if (result.data.adobeTarget?.detected) {
+                        const websiteResult = {
+                            url: result.url,
+                            domain: domain,
+                            success: true,
+                            adobeTargetDetected: true,
+                            experiments: result.data.adobeTarget.experiments || [],
+                            experimentCount: result.data.adobeTarget.experimentCount || 0,
+                            activeCount: result.data.adobeTarget.activeCount || 0,
+                            cookieType: result.data.adobeTarget.cookieType || 'unknown',
+                            error: result.data.adobeTarget.error,
+                            scrapedAt: new Date(),
+                            adobeTargetVersion: result.data.adobeTarget.version,
+                            adobeTargetObject: result.data.adobeTarget.adobeTargetObject,
+                            activityNames: result.data.adobeTarget.activityNames || [],
+                            activityIds: result.data.adobeTarget.activityIds || [],
+                            mboxData: result.data.adobeTarget.mboxData
+                        };
+
+                        adobeTargetDetectedCount++;
+                        totalExperiments += websiteResult.experimentCount;
+                        websiteResults.push(websiteResult);
+                    } else {
+                        const websiteWithoutAdobeTarget = {
+                            url: result.url,
+                            domain: domain,
+                            cookieType: result.data.adobeTarget?.cookieType || 'unknown',
+                            scrapedAt: new Date()
+                        };
+
+                        websitesWithoutAdobeTarget.push(websiteWithoutAdobeTarget);
+                    }
+                } else {
+                    const domain = this.extractDomain(result.url);
+                    failedWebsites.push({
+                        url: result.url,
+                        domain: domain,
+                        error: result.error || 'Unknown error',
+                        failedAt: new Date()
+                    });
+                }
+            });
+
+            const failedScrapes = results.length - successfulScrapes;
+            const successRate = `${((successfulScrapes / results.length) * 100).toFixed(1)}%`;
+            const adobeTargetRate = `${((adobeTargetDetectedCount / results.length) * 100).toFixed(1)}%`;
+
+            // Get next batch number
+            const lastBatch = await AdobeResult.findOne({ datasetId: datasetId })
+                .sort({ batchNumber: -1 })
+                .select('batchNumber')
+                .lean();
+
+            const batchNumber = (lastBatch?.batchNumber || 0) + 1;
+
+            // Save this batch
+            const adobeResult = await AdobeResult.findOneAndUpdate(
+                { datasetId: datasetId, batchNumber: batchNumber },
+                {
+                    datasetId: datasetId,
+                    datasetName: datasetName,
+                    batchNumber: batchNumber,
+                    totalBatches: 999,
+                    totalUrls: totalUrls,
+                    successfulScrapes: successfulScrapes,
+                    failedScrapes: failedScrapes,
+                    adobeTargetDetectedCount: adobeTargetDetectedCount,
+                    totalExperiments: totalExperiments,
+                    websiteResults: websiteResults,
+                    websitesWithoutAdobeTarget: websitesWithoutAdobeTarget,
+                    failedWebsites: failedWebsites,
+                    scrapingStats: {
+                        startedAt: startTime,
+                        completedAt: endTime,
+                        duration: duration,
+                        successRate: successRate,
+                        adobeTargetRate: adobeTargetRate
+                    }
+                },
+                {
+                    upsert: true,
+                    new: true,
+                    setDefaultsOnInsert: true
+                }
+            );
+
+            console.log(`  ✅ Streamed batch ${batchNumber} (${websiteResults.length} with Adobe Target, ${websitesWithoutAdobeTarget.length} without, ${failedWebsites.length} failed)`);
+
+            return { success: true, batchNumber, websiteCount: websiteResults.length };
+        } catch (error) {
+            console.error('Error saving Adobe Target streaming batch:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Finalize batch numbering - update all batches with final totalBatches count
+     * @param {string} datasetId - Dataset ID
+     * @returns {number} Total batches saved
+     */
+    async finalizeStreamingSave(datasetId) {
+        const AdobeResult = require('../models/AdobeResult');
+
+        try {
+            const totalBatches = await AdobeResult.countDocuments({ datasetId: datasetId });
+
+            await AdobeResult.updateMany(
+                { datasetId: datasetId },
+                { totalBatches: totalBatches }
+            );
+
+            console.log(`✅ Finalized: Updated all ${totalBatches} batches with final count`);
+            return totalBatches;
+        } catch (error) {
+            console.error('Error finalizing Adobe Target streaming save:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Helper method to extract domain from URL
      */
     extractDomain(url) {
