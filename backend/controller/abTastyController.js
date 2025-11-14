@@ -208,9 +208,10 @@ async function scrapeFromDataset(req, res) {
     }
 
     // Create background job using job queue
+    // IMPORTANT: datasetId and datasetName are required for streaming saves
     const jobQueue = require('../services/jobQueue');
     const jobId = jobQueue.createJob('dataset-scraping', {
-      datasetId,
+      datasetId: datasetId,
       datasetName: dataset.name,
       urls,
       options
@@ -572,7 +573,7 @@ async function getFailedWebsites(req, res) {
 async function getAbTastyDocuments(req, res) {
   try {
     const { datasetId } = req.params;
-    const { summary } = req.query;
+    const { summary, batch, batches, all } = req.query;
 
     if (!datasetId) {
       return res.status(400).json({
@@ -588,7 +589,21 @@ async function getAbTastyDocuments(req, res) {
       });
     }
 
-    const documents = await AbTastyScraperService.getAbTastyDocuments(datasetId);
+    // Determine which batches to fetch
+    let batchesToFetch = null;
+    if (batch) {
+      // Single batch: ?batch=5
+      batchesToFetch = [parseInt(batch)];
+    } else if (batches) {
+      // Multiple batches: ?batches=1,5,10
+      batchesToFetch = batches.split(',').map(b => parseInt(b.trim())).filter(b => !isNaN(b));
+    } else if (all === 'true') {
+      // All batches: ?all=true
+      // Pass null to fetch all batches without filtering
+      batchesToFetch = null;
+    }
+
+    const documents = await AbTastyScraperService.getAbTastyDocuments(datasetId, batchesToFetch);
 
     if (!documents) {
       return res.status(404).json({
@@ -599,24 +614,29 @@ async function getAbTastyDocuments(req, res) {
 
     // If summary view is requested
     if (summary === 'true') {
-      const summaryData = {
-        datasetId: documents.datasetId,
-        datasetName: documents.datasetName,
-        totalUrls: documents.totalUrls,
-        successfulScrapes: documents.successfulScrapes,
-        failedScrapes: documents.failedScrapes,
-        totalExperiments: documents.totalExperiments,
-        abTastyDetectedCount: documents.optimizelyDetectedCount,
-        stats: documents.scrapingStats,
-        websiteResultsCount: documents.websiteResults.length,
-        websitesWithoutAbTastyCount: documents.websitesWithoutAbTasty.length,
-        failedWebsitesCount: documents.failedWebsites.length
-      };
+      // Handle both single document and array of documents
+      const isArray = Array.isArray(documents);
+      const docsArray = isArray ? documents : [documents];
+
+      const summaryData = docsArray.map(doc => ({
+        batchNumber: doc.batchNumber,
+        datasetId: doc.datasetId,
+        datasetName: doc.datasetName,
+        totalUrls: doc.totalUrls,
+        successfulScrapes: doc.successfulScrapes,
+        failedScrapes: doc.failedScrapes,
+        totalExperiments: doc.totalExperiments,
+        abTastyDetectedCount: doc.optimizelyDetectedCount,
+        stats: doc.scrapingStats,
+        websiteResultsCount: doc.websiteResults?.length || 0,
+        websitesWithoutAbTastyCount: doc.websitesWithoutAbTasty?.length || 0,
+        failedWebsitesCount: doc.failedWebsites?.length || 0
+      }));
 
       return res.status(200).json({
         success: true,
         message: 'ABTasty document summary retrieved successfully',
-        data: summaryData
+        data: isArray ? summaryData : summaryData[0]
       });
     }
 

@@ -1302,10 +1302,12 @@ async extractAbTastySync(page) {
   }
 
   /**
-   * Batch scrape multiple URLs with optimized resource management
+   * Batch scrape multiple URLs with streaming saves
+   * STREAMING APPROACH: Save every chunk immediately after scraping (100-150 URLs per save)
+   * This prevents 16MB MongoDB document size limit and allows failure recovery
    * @param {Array} urls - Array of URLs to scrape
-   * @param {Object} options - Scraping options
-   * @returns {Array} Array of results
+   * @param {Object} options - Scraping options including datasetId and datasetName
+   * @returns {Object} Scraping summary with total chunks saved
    */
   async batchScrapeUrls(urls, options = {}) {
     const jobQueue = require('./jobQueue');
@@ -1316,8 +1318,16 @@ async extractAbTastySync(page) {
       delay = adaptiveOptions.delay || parseInt(process.env.BATCH_DELAY) || 2000,
       batchSize = adaptiveOptions.concurrent,
       maxTabs = adaptiveOptions.maxTabs,
-      jobId = `scrape-${Date.now()}`
+      jobId = `scrape-${Date.now()}`,
+      datasetId = null,
+      datasetName = 'Dataset'
     } = options;
+
+    if (!datasetId) {
+      throw new Error('datasetId is required for streaming saves');
+    }
+
+    const startTime = new Date();
 
     // Initialize checkpoint service if enabled
     const checkpoint = CHECKPOINT_ENABLED ? new CheckpointService(jobId, CHECKPOINT_DIR) : null;
@@ -1328,9 +1338,14 @@ async extractAbTastySync(page) {
       urlsToProcess = isResuming ? checkpoint.getUrlsToProcess(urls) : urls;
     }
 
-    console.log(`🎯 Using adaptive settings for ${adaptiveOptions.loadLevel} load level`);
+    console.log(`\n🎯 Using adaptive settings for ${adaptiveOptions.loadLevel} load level`);
+    console.log(`🚀 STREAMING SAVE MODE: Saving every chunk immediately (prevents 16MB limit)`);
 
     const results = [];
+    const saveTasks = []; // Track all save operations
+    let totalChunksSaved = 0;
+    let totalChunksFailed = 0;
+
     console.log(`Starting optimized batch scrape of ${urlsToProcess.length} URLs`);
     console.log(`Config: ${concurrent} concurrent, ${batchSize} batch size, ${maxTabs} max tabs per browser`);
 
@@ -1339,8 +1354,9 @@ async extractAbTastySync(page) {
       const chunk = urlsToProcess.slice(i, i + batchSize);
       const chunkNumber = Math.floor(i / batchSize) + 1;
       const totalChunks = Math.ceil(urlsToProcess.length / batchSize);
-      console.log(`Processing chunk ${chunkNumber}/${totalChunks}: URLs ${i + 1}-${Math.min(i + batchSize, urlsToProcess.length)}`);
+      console.log(`\n📥 Processing chunk ${chunkNumber}/${totalChunks}: URLs ${i + 1}-${Math.min(i + batchSize, urlsToProcess.length)}`);
 
+      // SCRAPE THIS CHUNK
       const chunkResults = await this.processUrlChunk(chunk, { concurrent, maxTabs });
       results.push(...chunkResults);
 
@@ -1362,12 +1378,68 @@ async extractAbTastySync(page) {
         }
       }
 
-      // Add delay between chunks
+      // ========== CRITICAL: SAVE THIS CHUNK IMMEDIATELY ==========
+      // This prevents MongoDB 16MB document size limit
+      // Saves happen in BACKGROUND - doesn't block next chunk scraping
+      const saveTask = (async () => {
+        try {
+          console.log(`💾 Chunk ${chunkNumber}: Saving ${chunkResults.length} results to database...`);
+
+          const saveResult = await this.saveResultsStreamingBatch(
+            datasetId,
+            datasetName,
+            chunkResults,
+            startTime,
+            urlsToProcess.length
+          );
+
+          totalChunksSaved++;
+          console.log(`✅ Chunk ${chunkNumber}: Saved batch #${saveResult.batchNumber} (${saveResult.websiteCount} websites)`);
+          return { success: true, chunkNumber, batchNumber: saveResult.batchNumber };
+        } catch (saveError) {
+          totalChunksFailed++;
+          console.error(`❌ Chunk ${chunkNumber}: Failed to save - ${saveError.message}`);
+          console.error('   ⚠️  Results for this chunk are lost! Checkpoint will help on retry.');
+          return { success: false, chunkNumber, error: saveError.message };
+        }
+      })();
+
+      // Track this save task (don't await - let it run in background)
+      saveTasks.push(saveTask);
+
+      // Add delay between chunks for resource recovery
       const batchDelay = parseInt(process.env.BATCH_DELAY) || 2000;
       if (i + batchSize < urlsToProcess.length && batchDelay > 0) {
-        console.log(`⏱️  Waiting ${batchDelay}ms before next chunk for resource recovery...`);
+        console.log(`⏱️  Waiting ${batchDelay}ms before next chunk...`);
         await new Promise(resolve => setTimeout(resolve, batchDelay));
       }
+    }
+
+    // ========== WAIT FOR ALL SAVES TO COMPLETE ==========
+    console.log(`\n⏳ Waiting for all ${saveTasks.length} chunks to save...`);
+    const saveResults = await Promise.allSettled(saveTasks);
+
+    // Check save results
+    let successfulSaves = 0;
+    const failedChunks = [];
+
+    saveResults.forEach((result, index) => {
+      if (result.status === 'fulfilled' && result.value.success) {
+        successfulSaves++;
+      } else {
+        const chunkNum = (result.value?.chunkNumber) || (index + 1);
+        failedChunks.push(chunkNum);
+      }
+    });
+
+    // ========== FINALIZE: Update totalBatches in all documents ==========
+    try {
+      console.log(`\n🔄 Finalizing batch numbering...`);
+      const totalBatches = await this.finalizeStreamingSave(datasetId);
+      console.log(`✅ Finalized: Updated all ${totalBatches} batches with final count`);
+    } catch (finalizeError) {
+      console.error('⚠️  Error finalizing batch count:', finalizeError.message);
+      console.error('   The data is saved, but totalBatches field may not be accurate');
     }
 
     // Final checkpoint save
@@ -1377,8 +1449,34 @@ async extractAbTastySync(page) {
     }
 
     const successful = results.filter(r => r.success).length;
-    console.log(`Batch scrape completed: ${successful}/${urlsToProcess.length} successful`);
-    return results;
+    const endTime = new Date();
+    const duration = Math.round((endTime - startTime) / 1000);
+
+    // ========== SUMMARY ==========
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📊 BATCH SCRAPING SUMMARY`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Total URLs processed: ${urlsToProcess.length}`);
+    console.log(`Successful scrapes: ${successful}/${urlsToProcess.length}`);
+    console.log(`Success rate: ${((successful / urlsToProcess.length) * 100).toFixed(1)}%`);
+    console.log(`Total chunks: ${saveTasks.length}`);
+    console.log(`Successful saves: ${successfulSaves}/${saveTasks.length}`);
+    if (failedChunks.length > 0) {
+      console.log(`❌ Failed chunk saves: ${failedChunks.join(', ')} (data lost for these)`);
+    }
+    console.log(`Duration: ${duration} seconds (${(duration / 60).toFixed(1)} minutes)`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    return {
+      success: failedChunks.length === 0,
+      totalUrls: urlsToProcess.length,
+      successfulScrapes: successful,
+      totalChunks: saveTasks.length,
+      successfulChunks: successfulSaves,
+      failedChunks: failedChunks,
+      duration: `${duration}s`,
+      datasetId: datasetId
+    };
   }
 
   /**
@@ -1625,12 +1723,17 @@ async extractAbTastySync(page) {
 
       // ========== CHUNKED SAVING ==========
       // PRODUCTION: Save every 500 websites as one batch document
-      const BATCH_SIZE = 500;
+      const BATCH_SIZE = 100;
       const totalBatches = Math.ceil(websiteResults.length / BATCH_SIZE) || 1;
 
       console.log(`💾 Saving results in ${totalBatches} batches (${BATCH_SIZE} websites per batch)...`);
 
-      // Save websiteResults in chunks
+      // Save websiteResults in chunks - PARALLELIZED for faster execution
+      // First, prepare all batch promises (don't await yet)
+      const batchPromises = [];
+      let remainingWithoutAbTasty = [...websitesWithoutAbTasty];
+      let remainingFailedWebsites = [...failedWebsites];
+
       for (let i = 0; i < websiteResults.length; i += BATCH_SIZE) {
         const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
         const batchWebsites = websiteResults.slice(i, i + BATCH_SIZE);
@@ -1642,15 +1745,15 @@ async extractAbTastySync(page) {
 
         if (batchNumber === totalBatches) {
           // Last batch gets remaining items
-          batchWithoutAbTasty = websitesWithoutAbTasty;
-          batchFailedWebsites = failedWebsites;
+          batchWithoutAbTasty = remainingWithoutAbTasty;
+          batchFailedWebsites = remainingFailedWebsites;
         } else {
           // Distribute proportionally
-          const withoutAbTastyCount = Math.floor(websitesWithoutAbTasty.length * batchRatio);
-          const failedCount = Math.floor(failedWebsites.length * batchRatio);
+          const withoutAbTastyCount = Math.floor(remainingWithoutAbTasty.length * batchRatio);
+          const failedCount = Math.floor(remainingFailedWebsites.length * batchRatio);
 
-          batchWithoutAbTasty = websitesWithoutAbTasty.splice(0, withoutAbTastyCount);
-          batchFailedWebsites = failedWebsites.splice(0, failedCount);
+          batchWithoutAbTasty = remainingWithoutAbTasty.splice(0, withoutAbTastyCount);
+          batchFailedWebsites = remainingFailedWebsites.splice(0, failedCount);
         }
 
         const queryData = { datasetId: datasetId, batchNumber: batchNumber };
@@ -1681,19 +1784,31 @@ async extractAbTastySync(page) {
           setDefaultsOnInsert: true
         };
 
-        try {
-          await AbTastyResult.findOneAndUpdate(queryData, updateData, saveOptions);
-          console.log(`  ✅ Saved batch ${batchNumber}/${totalBatches} (${batchWebsites.length} websites)`);
-        } catch (error) {
-          if (error.code === 11000 && error.message.includes('datasetId')) {
-            // Handle duplicate key error with auto-fix
-            await this.handleDuplicateKeyError(error, queryData, updateData, saveOptions);
-            console.log(`  ✅ Saved batch ${batchNumber}/${totalBatches} (${batchWebsites.length} websites) [after auto-fix]`);
-          } else {
-            throw error;
+        // Create promise for this batch (doesn't execute yet, just queued)
+        const batchSavePromise = (async () => {
+          try {
+            await AbTastyResult.findOneAndUpdate(queryData, updateData, saveOptions);
+            console.log(`  ✅ Saved batch ${batchNumber}/${totalBatches} (${batchWebsites.length} websites)`);
+            return { success: true, batchNumber };
+          } catch (error) {
+            if (error.code === 11000 && error.message.includes('datasetId')) {
+              // Handle duplicate key error with auto-fix
+              await this.handleDuplicateKeyError(error, queryData, updateData, saveOptions);
+              console.log(`  ✅ Saved batch ${batchNumber}/${totalBatches} (${batchWebsites.length} websites) [after auto-fix]`);
+              return { success: true, batchNumber };
+            } else {
+              console.error(`  ❌ Failed to save batch ${batchNumber}:`, error.message);
+              throw error;
+            }
           }
-        }
+        })();
+
+        batchPromises.push(batchSavePromise);
       }
+
+      // Execute all batch saves in parallel
+      console.log(`⏳ Saving ${totalBatches} batches in parallel...`);
+      await Promise.all(batchPromises);
 
       // Create initial version 1 in change detection system (with all websites)
       await this.createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutAbTasty.concat(websitesWithoutAbTasty), endTime);
@@ -1836,7 +1951,7 @@ async extractAbTastySync(page) {
   }
 
   /**
-   * Finalize batch numbering - update all batches with final totalBatches count
+   * Finalize batch numbering - update all batches with final totalBatches count and total experiments
    * Call this after all streaming saves are complete
    * @param {string} datasetId - Dataset ID
    * @returns {number} Total batches saved
@@ -1846,13 +1961,38 @@ async extractAbTastySync(page) {
       // Count total batches
       const totalBatches = await AbTastyResult.countDocuments({ datasetId: datasetId });
 
-      // Update all batches with final totalBatches count
+      // Get all batches to calculate total experiments across all batches
+      const allBatches = await AbTastyResult.find({ datasetId: datasetId })
+        .select('batchNumber abTastyDetectedCount totalExperiments successfulScrapes failedScrapes')
+        .lean();
+
+      // Calculate totals across all batches
+      let grandTotalExperiments = 0;
+      let grandTotalAbTastyDetected = 0;
+      let grandTotalSuccessful = 0;
+      let grandTotalFailed = 0;
+
+      allBatches.forEach(batch => {
+        grandTotalExperiments += batch.totalExperiments || 0;
+        grandTotalAbTastyDetected += batch.abTastyDetectedCount || 0;
+        grandTotalSuccessful += batch.successfulScrapes || 0;
+        grandTotalFailed += batch.failedScrapes || 0;
+      });
+
+      // Update all batches with final counts
       await AbTastyResult.updateMany(
         { datasetId: datasetId },
-        { totalBatches: totalBatches }
+        {
+          totalBatches: totalBatches,
+          grandTotalExperiments: grandTotalExperiments,
+          grandTotalAbTastyDetected: grandTotalAbTastyDetected
+        }
       );
 
-      console.log(`✅ Finalized: Updated all ${totalBatches} batches with final count`);
+      console.log(`✅ Finalized: Updated all ${totalBatches} batches with final counts`);
+      console.log(`   Total Experiments: ${grandTotalExperiments}`);
+      console.log(`   Total AbTasty Detected: ${grandTotalAbTastyDetected}`);
+
       return totalBatches;
     } catch (error) {
       console.error('Error finalizing streaming save:', error);
@@ -1931,10 +2071,24 @@ async extractAbTastySync(page) {
    * @param {string} datasetId - Dataset ID
    * @returns {Object} Complete ABTasty document
    */
-  async getAbTastyDocuments(datasetId) {
+  async getAbTastyDocuments(datasetId, batchNumbers = null) {
     try {
-      const results = await AbTastyResult.findOne({ datasetId: datasetId });
-      return results;
+      let query = { datasetId: datasetId };
+
+      // If specific batches are requested, filter by batch numbers
+      if (batchNumbers && batchNumbers.length > 0) {
+        query.batchNumber = { $in: batchNumbers };
+      }
+
+      const results = await AbTastyResult.find(query).sort({ batchNumber: 1 }).lean();
+
+      // If multiple batches requested, return array; if single batch, return first match
+      if (batchNumbers && batchNumbers.length === 1) {
+        return results[0] || null;
+      }
+
+      // For multiple batches or all, return array
+      return results.length > 0 ? results : null;
     } catch (error) {
       console.error('Error getting ABTasty documents:', error);
       throw error;
@@ -1948,11 +2102,30 @@ async extractAbTastySync(page) {
    */
   async getDatasetSummary(datasetId) {
     try {
+      // Get the first batch (which has been updated with grand totals after finalization)
       const results = await AbTastyResult.findOne({ datasetId: datasetId })
-        .select('datasetId datasetName totalUrls successfulScrapes failedScrapes abTastyDetectedCount totalExperiments totalBatches batchCount scrapingStats')
+        .select('datasetId datasetName totalUrls successfulScrapes failedScrapes abTastyDetectedCount totalExperiments grandTotalExperiments grandTotalAbTastyDetected totalBatches batchCount scrapingStats')
         .lean();
 
       if (!results) return null;
+
+      // Use grandTotalExperiments if available (from finalized batches), otherwise calculate from all batches
+      let totalExperiments = results.grandTotalExperiments;
+      let abTastyDetected = results.grandTotalAbTastyDetected || results.abTastyDetectedCount;
+
+      // If grand totals not set yet, fall back to batch totals and calculate from all batches
+      if (!totalExperiments) {
+        const allBatches = await AbTastyResult.find({ datasetId: datasetId })
+          .select('totalExperiments abTastyDetectedCount')
+          .lean();
+
+        totalExperiments = 0;
+        abTastyDetected = 0;
+        allBatches.forEach(batch => {
+          totalExperiments += batch.totalExperiments || 0;
+          abTastyDetected += batch.abTastyDetectedCount || 0;
+        });
+      }
 
       return {
         datasetId: results.datasetId,
@@ -1960,8 +2133,8 @@ async extractAbTastySync(page) {
         totalUrls: results.totalUrls,
         successfulScrapes: results.successfulScrapes,
         failedScrapes: results.failedScrapes,
-        abTastyDetected: results.abTastyDetectedCount,
-        totalExperiments: results.totalExperiments,
+        abTastyDetected: abTastyDetected,
+        totalExperiments: totalExperiments,
         batchCount: results.totalBatches || 1,
         scrapingStats: results.scrapingStats
       };
@@ -2005,6 +2178,20 @@ async extractAbTastySync(page) {
 
       if (!batches || batches.length === 0) return null;
 
+      // Calculate totals across all batches (for streaming saves, sum each batch's count)
+      let totalExperiments = batches[0].grandTotalExperiments || 0;
+      let abTastyDetectedCount = batches[0].grandTotalAbTastyDetected || batches[0].abTastyDetectedCount || 0;
+
+      // If grand totals not available, calculate from all batches
+      if (!totalExperiments) {
+        totalExperiments = 0;
+        abTastyDetectedCount = 0;
+        batches.forEach(batch => {
+          totalExperiments += batch.totalExperiments || 0;
+          abTastyDetectedCount += batch.abTastyDetectedCount || 0;
+        });
+      }
+
       // Aggregate all batches
       const aggregated = {
         datasetId: batches[0].datasetId,
@@ -2012,8 +2199,8 @@ async extractAbTastySync(page) {
         totalUrls: batches[0].totalUrls,
         successfulScrapes: batches[0].successfulScrapes,
         failedScrapes: batches[0].failedScrapes,
-        abTastyDetectedCount: batches[0].abTastyDetectedCount,
-        totalExperiments: batches[0].totalExperiments,
+        abTastyDetectedCount: abTastyDetectedCount,
+        totalExperiments: totalExperiments,
         batchCount: batches.length,
         totalBatches: batches[0].totalBatches,
         websiteResults: [],

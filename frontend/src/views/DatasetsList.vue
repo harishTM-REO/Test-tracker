@@ -144,9 +144,9 @@ export default {
     async fetchDatasets() {
       this.loading = true
       this.error = null
-      
+
       try {
-        const response = await fetch(`${this.apiBaseUrl}/api/datasets`)
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets?limit=10`)
         const data = await response.json()
         
         if (data.success) {

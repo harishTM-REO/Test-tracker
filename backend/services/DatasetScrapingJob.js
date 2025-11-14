@@ -10,15 +10,20 @@ const AbTastyScraperService = require('./abTastyScraperService');
 
 /**
  * Register scraping worker with job queue
+ * STREAMING MODE: Saves results every 100-150 URLs (prevents 16MB MongoDB limit)
  */
 const registerScrapingWorker = (jobQueue) => {
   jobQueue.registerWorker('dataset-scraping', async (jobData, progressCallback) => {
-    const { datasetId, urls, tool } = jobData;
+    const { datasetId, datasetName, urls, options = {} } = jobData;
 
-    console.log(`\n🔄 Starting scraping for dataset: ${datasetId}`);
-    console.log(`🎯 Tool: ${tool}`);
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🔄 STARTING DATASET SCRAPING (STREAMING MODE)`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`📋 Dataset: ${datasetName} (${datasetId})`);
     console.log(`📊 Total URLs: ${urls.length}`);
+    console.log(`💾 Save Strategy: Stream saves every 100-150 URLs (prevents 16MB limit)\n`);
 
+    const startTime = new Date();
     let checkpoint = null;
     let urlsToProcess = urls;
 
@@ -34,9 +39,9 @@ const registerScrapingWorker = (jobQueue) => {
 
       if (isResuming) {
         urlsToProcess = checkpoint.getUrlsToProcess(urls);
-        console.log(`⏮️  Resuming from checkpoint: ${urlsToProcess.length} URLs remaining`);
+        console.log(`⏮️  Resuming from checkpoint: ${urlsToProcess.length} URLs remaining\n`);
       } else {
-        console.log(`🆕 Starting fresh: ${urlsToProcess.length} URLs to process`);
+        console.log(`🆕 Starting fresh: ${urlsToProcess.length} URLs to process\n`);
       }
 
       // Update dataset status
@@ -50,64 +55,113 @@ const registerScrapingWorker = (jobQueue) => {
         }
       );
 
-      let results = [];
-      const scraperService = new AbTastyScraperService();
+      // ========== STREAMING APPROACH: Scrape in chunks and save immediately ==========
+      const CHUNK_SIZE = 100; // Save every 100 URLs (~1.6MB each)
+      let processedResults = [];
+      let chunkResults = [];
+      let totalChunksSaved = 0;
+      let totalChunksFailed = 0;
 
-      // Scrape URLs
       for (let i = 0; i < urlsToProcess.length; i++) {
         const url = urlsToProcess[i];
+        const urlIndex = i + 1;
+        const totalUrls = urlsToProcess.length;
+        const percentComplete = Math.round((urlIndex / totalUrls) * 100);
 
         try {
-          console.log(`[${i + 1}/${urlsToProcess.length}] Scraping: ${url}`);
-          const scrapedData = await scraperService.scrapeAbTastyExperiments(url);
+          console.log(`[${urlIndex}/${totalUrls}] Scraping: ${url}`);
+          const scrapedData = await AbTastyScraperService.scrapeAbTastyExperiments(url);
 
           checkpoint.recordSuccess(url, scrapedData);
-          results.push({
+
+          // Format result for saving
+          const result = {
             url,
-            status: 'success',
+            success: true,
             data: scrapedData
-          });
+          };
+
+          chunkResults.push(result);
+          processedResults.push(result);
 
         } catch (error) {
           const isTimeout = error.message.includes('timeout');
           checkpoint.recordFailure(url, error, isTimeout);
-          results.push({
-            url,
-            status: 'failed',
-            error: error.message,
-            isTimeout
-          });
 
+          const result = {
+            url,
+            success: false,
+            error: error.message
+          };
+
+          chunkResults.push(result);
+          processedResults.push(result);
           console.warn(`⚠️  Failed to scrape ${url}: ${error.message}`);
         }
 
-        // Save checkpoint every 500 URLs
-        if (checkpoint.shouldSave(500)) {
-          checkpoint.save();
+        // ========== CRITICAL: Save chunk when reaching CHUNK_SIZE ==========
+        if (chunkResults.length >= CHUNK_SIZE || urlIndex === totalUrls) {
+          console.log(`\n📤 Saving chunk ${Math.floor(i / CHUNK_SIZE) + 1}: ${chunkResults.length} URLs...`);
 
-          const stats = checkpoint.getStats();
+          try {
+            const saveResult = await AbTastyScraperService.saveResultsStreamingBatch(
+              datasetId.toString(),
+              datasetName,
+              chunkResults,
+              startTime,
+              totalUrls
+            );
 
-          // Update database with progress
-          await Dataset.updateOne(
-            { _id: datasetId },
-            {
-              'scraping.progress.current': stats.processedUrls,
-              'scraping.progress.total': stats.totalUrls,
-              'scraping.progress.percentage': Math.round(stats.percentComplete),
-              'scraping.results.successful': stats.successfulUrls,
-              'scraping.results.failed': stats.failedUrls,
-              'scraping.results.timeout': stats.timeoutUrls,
-              'scraping.checkpoint.lastSaved': new Date(),
-              'scraping.checkpoint.lastProcessedUrl': url,
-              'scraping.checkpoint.processedCount': stats.processedUrls
-            }
-          );
+            totalChunksSaved++;
+            console.log(`✅ Chunk saved successfully (batch #${saveResult.batchNumber})`);
 
-          // Update job progress
-          progressCallback(Math.round(stats.percentComplete));
+            // Save checkpoint after each successful chunk save
+            checkpoint.save();
+            const stats = checkpoint.getStats();
 
-          console.log(`💾 Checkpoint saved: ${stats.processedUrls}/${stats.totalUrls} (${stats.percentComplete}%)`);
+            // Update dataset with progress
+            await Dataset.updateOne(
+              { _id: datasetId },
+              {
+                'scraping.progress.current': stats.processedUrls,
+                'scraping.progress.total': stats.totalUrls,
+                'scraping.progress.percentage': Math.round(stats.percentComplete),
+                'scraping.results.successful': stats.successfulUrls,
+                'scraping.results.failed': stats.failedUrls,
+                'scraping.results.timeout': stats.timeoutUrls,
+                'scraping.checkpoint.lastSaved': new Date(),
+                'scraping.checkpoint.lastProcessedUrl': url,
+                'scraping.checkpoint.processedCount': stats.processedUrls,
+                'scraping.savedChunks': totalChunksSaved
+              }
+            );
+
+            // Update job progress
+            progressCallback(Math.round(stats.percentComplete));
+            console.log(`📊 Progress: ${stats.processedUrls}/${stats.totalUrls} (${stats.percentComplete}%)\n`);
+
+            // Reset chunk for next iteration
+            chunkResults = [];
+
+          } catch (saveError) {
+            totalChunksFailed++;
+            console.error(`❌ Failed to save chunk: ${saveError.message}`);
+            console.error(`   ⚠️  Results for this chunk are lost! Use checkpoint to resume later.\n`);
+
+            // Continue with next chunk even if save fails
+            chunkResults = [];
+          }
         }
+      }
+
+      // ========== FINALIZE: Update all batches with final totalBatches count ==========
+      try {
+        console.log(`\n🔄 Finalizing batch numbering...`);
+        const totalBatches = await AbTastyScraperService.finalizeStreamingSave(datasetId.toString());
+        console.log(`✅ Finalized: Updated all ${totalBatches} batches with final count\n`);
+      } catch (finalizeError) {
+        console.error('⚠️  Error finalizing batch count:', finalizeError.message);
+        console.error('   The data is saved, but totalBatches field may not be accurate\n');
       }
 
       // Final checkpoint save
@@ -115,14 +169,25 @@ const registerScrapingWorker = (jobQueue) => {
         checkpoint.save();
         const finalStats = checkpoint.getStats();
 
-        console.log(`\n📊 Scraping Final Stats:`);
-        console.log(`   Successful: ${finalStats.successfulUrls}`);
-        console.log(`   Failed: ${finalStats.failedUrls}`);
+        console.log(`${'='.repeat(60)}`);
+        console.log(`📊 SCRAPING FINAL STATISTICS`);
+        console.log(`${'='.repeat(60)}`);
+        console.log(`   Successful scrapes: ${finalStats.successfulUrls}`);
+        console.log(`   Failed scrapes: ${finalStats.failedUrls}`);
         console.log(`   Timeouts: ${finalStats.timeoutUrls}`);
-        console.log(`   Success Rate: ${finalStats.successRate}%`);
+        console.log(`   Success rate: ${finalStats.successRate}%`);
+        console.log(`   Chunks saved: ${totalChunksSaved}`);
+        console.log(`   Chunks failed: ${totalChunksFailed}`);
+        console.log(`${'='.repeat(60)}\n`);
       }
 
+      const endTime = new Date();
+      const duration = Math.round((endTime - startTime) / 1000);
+
       // Update dataset with final results
+      const successCount = processedResults.filter(r => r.success).length;
+      const failureCount = processedResults.filter(r => !r.success).length;
+
       await Dataset.updateOne(
         { _id: datasetId },
         {
@@ -130,29 +195,32 @@ const registerScrapingWorker = (jobQueue) => {
           'scraping.status': 'COMPLETED',
           'scraping.completedAt': new Date(),
           'scraping.progress.percentage': 100,
-          'scraping.results.successful': results.filter(r => r.status === 'success').length,
-          'scraping.results.failed': results.filter(r => r.status === 'failed' && !r.isTimeout).length,
-          'scraping.results.timeout': results.filter(r => r.isTimeout).length,
-          resultsCount: results.filter(r => r.status === 'success').length
+          'scraping.results.successful': successCount,
+          'scraping.results.failed': failureCount,
+          'scraping.duration': duration,
+          'scraping.chunksProcessed': totalChunksSaved,
+          resultsCount: successCount
         }
       );
 
       progressCallback(100);
 
-      console.log(`\n✅ Scraping Complete for dataset ${datasetId}!`);
+      console.log(`✅ Scraping Complete for dataset "${datasetName}"!`);
+      console.log(`⏱️  Total duration: ${duration} seconds (${(duration / 60).toFixed(1)} minutes)\n`);
 
       return {
         success: true,
         results: {
-          successful: results.filter(r => r.status === 'success').length,
-          failed: results.filter(r => r.status === 'failed').length,
-          timeout: results.filter(r => r.isTimeout).length,
-          total: results.length
+          successful: successCount,
+          failed: failureCount,
+          total: processedResults.length,
+          duration: `${duration}s`,
+          chunksProcessed: totalChunksSaved
         }
       };
 
     } catch (error) {
-      console.error('Scraping error:', error);
+      console.error('\n❌ Scraping error:', error.message);
 
       // Update dataset with error
       await Dataset.updateOne(
