@@ -14,6 +14,8 @@ const AbTastyResult = require('../models/AbTastyResult');
 const browserPool = require('./browserPoolService'); // Import browser pool service
 const CheckpointService = require('./checkpointService'); // Import checkpoint service
 const urlSanitizer = require('./urlSanitizerService'); // Import URL sanitizer
+const retryLogic = require('./retryLogic'); // Import retry logic for failed URLs
+const mongoDBResilience = require('./mongoDBResilience'); // Import MongoDB resilience module
 
 const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
 const CHECKPOINT_ENABLED = process.env.CHECKPOINT_ENABLED === 'true';
@@ -1385,6 +1387,9 @@ async extractAbTastySync(page) {
         try {
           console.log(`💾 Chunk ${chunkNumber}: Saving ${chunkResults.length} results to database...`);
 
+          // Ensure database connection is healthy before save
+          await mongoDBResilience.ensureConnection();
+
           const saveResult = await this.saveResultsStreamingBatch(
             datasetId,
             datasetName,
@@ -1397,8 +1402,31 @@ async extractAbTastySync(page) {
           console.log(`✅ Chunk ${chunkNumber}: Saved batch #${saveResult.batchNumber} (${saveResult.websiteCount} websites)`);
           return { success: true, chunkNumber, batchNumber: saveResult.batchNumber };
         } catch (saveError) {
+          console.error(`❌ Chunk ${chunkNumber}: Save failed - ${saveError.message}`);
+
+          // Try to reconnect and retry once
+          try {
+            console.log(`🔄 Attempting database reconnection for chunk ${chunkNumber}...`);
+            const reconnected = await mongoDBResilience.attemptAutoReconnect();
+
+            if (reconnected) {
+              console.log(`✅ Reconnected - retrying save for chunk ${chunkNumber}...`);
+              const retryResult = await this.saveResultsStreamingBatch(
+                datasetId,
+                datasetName,
+                chunkResults,
+                startTime,
+                urlsToProcess.length
+              );
+              totalChunksSaved++;
+              console.log(`✅ Chunk ${chunkNumber}: Saved batch #${retryResult.batchNumber} (after reconnect)`);
+              return { success: true, chunkNumber, batchNumber: retryResult.batchNumber };
+            }
+          } catch (reconnectError) {
+            console.error(`❌ Reconnection or retry failed: ${reconnectError.message}`);
+          }
+
           totalChunksFailed++;
-          console.error(`❌ Chunk ${chunkNumber}: Failed to save - ${saveError.message}`);
           console.error('   ⚠️  Results for this chunk are lost! Checkpoint will help on retry.');
           return { success: false, chunkNumber, error: saveError.message };
         }
@@ -1413,6 +1441,38 @@ async extractAbTastySync(page) {
         console.log(`⏱️  Waiting ${batchDelay}ms before next chunk...`);
         await new Promise(resolve => setTimeout(resolve, batchDelay));
       }
+    }
+
+    // ========== RETRY PHASE: Retry failed URLs ==========
+    const failedUrls = results.filter(r => !r.success);
+    let retryPhaseResults = { recovered: 0, stillFailed: 0 };
+
+    if (failedUrls.length > 0) {
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`🔁 RETRY PHASE: ${failedUrls.length} URLs failed in initial scrape`);
+      console.log(`${'='.repeat(60)}`);
+
+      retryPhaseResults = await retryLogic.retryFailedUrls(
+        failedUrls,
+        async (failedUrlInfo) => {
+          // Retry the failed URL
+          const url = failedUrlInfo.url || failedUrlInfo;
+          const singleResult = await this.scrapeExperimentsFromPageInternal(url);
+          return singleResult;
+        },
+        'retry-phase'
+      );
+
+      // Update results with recovered URLs
+      retryPhaseResults.recoveredUrls.forEach(recoveredUrl => {
+        const originalIndex = results.findIndex(r => r.url === (recoveredUrl.url || recoveredUrl));
+        if (originalIndex !== -1) {
+          results[originalIndex].success = true;
+          results[originalIndex].retried = true;
+        }
+      });
+
+      console.log(`✅ Retry phase complete: Recovered ${retryPhaseResults.recovered}/${failedUrls.length} URLs`);
     }
 
     // ========== WAIT FOR ALL SAVES TO COMPLETE ==========
@@ -1449,6 +1509,7 @@ async extractAbTastySync(page) {
     }
 
     const successful = results.filter(r => r.success).length;
+    const retriedSuccessful = results.filter(r => r.retried && r.success).length;
     const endTime = new Date();
     const duration = Math.round((endTime - startTime) / 1000);
 
@@ -1457,24 +1518,49 @@ async extractAbTastySync(page) {
     console.log(`📊 BATCH SCRAPING SUMMARY`);
     console.log(`${'='.repeat(60)}`);
     console.log(`Total URLs processed: ${urlsToProcess.length}`);
-    console.log(`Successful scrapes: ${successful}/${urlsToProcess.length}`);
-    console.log(`Success rate: ${((successful / urlsToProcess.length) * 100).toFixed(1)}%`);
-    console.log(`Total chunks: ${saveTasks.length}`);
-    console.log(`Successful saves: ${successfulSaves}/${saveTasks.length}`);
-    if (failedChunks.length > 0) {
-      console.log(`❌ Failed chunk saves: ${failedChunks.join(', ')} (data lost for these)`);
+    console.log(`\n📈 Initial Scrape Results:`);
+    console.log(`   Successful: ${successful}/${urlsToProcess.length}`);
+    console.log(`   Success rate: ${((successful / urlsToProcess.length) * 100).toFixed(1)}%`);
+
+    if (failedUrls.length > 0) {
+      console.log(`\n🔁 Retry Phase Results:`);
+      console.log(`   Failed URLs: ${failedUrls.length}`);
+      console.log(`   Recovered: ${retryPhaseResults.recovered}`);
+      console.log(`   Still failed: ${retryPhaseResults.stillFailed}`);
+      console.log(`   Recovery rate: ${((retryPhaseResults.recovered / failedUrls.length) * 100).toFixed(1)}%`);
     }
-    console.log(`Duration: ${duration} seconds (${(duration / 60).toFixed(1)} minutes)`);
+
+    console.log(`\n💾 Database Results:`);
+    console.log(`   Total chunks: ${saveTasks.length}`);
+    console.log(`   Successful saves: ${successfulSaves}/${saveTasks.length}`);
+    if (failedChunks.length > 0) {
+      console.log(`   ❌ Failed chunk saves: ${failedChunks.join(', ')} (data lost for these)`);
+    }
+
+    console.log(`\n⏱️  Performance:`);
+    console.log(`   Duration: ${duration} seconds (${(duration / 60).toFixed(1)} minutes)`);
+    console.log(`   Throughput: ${(urlsToProcess.length / (duration / 3600)).toFixed(0)} URLs/hour`);
+
+    const finalSuccessRate = ((successful / urlsToProcess.length) * 100).toFixed(1);
+    console.log(`\n📊 Final Success Rate: ${finalSuccessRate}%`);
     console.log(`${'='.repeat(60)}\n`);
 
     return {
       success: failedChunks.length === 0,
       totalUrls: urlsToProcess.length,
       successfulScrapes: successful,
+      finalSuccessRate: finalSuccessRate,
       totalChunks: saveTasks.length,
       successfulChunks: successfulSaves,
       failedChunks: failedChunks,
+      retryPhase: {
+        failedUrls: failedUrls.length,
+        recovered: retryPhaseResults.recovered,
+        stillFailed: retryPhaseResults.stillFailed,
+        recoveryRate: retryPhaseResults.recovered > 0 ? ((retryPhaseResults.recovered / failedUrls.length) * 100).toFixed(1) + '%' : '0%'
+      },
       duration: `${duration}s`,
+      throughput: `${(urlsToProcess.length / (duration / 3600)).toFixed(0)} URLs/hour`,
       datasetId: datasetId
     };
   }
