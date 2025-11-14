@@ -1453,7 +1453,7 @@ async extractAbTastySync(page) {
     try {
       const endTime = new Date();
       const duration = `${endTime - startTime}ms`;
-      
+
       // Process results
       const websiteResults = [];
       const websitesWithoutAbTasty = [];
@@ -1466,7 +1466,7 @@ async extractAbTastySync(page) {
         if (result.success && result.data) {
           successfulScrapes++;
           const domain = this.extractDomain(result.url);
-          
+
           if (result.data.abTasty?.detected) {
             // Website has AbTasty - add to websiteResults
             const websiteResult = {
@@ -1510,42 +1510,75 @@ async extractAbTastySync(page) {
       const successRate = `${((successfulScrapes / results.length) * 100).toFixed(1)}%`;
       const abTastyRate = `${((abTastyDetectedCount / results.length) * 100).toFixed(1)}%`;
 
-      // Create or update AbTastyResult document
-      const abTastyResult = await AbTastyResult.findOneAndUpdate(
-        { datasetId: datasetId },
-        {
-          datasetId: datasetId,
-          datasetName: datasetName,
-          totalUrls: results.length,
-          successfulScrapes: successfulScrapes,
-          failedScrapes: failedScrapes,
-          abTastyDetectedCount: abTastyDetectedCount,
-          totalExperiments: totalExperiments,
-          websiteResults: websiteResults,
-          websitesWithoutAbTasty: websitesWithoutAbTasty,
-          failedWebsites: failedWebsites,
-          scrapingStats: {
-            startedAt: startTime,
-            completedAt: endTime,
-            duration: duration,
-            abTastyRate: abTastyRate,
-            successRate: successRate
-          }
-        },
-        { 
-          upsert: true, 
-          new: true,
-          setDefaultsOnInsert: true
+      // ========== CHUNKED SAVING ==========
+      const BATCH_SIZE = 500;
+      const totalBatches = Math.ceil(websiteResults.length / BATCH_SIZE) || 1;
+
+      console.log(`💾 Saving results in ${totalBatches} batches (${BATCH_SIZE} websites per batch)...`);
+
+      // Save websiteResults in chunks
+      for (let i = 0; i < websiteResults.length; i += BATCH_SIZE) {
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+        const batchWebsites = websiteResults.slice(i, i + BATCH_SIZE);
+
+        // Distribute websitesWithoutAbTasty and failedWebsites across batches proportionally
+        const batchRatio = batchWebsites.length / websiteResults.length;
+        let batchWithoutAbTasty = [];
+        let batchFailedWebsites = [];
+
+        if (batchNumber === totalBatches) {
+          // Last batch gets remaining items
+          batchWithoutAbTasty = websitesWithoutAbTasty;
+          batchFailedWebsites = failedWebsites;
+        } else {
+          // Distribute proportionally
+          const withoutAbTastyCount = Math.floor(websitesWithoutAbTasty.length * batchRatio);
+          const failedCount = Math.floor(failedWebsites.length * batchRatio);
+
+          batchWithoutAbTasty = websitesWithoutAbTasty.splice(0, withoutAbTastyCount);
+          batchFailedWebsites = failedWebsites.splice(0, failedCount);
         }
-      );
 
-      // Create initial version 1 in change detection system
-      await this.createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutAbTasty, endTime);
+        await AbTastyResult.findOneAndUpdate(
+          { datasetId: datasetId, batchNumber: batchNumber },
+          {
+            datasetId: datasetId,
+            datasetName: datasetName,
+            batchNumber: batchNumber,
+            totalBatches: totalBatches,
+            totalUrls: results.length,
+            successfulScrapes: successfulScrapes,
+            failedScrapes: failedScrapes,
+            abTastyDetectedCount: abTastyDetectedCount,
+            totalExperiments: totalExperiments,
+            websiteResults: batchWebsites,
+            websitesWithoutAbTasty: batchWithoutAbTasty,
+            failedWebsites: batchFailedWebsites,
+            scrapingStats: {
+              startedAt: startTime,
+              completedAt: endTime,
+              duration: duration,
+              abTastyRate: abTastyRate,
+              successRate: successRate
+            }
+          },
+          {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true
+          }
+        );
 
-      console.log(`✅ Saved batch results to database for dataset ${datasetId}`);
+        console.log(`  ✅ Saved batch ${batchNumber}/${totalBatches} (${batchWebsites.length} websites)`);
+      }
+
+      // Create initial version 1 in change detection system (with all websites)
+      await this.createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutAbTasty.concat(websitesWithoutAbTasty), endTime);
+
+      console.log(`✅ Saved all ${totalBatches} batches to database for dataset ${datasetId}`);
       console.log(`📊 Summary: ${successfulScrapes}/${results.length} successful, ${abTastyDetectedCount} with AbTasty, ${websitesWithoutAbTasty.length} without AbTasty, ${totalExperiments} total experiments`);
-      
-      return abTastyResult;
+
+      return { success: true, totalBatches, datasetId };
     } catch (error) {
       console.error('Error saving batch results:', error);
       throw error;
@@ -1634,9 +1667,103 @@ async extractAbTastySync(page) {
   }
 
   /**
+   * Get dataset summary (metadata only, no website details)
+   * @param {string} datasetId - Dataset ID
+   * @returns {Object} Summary data
+   */
+  async getDatasetSummary(datasetId) {
+    try {
+      const results = await AbTastyResult.findOne({ datasetId: datasetId })
+        .select('datasetId datasetName totalUrls successfulScrapes failedScrapes abTastyDetectedCount totalExperiments totalBatches batchCount scrapingStats')
+        .lean();
+
+      if (!results) return null;
+
+      return {
+        datasetId: results.datasetId,
+        datasetName: results.datasetName,
+        totalUrls: results.totalUrls,
+        successfulScrapes: results.successfulScrapes,
+        failedScrapes: results.failedScrapes,
+        abTastyDetected: results.abTastyDetectedCount,
+        totalExperiments: results.totalExperiments,
+        batchCount: results.totalBatches || 1,
+        scrapingStats: results.scrapingStats
+      };
+    } catch (error) {
+      console.error('Error getting dataset summary:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get specific batches for a dataset
+   * @param {string} datasetId - Dataset ID
+   * @param {Array} batchNumbers - Array of batch numbers to fetch
+   * @returns {Array} Batch documents
+   */
+  async getDatasetBatches(datasetId, batchNumbers) {
+    try {
+      const batches = await AbTastyResult.find({
+        datasetId: datasetId,
+        batchNumber: { $in: batchNumbers }
+      }).sort({ batchNumber: 1 })
+        .lean();
+
+      return batches;
+    } catch (error) {
+      console.error('Error getting dataset batches:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all batches aggregated into single response
+   * @param {string} datasetId - Dataset ID
+   * @returns {Object} Aggregated results with all batches combined
+   */
+  async getDatasetResultsAggregated(datasetId) {
+    try {
+      const batches = await AbTastyResult.find({ datasetId: datasetId })
+        .sort({ batchNumber: 1 })
+        .lean();
+
+      if (!batches || batches.length === 0) return null;
+
+      // Aggregate all batches
+      const aggregated = {
+        datasetId: batches[0].datasetId,
+        datasetName: batches[0].datasetName,
+        totalUrls: batches[0].totalUrls,
+        successfulScrapes: batches[0].successfulScrapes,
+        failedScrapes: batches[0].failedScrapes,
+        abTastyDetectedCount: batches[0].abTastyDetectedCount,
+        totalExperiments: batches[0].totalExperiments,
+        batchCount: batches.length,
+        totalBatches: batches[0].totalBatches,
+        websiteResults: [],
+        websitesWithoutAbTasty: [],
+        failedWebsites: [],
+        scrapingStats: batches[0].scrapingStats
+      };
+
+      batches.forEach(batch => {
+        aggregated.websiteResults.push(...(batch.websiteResults || []));
+        aggregated.websitesWithoutAbTasty.push(...(batch.websitesWithoutAbTasty || []));
+        aggregated.failedWebsites.push(...(batch.failedWebsites || []));
+      });
+
+      return aggregated;
+    } catch (error) {
+      console.error('Error aggregating dataset results:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Create initial version 1 in change detection system after first scraping
    * @param {string} datasetId - Dataset ID
-   * @param {string} datasetName - Dataset name  
+   * @param {string} datasetName - Dataset name
    * @param {Array} websiteResults - Websites with AbTasty
    * @param {Array} websitesWithoutAbTasty - Websites without AbTasty
    * @param {Date} scrapingCompletedAt - When scraping completed

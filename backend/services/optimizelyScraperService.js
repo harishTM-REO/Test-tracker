@@ -1625,42 +1625,75 @@ class OptimizelyScraperService {
       const successRate = `${((successfulScrapes / results.length) * 100).toFixed(1)}%`;
       const optimizelyRate = `${((optimizelyDetectedCount / results.length) * 100).toFixed(1)}%`;
 
-      // Create or update OptimizelyResult document
-      const optimizelyResult = await OptimizelyResult.findOneAndUpdate(
-        { datasetId: datasetId },
-        {
-          datasetId: datasetId,
-          datasetName: datasetName,
-          totalUrls: results.length,
-          successfulScrapes: successfulScrapes,
-          failedScrapes: failedScrapes,
-          optimizelyDetectedCount: optimizelyDetectedCount,
-          totalExperiments: totalExperiments,
-          websiteResults: websiteResults,
-          websitesWithoutOptimizely: websitesWithoutOptimizely,
-          failedWebsites: failedWebsites,
-          scrapingStats: {
-            startedAt: startTime,
-            completedAt: endTime,
-            duration: duration,
-            optimizelyRate: optimizelyRate,
-            successRate: successRate
-          }
-        },
-        {
-          upsert: true,
-          new: true,
-          setDefaultsOnInsert: true
+      // ========== CHUNKED SAVING ==========
+      const BATCH_SIZE = 500;
+      const totalBatches = Math.ceil(websiteResults.length / BATCH_SIZE) || 1;
+
+      console.log(`💾 Saving results in ${totalBatches} batches (${BATCH_SIZE} websites per batch)...`);
+
+      // Save websiteResults in chunks
+      for (let i = 0; i < websiteResults.length; i += BATCH_SIZE) {
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+        const batchWebsites = websiteResults.slice(i, i + BATCH_SIZE);
+
+        // Distribute websitesWithoutOptimizely and failedWebsites across batches proportionally
+        const batchRatio = batchWebsites.length / websiteResults.length;
+        let batchWithoutOptimizely = [];
+        let batchFailedWebsites = [];
+
+        if (batchNumber === totalBatches) {
+          // Last batch gets remaining items
+          batchWithoutOptimizely = websitesWithoutOptimizely;
+          batchFailedWebsites = failedWebsites;
+        } else {
+          // Distribute proportionally
+          const withoutOptimizelyCount = Math.floor(websitesWithoutOptimizely.length * batchRatio);
+          const failedCount = Math.floor(failedWebsites.length * batchRatio);
+
+          batchWithoutOptimizely = websitesWithoutOptimizely.splice(0, withoutOptimizelyCount);
+          batchFailedWebsites = failedWebsites.splice(0, failedCount);
         }
-      );
 
-      // Create initial version 1 in change detection system
-      await this.createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutOptimizely, endTime);
+        await OptimizelyResult.findOneAndUpdate(
+          { datasetId: datasetId, batchNumber: batchNumber },
+          {
+            datasetId: datasetId,
+            datasetName: datasetName,
+            batchNumber: batchNumber,
+            totalBatches: totalBatches,
+            totalUrls: results.length,
+            successfulScrapes: successfulScrapes,
+            failedScrapes: failedScrapes,
+            optimizelyDetectedCount: optimizelyDetectedCount,
+            totalExperiments: totalExperiments,
+            websiteResults: batchWebsites,
+            websitesWithoutOptimizely: batchWithoutOptimizely,
+            failedWebsites: batchFailedWebsites,
+            scrapingStats: {
+              startedAt: startTime,
+              completedAt: endTime,
+              duration: duration,
+              optimizelyRate: optimizelyRate,
+              successRate: successRate
+            }
+          },
+          {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true
+          }
+        );
 
-      console.log(`✅ Saved batch results to database for dataset ${datasetId}`);
+        console.log(`  ✅ Saved batch ${batchNumber}/${totalBatches} (${batchWebsites.length} websites)`);
+      }
+
+      // Create initial version 1 in change detection system (with all websites)
+      await this.createInitialVersion(datasetId, datasetName, websiteResults, websitesWithoutOptimizely.concat(websitesWithoutOptimizely), endTime);
+
+      console.log(`✅ Saved all ${totalBatches} batches to database for dataset ${datasetId}`);
       console.log(`📊 Summary: ${successfulScrapes}/${results.length} successful, ${optimizelyDetectedCount} with Optimizely, ${websitesWithoutOptimizely.length} without Optimizely, ${totalExperiments} total experiments`);
 
-      return optimizelyResult;
+      return { success: true, totalBatches, datasetId };
     } catch (error) {
       console.error('Error saving batch results:', error);
       throw error;

@@ -148,12 +148,21 @@ const adobeResultSchema = new mongoose.Schema({
   datasetId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Dataset',
-    required: true,
-    unique: true
+    required: true
   },
   datasetName: {
     type: String,
     required: true
+  },
+  batchNumber: {
+    type: Number,
+    required: true,
+    default: 1
+  },
+  totalBatches: {
+    type: Number,
+    required: true,
+    default: 1
   },
   totalUrls: {
     type: Number,
@@ -189,8 +198,8 @@ const adobeResultSchema = new mongoose.Schema({
   collection: 'adoberesults'
 });
 
-// Indexes for better query performance
-// Note: datasetId already has unique: true which creates an index automatically
+// Composite index for datasetId + batchNumber to handle batching
+adobeResultSchema.index({ datasetId: 1, batchNumber: 1 }, { unique: true });
 adobeResultSchema.index({ 'websiteResults.domain': 1 });
 adobeResultSchema.index({ 'websiteResults.adobeTargetDetected': 1 });
 adobeResultSchema.index({ createdAt: -1 });

@@ -69,12 +69,21 @@ const abTastyResultSchema = new mongoose.Schema({
   datasetId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Dataset',
-    required: true,
-    unique: true
+    required: true
   },
   datasetName: {
     type: String,
     required: true
+  },
+  batchNumber: {
+    type: Number,
+    required: true,
+    default: 1
+  },
+  totalBatches: {
+    type: Number,
+    required: true,
+    default: 1
   },
   totalUrls: {
     type: Number,
@@ -148,7 +157,8 @@ const abTastyResultSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// datasetId index removed - already has unique constraint
+// Composite index for datasetId + batchNumber to handle batching
+abTastyResultSchema.index({ datasetId: 1, batchNumber: 1 }, { unique: true });
 abTastyResultSchema.index({ "websiteResults.domain": 1 });
 abTastyResultSchema.index({ "websiteResults.abTastyDetected": 1 });
 abTastyResultSchema.index({ "websitesWithoutAbTasty.domain": 1 });

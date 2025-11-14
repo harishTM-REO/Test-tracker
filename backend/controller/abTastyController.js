@@ -307,6 +307,7 @@ async function healthCheck(req, res) {
 async function getDatasetResults(req, res) {
   try {
     const { datasetId } = req.params;
+    const { all, batch, batches, summary } = req.query;
 
     if (!datasetId) {
       return res.status(400).json({
@@ -322,24 +323,103 @@ async function getDatasetResults(req, res) {
       });
     }
 
-    const results = await AbTastyScraperService.getDatasetResults(datasetId);
+    // Case 1: Summary only (metadata)
+    if (summary === 'true') {
+      const summaryData = await AbTastyScraperService.getDatasetSummary(datasetId);
 
-    if (!results) {
-      return res.status(404).json({
-        success: false,
-        message: 'No scraping results found for this dataset'
+      if (!summaryData) {
+        return res.status(404).json({
+          success: false,
+          message: 'No scraping results found for this dataset'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Summary retrieved successfully',
+        data: summaryData
       });
     }
 
+    // Case 2: All batches aggregated
+    if (all === 'true') {
+      const aggregated = await AbTastyScraperService.getDatasetResultsAggregated(datasetId);
+
+      if (!aggregated) {
+        return res.status(404).json({
+          success: false,
+          message: 'No scraping results found for this dataset'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Full results (aggregated from ${aggregated.batchCount} batches)`,
+        data: aggregated
+      });
+    }
+
+    // Case 3: Specific batch(es)
+    let batchesToFetch = [];
+
+    if (batch) {
+      // Single batch: ?batch=5
+      batchesToFetch = [parseInt(batch)];
+    } else if (batches) {
+      // Multiple batches: ?batches=1,5,10
+      batchesToFetch = batches.split(',').map(Number);
+    } else {
+      // Default: first batch (pagination)
+      batchesToFetch = [1];
+    }
+
+    const results = await AbTastyScraperService.getDatasetBatches(datasetId, batchesToFetch);
+
+    if (!results || results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No scraping results found for specified batches'
+      });
+    }
+
+    // Aggregate requested batches
+    const aggregated = {
+      datasetId: results[0].datasetId,
+      datasetName: results[0].datasetName,
+      batchNumbers: results.map(r => r.batchNumber),
+      totalBatches: results[0].totalBatches,
+      summary: {
+        totalUrls: results[0].totalUrls,
+        successfulScrapes: results[0].successfulScrapes,
+        failedScrapes: results[0].failedScrapes,
+        abTastyDetected: results[0].abTastyDetectedCount,
+        totalExperiments: results[0].totalExperiments
+      },
+      scrapingStats: results[0].scrapingStats,
+      websiteResults: [],
+      websitesWithoutAbTasty: [],
+      failedWebsites: []
+    };
+
+    results.forEach(r => {
+      aggregated.websiteResults.push(...(r.websiteResults || []));
+      aggregated.websitesWithoutAbTasty.push(...(r.websitesWithoutAbTasty || []));
+      aggregated.failedWebsites.push(...(r.failedWebsites || []));
+    });
+
+    const message = batch ? `Batch ${batch}` :
+                   batches ? `Batches ${batches}` :
+                   'Batch 1 (default - paginated)';
+
     res.status(200).json({
       success: true,
-      message: 'Dataset results retrieved successfully',
-      data: results
+      message,
+      data: aggregated
     });
 
   } catch (error) {
     console.error('Error in getDatasetResults controller:', error);
-    
+
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve dataset results',

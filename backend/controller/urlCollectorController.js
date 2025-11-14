@@ -4,6 +4,7 @@ const playwrightCrawlerService = require('../services/playwrightCrawlerService')
 const urlCollectionOrchestrator = require('../services/urlCollectionOrchestrator');
 const urlDynamicCategorizationService = require('../services/urlDynamicCategorizationService');
 const { isValidUrl, sanitizeUrl, validateAndSanitize } = require('../utils/urlValidator');
+const { normalizeUrl } = require('../utils/helper');
 
 /**
  * POST /api/url-collector/collect
@@ -454,7 +455,7 @@ async function playwrightQuickScan(req, res) {
  */
 async function collectUrlsWaterfall(req, res) {
     try {
-        const {
+        let {
             url,
             maxUrls,
             timeout,
@@ -471,18 +472,21 @@ async function collectUrlsWaterfall(req, res) {
             return res.status(400).json({
                 success: false,
                 message: 'URL parameter is required',
-                example: '{ "url": "https://example.com/", "maxUrls": 1000, "methods": ["sitemap", "playwright", "browserless"] }'
+                example: '{ "url": "example.com", "maxUrls": 1000, "methods": ["sitemap", "playwright", "browserless"] }'
             });
         }
 
-        // Validate URL format
-        if (!isValidUrl(url)) {
+        // Normalize URL (accepts: example.com, www.example.com, https://example.com)
+        const normalizedUrl = normalizeUrl(url);
+        if (!normalizedUrl) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid URL format. URL must start with http:// or https://',
+                message: 'Invalid URL format. Provide URL in format: example.com, www.example.com, or https://example.com',
                 provided: url
             });
         }
+
+        url = normalizedUrl;
 
         // Parse and validate options
         const options = {
@@ -624,7 +628,7 @@ async function collectCategorizePrioritize(req, res) {
  */
 async function enrichUrlCollection(req, res) {
     try {
-        const {
+        let {
             url,
             maxUrls,
             methods,
@@ -648,23 +652,26 @@ async function enrichUrlCollection(req, res) {
                 success: false,
                 message: 'URL parameter is required',
                 example: {
-                    url: 'https://boots.com/',
+                    url: 'boots.com',
                     maxUrls: 50,
                     methods: ['sitemap', 'playwright'],
                     sortByPriority: true,
-                    format: 'compact'  // NEW: for simplified response
+                    format: 'compact'
                 }
             });
         }
 
-        // Validate URL format
-        if (!isValidUrl(url)) {
+        // Normalize URL (accepts: example.com, www.example.com, https://example.com)
+        const normalizedUrl = normalizeUrl(url);
+        if (!normalizedUrl) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid URL format. URL must start with http:// or https://',
+                message: 'Invalid URL format. Provide URL in format: example.com, www.example.com, or https://example.com',
                 provided: url
             });
         }
+
+        url = normalizedUrl;
 
         // Build options
         const options = {
@@ -786,7 +793,7 @@ async function enrichUrlCollection(req, res) {
 async function liveCrawl(req, res) {
     let browser;
     try {
-        const { url, timeout } = req.body;
+        let { url, timeout } = req.body;
 
         console.log(`🎯 Received live crawl request for: ${url}`);
 
@@ -795,18 +802,21 @@ async function liveCrawl(req, res) {
             return res.status(400).json({
                 success: false,
                 message: 'URL parameter is required',
-                example: '{ "url": "https://example.com/" }'
+                example: '{ "url": "example.com" } or { "url": "https://example.com/" }'
             });
         }
 
-        // Validate URL format
-        if (!isValidUrl(url)) {
+        // Normalize URL (accepts: example.com, www.example.com, https://example.com)
+        const normalizedUrl = normalizeUrl(url);
+        if (!normalizedUrl) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid URL format. URL must start with http:// or https://',
+                message: 'Invalid URL format. Provide URL in format: example.com, www.example.com, or https://example.com',
                 provided: url
             });
         }
+
+        url = normalizedUrl;
 
         const pageTimeout = parseInt(timeout) || 60000; // 60 seconds default
         const startTime = Date.now();
@@ -829,11 +839,27 @@ async function liveCrawl(req, res) {
         console.log(`📄 New page created, navigating to ${url}...`);
 
         // Navigate to URL with timeout
-        // Using 'domcontentloaded' instead of 'networkidle' for better performance
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: pageTimeout });
-        console.log(`✅ Page loaded successfully`);
+        // Try networkidle first for better dynamic content loading
+        try {
+            await page.goto(url, { waitUntil: 'networkidle', timeout: pageTimeout });
+            console.log(`✅ Page loaded successfully with networkidle`);
+        } catch (error) {
+            // Fallback to domcontentloaded if networkidle times out
+            console.log(`⚠️ Networkidle timeout, falling back to domcontentloaded: ${error.message}`);
+            try {
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: pageTimeout });
+                console.log(`✅ Page loaded with domcontentloaded fallback`);
+            } catch (fallbackError) {
+                console.error(`❌ Both load strategies failed: ${fallbackError.message}`);
+                throw fallbackError;
+            }
+        }
 
-        // Extract all URLs from the page
+        // Wait extra time for JavaScript to fully execute (helps with dynamic content)
+        console.log(`⏳ Waiting for JavaScript execution...`);
+        await page.waitForTimeout(2000);
+
+        // Extract all URLs from the page with improved selector
         const urls = await page.evaluate(() => {
             const links = [];
             const anchors = document.querySelectorAll('a[href]');
@@ -842,7 +868,9 @@ async function liveCrawl(req, res) {
             anchors.forEach(anchor => {
                 let href = anchor.getAttribute('href');
 
-                if (!href) return;
+                if (!href || href.trim() === '') return;
+
+                href = href.trim();
 
                 // Convert relative URLs to absolute URLs
                 if (href.startsWith('/')) {
@@ -854,7 +882,10 @@ async function liveCrawl(req, res) {
 
                 // Only include http/https URLs
                 if (href.startsWith('http://') || href.startsWith('https://')) {
-                    links.push(href);
+                    // Filter out empty and common non-content links
+                    if (href !== origin && href !== origin + '/') {
+                        links.push(href);
+                    }
                 }
             });
 
@@ -1085,7 +1116,7 @@ async function listCollectedUrls(req, res) {
 async function liveCrawlAndPrioritize(req, res) {
     let browser;
     try {
-        const { url, timeout } = req.body;
+        let { url, timeout } = req.body;
 
         console.log(`🎯 Received live crawl + prioritize request for: ${url}`);
 
@@ -1094,18 +1125,21 @@ async function liveCrawlAndPrioritize(req, res) {
             return res.status(400).json({
                 success: false,
                 message: 'URL parameter is required',
-                example: '{ "url": "https://example.com/" }'
+                example: '{ "url": "example.com" } or { "url": "https://example.com/" }'
             });
         }
 
-        // Validate URL format
-        if (!isValidUrl(url)) {
+        // Normalize URL (accepts: example.com, www.example.com, https://example.com)
+        const normalizedUrl = normalizeUrl(url);
+        if (!normalizedUrl) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid URL format. URL must start with http:// or https://',
+                message: 'Invalid URL format. Provide URL in format: example.com, www.example.com, or https://example.com',
                 provided: url
             });
         }
+
+        url = normalizedUrl;
 
         const pageTimeout = parseInt(timeout) || 60000; // 60 seconds default
         const startTime = Date.now();
@@ -1129,11 +1163,27 @@ async function liveCrawlAndPrioritize(req, res) {
         console.log(`📄 New page created, navigating to ${url}...`);
 
         // Navigate to URL with timeout
-        // Using 'domcontentloaded' instead of 'networkidle' for better performance
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: pageTimeout });
-        console.log(`✅ Page loaded successfully`);
+        // Try networkidle first for better dynamic content loading
+        try {
+            await page.goto(url, { waitUntil: 'networkidle', timeout: pageTimeout });
+            console.log(`✅ Page loaded successfully with networkidle`);
+        } catch (error) {
+            // Fallback to domcontentloaded if networkidle times out
+            console.log(`⚠️ Networkidle timeout, falling back to domcontentloaded: ${error.message}`);
+            try {
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: pageTimeout });
+                console.log(`✅ Page loaded with domcontentloaded fallback`);
+            } catch (fallbackError) {
+                console.error(`❌ Both load strategies failed: ${fallbackError.message}`);
+                throw fallbackError;
+            }
+        }
 
-        // Extract all URLs from the page
+        // Wait extra time for JavaScript to fully execute (helps with dynamic content)
+        console.log(`⏳ Waiting for JavaScript execution...`);
+        await page.waitForTimeout(2000);
+
+        // Extract all URLs from the page with improved selector
         const urls = await page.evaluate(() => {
             const links = [];
             const anchors = document.querySelectorAll('a[href]');
@@ -1142,7 +1192,9 @@ async function liveCrawlAndPrioritize(req, res) {
             anchors.forEach(anchor => {
                 let href = anchor.getAttribute('href');
 
-                if (!href) return;
+                if (!href || href.trim() === '') return;
+
+                href = href.trim();
 
                 // Convert relative URLs to absolute URLs
                 if (href.startsWith('/')) {
@@ -1154,7 +1206,10 @@ async function liveCrawlAndPrioritize(req, res) {
 
                 // Only include http/https URLs
                 if (href.startsWith('http://') || href.startsWith('https://')) {
-                    links.push(href);
+                    // Filter out empty and common non-content links
+                    if (href !== origin && href !== origin + '/') {
+                        links.push(href);
+                    }
                 }
             });
 

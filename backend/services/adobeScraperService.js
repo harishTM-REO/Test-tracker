@@ -2402,47 +2402,77 @@ class AdobeScraperService {
                 failedWebsitesCount: failedWebsites.length
             });
 
-            // Create or update AdobeResult document
-            console.log(`🔍 [Adobe Target] Attempting to save to database...`);
-            
-            const updateData = {
-                datasetId: datasetId,
-                datasetName: datasetName,
-                totalUrls: results.length,
-                successfulScrapes: successfulScrapes,
-                failedScrapes: failedScrapes,
-                adobeTargetDetectedCount: adobeTargetDetectedCount,
-                totalExperiments: totalExperiments,
-                websiteResults: websiteResults,
-                websitesWithoutAdobeTarget: websitesWithoutAdobeTarget,
-                failedWebsites: failedWebsites,
-                scrapingStats: {
-                    startedAt: startTime,
-                    completedAt: endTime,
-                    duration: duration,
-                    successRate: successRate,
-                    adobeTargetRate: adobeTargetRate
+            // ========== CHUNKED SAVING ==========
+            const BATCH_SIZE = 500;
+            const totalBatches = Math.ceil(websiteResults.length / BATCH_SIZE) || 1;
+
+            console.log(`💾 Saving Adobe Target results in ${totalBatches} batches (${BATCH_SIZE} websites per batch)...`);
+
+            // Save websiteResults in chunks
+            for (let i = 0; i < websiteResults.length; i += BATCH_SIZE) {
+                const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+                const batchWebsites = websiteResults.slice(i, i + BATCH_SIZE);
+
+                // Distribute websitesWithoutAdobeTarget and failedWebsites across batches proportionally
+                const batchRatio = batchWebsites.length / websiteResults.length;
+                let batchWithoutAdobeTarget = [];
+                let batchFailedWebsites = [];
+
+                if (batchNumber === totalBatches) {
+                    // Last batch gets remaining items
+                    batchWithoutAdobeTarget = websitesWithoutAdobeTarget;
+                    batchFailedWebsites = failedWebsites;
+                } else {
+                    // Distribute proportionally
+                    const withoutAdobeTargetCount = Math.floor(websitesWithoutAdobeTarget.length * batchRatio);
+                    const failedCount = Math.floor(failedWebsites.length * batchRatio);
+
+                    batchWithoutAdobeTarget = websitesWithoutAdobeTarget.splice(0, withoutAdobeTargetCount);
+                    batchFailedWebsites = failedWebsites.splice(0, failedCount);
                 }
-            };
-            
-            console.log(`🔍 [Adobe Target] Update data:`, JSON.stringify(updateData, null, 2));
-            
-            const adobeResult = await AdobeResult.findOneAndUpdate(
-                { datasetId: datasetId },
-                updateData,
-                { 
-                    new: true, 
-                    upsert: true,
-                    runValidators: true
-                }
-            );
+
+                const updateData = {
+                    datasetId: datasetId,
+                    datasetName: datasetName,
+                    batchNumber: batchNumber,
+                    totalBatches: totalBatches,
+                    totalUrls: results.length,
+                    successfulScrapes: successfulScrapes,
+                    failedScrapes: failedScrapes,
+                    adobeTargetDetectedCount: adobeTargetDetectedCount,
+                    totalExperiments: totalExperiments,
+                    websiteResults: batchWebsites,
+                    websitesWithoutAdobeTarget: batchWithoutAdobeTarget,
+                    failedWebsites: batchFailedWebsites,
+                    scrapingStats: {
+                        startedAt: startTime,
+                        completedAt: endTime,
+                        duration: duration,
+                        successRate: successRate,
+                        adobeTargetRate: adobeTargetRate
+                    }
+                };
+
+                console.log(`🔍 [Adobe Target] Batch ${batchNumber}/${totalBatches} Update data size:`, JSON.stringify(updateData).length, 'bytes');
+
+                const adobeResult = await AdobeResult.findOneAndUpdate(
+                    { datasetId: datasetId, batchNumber: batchNumber },
+                    updateData,
+                    {
+                        new: true,
+                        upsert: true,
+                        runValidators: true
+                    }
+                );
+
+                console.log(`  ✅ Saved batch ${batchNumber}/${totalBatches} (${batchWebsites.length} websites) - Document ID: ${adobeResult._id}`);
+            }
 
             console.log(`✅ Adobe Target batch results saved successfully for dataset: ${datasetName}`);
             console.log(`📊 Results: ${results.length} total, ${successfulScrapes} successful, ${adobeTargetDetectedCount} with Adobe Target, ${totalExperiments} total experiments`);
-            console.log(`🔍 [Adobe Target] Saved document ID: ${adobeResult._id}`);
-            console.log(`🔍 [Adobe Target] Saved document:`, JSON.stringify(adobeResult, null, 2));
+            console.log(`✅ Saved all ${totalBatches} batches to database`);
 
-            return adobeResult;
+            return { success: true, totalBatches, datasetId };
 
         } catch (error) {
             console.error('Error saving Adobe Target batch results:', error);

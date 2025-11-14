@@ -72,12 +72,21 @@ const optimizelyResultSchema = new mongoose.Schema({
   datasetId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Dataset',
-    required: true,
-    unique: true
+    required: true
   },
   datasetName: {
     type: String,
     required: true
+  },
+  batchNumber: {
+    type: Number,
+    required: true,
+    default: 1
+  },
+  totalBatches: {
+    type: Number,
+    required: true,
+    default: 1
   },
   totalUrls: {
     type: Number,
@@ -151,7 +160,8 @@ const optimizelyResultSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// datasetId index removed - already has unique constraint
+// Composite index for datasetId + batchNumber to handle batching
+optimizelyResultSchema.index({ datasetId: 1, batchNumber: 1 }, { unique: true });
 optimizelyResultSchema.index({ "websiteResults.domain": 1 });
 optimizelyResultSchema.index({ "websiteResults.optimizelyDetected": 1 });
 optimizelyResultSchema.index({ "websitesWithoutOptimizely.domain": 1 });

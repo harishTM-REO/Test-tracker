@@ -250,7 +250,7 @@ class URLDynamicCategorizationService {
         score: 8
       },
       'Product Categories': {
-        keywords: ['product', 'products', 'shop', 'shopping', 'store', 'category', 'catalog', 'collection', 'browse', 'p', 'clothes', 'clothing', 'apparel', 'fashion', 'shoes', 'accessories', 'beauty', 'skincare', 'hair'],
+        keywords: ['product', 'products', 'shop', 'shopping', 'store', 'category', 'catalog', 'collection', 'browse', 'p', 'clothes', 'clothing', 'apparel', 'fashion', 'shoes', 'accessories', 'beauty', 'skincare', 'hair', 'beachwear', 'lingerie', 'swimwear', 'sportswear', 'nightwear', 'hosiery', 'knitwear', 'knickers', 'bras', 'tops', 'bottoms', 'dresses', 'shirts', 'pants', 'shorts', 'jackets', 'coats', 'sweaters', 'jumpers', 'blouses', 'skirts', 'trousers', 'jeans', 'leggings', 'tights', 'stockings', 'bikini', 'bikinis', 'swimsuit', 'swimsuits', 'tankini', 'tankinis', 'coverups', 'cover-ups', 'sarong', 'playsuits', 'chemises', 'babydolls', 'pyjamas', 'loungewear', 'hoodies', 'sweatshirts', 'robes', 'basque', 'basques', 'bodysuit', 'bodysuits', 'giftsets', 'gift-sets', 'collections', 'new-in', 'new', 'allproducts', 'edit', 'edits', 'holiday', 'sale', 'clearance', 'brand', 'brands', 'course', 'courses', 'program', 'programs', 'programme', 'programmes', 'degree', 'degrees', 'class', 'classes', 'training', 'trainings', 'workshop', 'workshops', 'lesson', 'lessons', 'subject', 'subjects', 'module', 'modules', 'certification', 'certifications', 'certificate', 'certificates', 'diploma', 'diplomas'],
         score: 8
       },
       'Offers & Sales': {
@@ -449,7 +449,7 @@ class URLDynamicCategorizationService {
       }
     }
 
-    // 3. Fall back to keyword matching
+    // 3. Fall back to keyword matching on full URL first
     const keywordMatch = this.matchKeywordsToCategory(keywords, categoryMap);
 
     if (keywordMatch !== 'Other') {
@@ -458,6 +458,22 @@ class URLDynamicCategorizationService {
         confidence: 0.7,
         reason: `Keyword "${keywords.join(', ')}" matched to ${keywordMatch}`
       };
+    }
+
+    // 3b. If no match, also check parent keywords (in case child has non-product keywords but parent is product)
+    if (context.tree) {
+      const parentPath = this.getParentPath(path);
+      if (parentPath && context.tree[parentPath]) {
+        const parentKeywords = this.extractKeywords(parentPath);
+        const parentMatch = this.matchKeywordsToCategory(parentKeywords, categoryMap);
+        if (parentMatch === 'Product Categories') {
+          return {
+            category: 'Product Categories',
+            confidence: 0.65,
+            reason: `Parent path contains product keyword "${parentKeywords.join(', ')}"`
+          };
+        }
+      }
     }
 
     // 4. Handle root paths
@@ -523,7 +539,7 @@ class URLDynamicCategorizationService {
       }
     }
 
-    return bestScore >= 15 ? bestCategory : 'Other';
+    return bestScore >= 10 ? bestCategory : 'Other';
   }
 
   /**
@@ -543,8 +559,11 @@ class URLDynamicCategorizationService {
 
   /**
    * Extract all URLs from prioritized response
+   * FOCUS: Only extract from children arrays (actual content pages)
+   * Skip parent/category URLs as they may just be redirects or landing pages
+   *
    * @param {Array} prioritizedUrls - Array from liveCrawlAndPrioritize response
-   * @returns {Array<string>} Flattened array of all unique URLs
+   * @returns {Array<string>} Flattened array of all unique URLs from children arrays
    */
   extractAllUrls(prioritizedUrls) {
     const urlSet = new Set();
@@ -553,25 +572,27 @@ class URLDynamicCategorizationService {
       return [];
     }
 
-    for (const entry of prioritizedUrls) {
-      // Add parent URL
-      if (entry.url) {
-        urlSet.add(entry.url);
-      }
+    console.log(`📍 Extracting URLs from prioritized response (focusing on children/content pages)`);
 
-      // Add all children URLs
+    for (const entry of prioritizedUrls) {
+      // ONLY process children arrays (actual content pages)
+      // Skip: entry.url (parent/category page) and child.url (intermediate category)
       if (entry.topChildren && Array.isArray(entry.topChildren)) {
         for (const child of entry.topChildren) {
-          if (child.url) {
-            urlSet.add(child.url);
-          }
+          // Extract ONLY from the children array - these are the real content pages
           if (child.children && Array.isArray(child.children)) {
-            child.children.forEach(childUrl => urlSet.add(childUrl));
+            console.log(`  → Processing ${child.children.length} child URLs from parent "${child.url}"`);
+            child.children.forEach(childUrl => {
+              if (childUrl && typeof childUrl === 'string') {
+                urlSet.add(childUrl);
+              }
+            });
           }
         }
       }
     }
 
+    console.log(`✅ Total unique URLs extracted from children: ${urlSet.size}`);
     return Array.from(urlSet);
   }
 
