@@ -22,6 +22,7 @@ const CronJobService = require('./services/cronJobService');
 const BackgroundScrapingService = require('./services/backgroundScrapingService');
 const { initializeDatasetJobs } = require('./services/DatasetJobsInitializer');
 const jobQueue = require('./services/jobQueue');
+const IndexValidationService = require('./services/indexValidationService');
 
 const optimizelyRoutes = require('./routes/optimizelyRoutes');
 const abTastyRoutes = require('./routes/abTastyRoutes');
@@ -133,7 +134,16 @@ app.get('/api/health', (req, res) => {
 app.listen(port, async () => {
   console.log(`Server running on http://localhost:${port}`);
   await connectDB();
-  
+
+  // Validate and fix MongoDB indexes
+  try {
+    await IndexValidationService.validateAllIndexes();
+    console.log('✅ MongoDB indexes validated successfully');
+  } catch (error) {
+    console.error('⚠️  Index validation encountered an issue:', error.message);
+    // Don't crash the server, but log the warning
+  }
+
   // Start cron jobs after server starts
   // ❌ DISABLED - All cron jobs have been disabled
   // try {

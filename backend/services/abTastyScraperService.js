@@ -1189,6 +1189,119 @@ async extractAbTastySync(page) {
   }
 
   /**
+   * Handle E11000 duplicate key error when saving batches
+   * Attempts to drop conflicting indexes and retry the save
+   * @param {Error} error - The MongoDB error
+   * @param {Object} queryData - Query object for the failed operation
+   * @param {Object} updateData - Update data for the failed operation
+   * @param {Object} options - Save options
+   * @returns {Object} The result of retry, or throws if unfixable
+   */
+  async handleDuplicateKeyError(error, queryData, updateData, options) {
+    if (error.code !== 11000 || !error.message.includes('datasetId')) {
+      // Not the specific error we're looking for, re-throw
+      throw error;
+    }
+
+    console.log('\n⚠️  E11000 Duplicate Key Error detected!');
+    console.log('   This usually means there\'s a conflicting unique index on datasetId');
+    console.log('   Attempting automatic fix...\n');
+
+    try {
+      const collection = AbTastyResult.collection;
+
+      // Get indexes using the newer API
+      let indexes = {};
+      try {
+        // Try newer API first (MongoDB 4.2+)
+        const indexInfo = await collection.listIndexes().toArray();
+        indexInfo.forEach(idx => {
+          indexes[idx.name] = { key: idx.key, unique: idx.unique || false };
+        });
+      } catch (e) {
+        // Fallback to older API if available
+        if (typeof collection.getIndexes === 'function') {
+          indexes = await collection.getIndexes();
+        } else {
+          throw new Error('Unable to retrieve indexes from MongoDB');
+        }
+      }
+
+      // Look for the index name directly from error or by pattern
+      // The error message tells us the index name in keyPattern: { datasetId: 1 }
+      let indexNameToDrop = null;
+
+      // Method 1: Try to find it by checking the structure
+      Object.entries(indexes).forEach(([name, spec]) => {
+        // Check if this is a unique index on just datasetId (not composite)
+        if (name !== '_id_' && spec.unique === true) {
+          // Safe check for spec.key
+          const keyObj = spec.key || {};
+          const keyFields = Object.keys(keyObj);
+
+          // If it's a single field index on datasetId, this is the problematic one
+          if (keyFields.length === 1 && keyFields[0] === 'datasetId') {
+            indexNameToDrop = name;
+            console.log(`🔧 Found conflicting index: "${name}"`);
+            console.log(`   Structure: { ${keyFields.join(', ')} }`);
+          }
+        }
+      });
+
+      // Method 2: If not found by structure, try the common name pattern
+      if (!indexNameToDrop && indexes['datasetId_1']) {
+        if (indexes['datasetId_1'].unique === true) {
+          indexNameToDrop = 'datasetId_1';
+          console.log(`🔧 Found conflicting index: "datasetId_1"`);
+        }
+      }
+
+      if (indexNameToDrop) {
+        console.log(`   Dropping it...\n`);
+
+        try {
+          await collection.dropIndex(indexNameToDrop);
+          console.log(`✅ Successfully dropped conflicting index!\n`);
+
+          // Retry the save operation
+          console.log('🔄 Retrying save operation...\n');
+          const result = await AbTastyResult.findOneAndUpdate(
+            queryData,
+            updateData,
+            options
+          );
+
+          console.log('✅ Save succeeded after fixing indexes!\n');
+          return result;
+        } catch (dropError) {
+          console.error(`❌ Failed to drop index "${indexNameToDrop}": ${dropError.message}`);
+          throw dropError;
+        }
+      } else {
+        console.log('❌ Could not identify the conflicting index');
+        console.log('   Available indexes:');
+        Object.entries(indexes).forEach(([name, spec]) => {
+          try {
+            const keyInfo = spec.key ? Object.keys(spec.key).join(', ') : 'unknown';
+            const uniqueFlag = spec.unique ? '(unique)' : '';
+            console.log(`     • ${name}: { ${keyInfo} } ${uniqueFlag}`);
+          } catch (e) {
+            console.log(`     • ${name}: [unable to parse]`);
+          }
+        });
+        throw new Error('Could not find datasetId_1 index to drop');
+      }
+    } catch (fixError) {
+      console.error('\n❌ Failed to auto-fix the duplicate key error');
+      console.error(`   ${fixError.message}\n`);
+      console.log('⚠️  Manual Fix Required!');
+      console.log('   Run: node backend/scripts/fixDuplicateKeyIndex.js');
+      console.log('   Or: Delete the "datasetId_1" index in MongoDB Atlas\n');
+      throw error; // Throw original error
+    }
+  }
+
+  /**
    * Batch scrape multiple URLs with optimized resource management
    * @param {Array} urls - Array of URLs to scrape
    * @param {Object} options - Scraping options
@@ -1511,6 +1624,7 @@ async extractAbTastySync(page) {
       const abTastyRate = `${((abTastyDetectedCount / results.length) * 100).toFixed(1)}%`;
 
       // ========== CHUNKED SAVING ==========
+      // PRODUCTION: Save every 500 websites as one batch document
       const BATCH_SIZE = 500;
       const totalBatches = Math.ceil(websiteResults.length / BATCH_SIZE) || 1;
 
@@ -1539,37 +1653,46 @@ async extractAbTastySync(page) {
           batchFailedWebsites = failedWebsites.splice(0, failedCount);
         }
 
-        await AbTastyResult.findOneAndUpdate(
-          { datasetId: datasetId, batchNumber: batchNumber },
-          {
-            datasetId: datasetId,
-            datasetName: datasetName,
-            batchNumber: batchNumber,
-            totalBatches: totalBatches,
-            totalUrls: results.length,
-            successfulScrapes: successfulScrapes,
-            failedScrapes: failedScrapes,
-            abTastyDetectedCount: abTastyDetectedCount,
-            totalExperiments: totalExperiments,
-            websiteResults: batchWebsites,
-            websitesWithoutAbTasty: batchWithoutAbTasty,
-            failedWebsites: batchFailedWebsites,
-            scrapingStats: {
-              startedAt: startTime,
-              completedAt: endTime,
-              duration: duration,
-              abTastyRate: abTastyRate,
-              successRate: successRate
-            }
-          },
-          {
-            upsert: true,
-            new: true,
-            setDefaultsOnInsert: true
+        const queryData = { datasetId: datasetId, batchNumber: batchNumber };
+        const updateData = {
+          datasetId: datasetId,
+          datasetName: datasetName,
+          batchNumber: batchNumber,
+          totalBatches: totalBatches,
+          totalUrls: results.length,
+          successfulScrapes: successfulScrapes,
+          failedScrapes: failedScrapes,
+          abTastyDetectedCount: abTastyDetectedCount,
+          totalExperiments: totalExperiments,
+          websiteResults: batchWebsites,
+          websitesWithoutAbTasty: batchWithoutAbTasty,
+          failedWebsites: batchFailedWebsites,
+          scrapingStats: {
+            startedAt: startTime,
+            completedAt: endTime,
+            duration: duration,
+            abTastyRate: abTastyRate,
+            successRate: successRate
           }
-        );
+        };
+        const saveOptions = {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true
+        };
 
-        console.log(`  ✅ Saved batch ${batchNumber}/${totalBatches} (${batchWebsites.length} websites)`);
+        try {
+          await AbTastyResult.findOneAndUpdate(queryData, updateData, saveOptions);
+          console.log(`  ✅ Saved batch ${batchNumber}/${totalBatches} (${batchWebsites.length} websites)`);
+        } catch (error) {
+          if (error.code === 11000 && error.message.includes('datasetId')) {
+            // Handle duplicate key error with auto-fix
+            await this.handleDuplicateKeyError(error, queryData, updateData, saveOptions);
+            console.log(`  ✅ Saved batch ${batchNumber}/${totalBatches} (${batchWebsites.length} websites) [after auto-fix]`);
+          } else {
+            throw error;
+          }
+        }
       }
 
       // Create initial version 1 in change detection system (with all websites)
@@ -1663,35 +1786,45 @@ async extractAbTastySync(page) {
       const batchNumber = (lastBatch?.batchNumber || 0) + 1;
 
       // Save this batch
-      const abTastyResult = await AbTastyResult.findOneAndUpdate(
-        { datasetId: datasetId, batchNumber: batchNumber },
-        {
-          datasetId: datasetId,
-          datasetName: datasetName,
-          batchNumber: batchNumber,
-          totalBatches: 999,  // ← Placeholder, will be updated at end
-          totalUrls: totalUrls,  // Total URLs being processed
-          successfulScrapes: successfulScrapes,
-          failedScrapes: failedScrapes,
-          abTastyDetectedCount: abTastyDetectedCount,
-          totalExperiments: totalExperiments,
-          websiteResults: websiteResults,
-          websitesWithoutAbTasty: websitesWithoutAbTasty,
-          failedWebsites: failedWebsites,
-          scrapingStats: {
-            startedAt: startTime,
-            completedAt: endTime,
-            duration: duration,
-            abTastyRate: abTastyRate,
-            successRate: successRate
-          }
-        },
-        {
-          upsert: true,
-          new: true,
-          setDefaultsOnInsert: true
+      const queryData = { datasetId: datasetId, batchNumber: batchNumber };
+      const updateData = {
+        datasetId: datasetId,
+        datasetName: datasetName,
+        batchNumber: batchNumber,
+        totalBatches: 999,  // ← Placeholder, will be updated at end
+        totalUrls: totalUrls,  // Total URLs being processed
+        successfulScrapes: successfulScrapes,
+        failedScrapes: failedScrapes,
+        abTastyDetectedCount: abTastyDetectedCount,
+        totalExperiments: totalExperiments,
+        websiteResults: websiteResults,
+        websitesWithoutAbTasty: websitesWithoutAbTasty,
+        failedWebsites: failedWebsites,
+        scrapingStats: {
+          startedAt: startTime,
+          completedAt: endTime,
+          duration: duration,
+          abTastyRate: abTastyRate,
+          successRate: successRate
         }
-      );
+      };
+      const saveOptions = {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      };
+
+      let abTastyResult;
+      try {
+        abTastyResult = await AbTastyResult.findOneAndUpdate(queryData, updateData, saveOptions);
+      } catch (error) {
+        if (error.code === 11000 && error.message.includes('datasetId')) {
+          // Handle duplicate key error with auto-fix
+          abTastyResult = await this.handleDuplicateKeyError(error, queryData, updateData, saveOptions);
+        } else {
+          throw error;
+        }
+      }
 
       console.log(`  ✅ Streamed batch ${batchNumber} (${websiteResults.length} with AbTasty, ${websitesWithoutAbTasty.length} without, ${failedWebsites.length} failed)`);
 
