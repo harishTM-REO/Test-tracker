@@ -7,16 +7,25 @@
 const dns = require('dns').promises;
 const https = require('https');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 class URLSanitizerService {
   constructor() {
-    this.problematicDomains = new Set([
+    // Hardcoded problematic domains
+    const hardcodedDomains = [
       'polkadotdata.com',
       'floristeria-mowgli.myshopify.com',
       'cceifame.com',
       'cse-uloglangon.fr',
-      // Add more as you discover them
-    ]);
+    ];
+
+    // Load persistent blacklist from file
+    this.blacklistFile = path.join(__dirname, '../data/problematic-domains.json');
+    const persistedDomains = this.loadBlacklist();
+
+    // Combine hardcoded and persisted domains
+    this.problematicDomains = new Set([...hardcodedDomains, ...persistedDomains]);
 
     this.validatedCache = new Map(); // Cache validation results
     this.stats = {
@@ -380,11 +389,52 @@ class URLSanitizerService {
   }
 
   /**
+   * Load persistent blacklist from file
+   */
+  loadBlacklist() {
+    try {
+      if (fs.existsSync(this.blacklistFile)) {
+        const data = fs.readFileSync(this.blacklistFile, 'utf-8');
+        const domains = JSON.parse(data).domains || [];
+        console.log(`📂 Loaded ${domains.length} domains from persistent blacklist`);
+        return domains;
+      }
+    } catch (error) {
+      console.warn(`⚠️  Failed to load blacklist from file: ${error.message}`);
+    }
+    return [];
+  }
+
+  /**
+   * Save persistent blacklist to file
+   */
+  saveBlacklist() {
+    try {
+      const dir = path.dirname(this.blacklistFile);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const data = {
+        domains: Array.from(this.problematicDomains),
+        lastUpdated: new Date().toISOString(),
+        count: this.problematicDomains.size
+      };
+      fs.writeFileSync(this.blacklistFile, JSON.stringify(data, null, 2));
+      console.log(`💾 Saved ${this.problematicDomains.size} domains to persistent blacklist`);
+    } catch (error) {
+      console.error(`❌ Failed to save blacklist to file: ${error.message}`);
+    }
+  }
+
+  /**
    * Add domain to blacklist (when we discover it crashes browsers)
+   * NOW PERSISTS TO FILE
    */
   addProblematicDomain(domain) {
-    this.problematicDomains.add(domain.toLowerCase());
-    console.log(`⛔ Added ${domain} to problematic domains blacklist`);
+    const lowerDomain = domain.toLowerCase();
+    this.problematicDomains.add(lowerDomain);
+    this.saveBlacklist(); // Persist to file
+    console.log(`⛔ Added ${domain} to problematic domains blacklist (persisted to disk)`);
   }
 
   /**

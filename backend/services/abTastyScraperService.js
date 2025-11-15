@@ -284,6 +284,22 @@ class AbTastyScraperService {
       //   req.continue();
       // });
 
+      // Add error handlers to detect page crashes early
+      page.on('error', (error) => {
+        console.warn(`⚠️  Page error event (non-fatal):`, error.message);
+      });
+
+      page.on('close', () => {
+        console.warn(`⚠️  Page closed unexpectedly`);
+      });
+
+      // Monitor for browser disconnection
+      if (browser) {
+        browser.on('disconnected', () => {
+          console.error('❌ Browser disconnected unexpectedly');
+        });
+      }
+
       console.log('✅ Page configured successfully (JS enabled, request interception disabled for stability)');
       return page;
     } catch (error) {
@@ -1592,6 +1608,9 @@ async extractAbTastySync(page) {
       const totalChunks = Math.ceil(urlsToProcess.length / batchSize);
       console.log(`\n📥 Processing chunk ${chunkNumber}/${totalChunks}: URLs ${i + 1}-${Math.min(i + batchSize, urlsToProcess.length)}`);
 
+      // Capture batch processing start time for accurate duration tracking
+      const batchProcessingStartTime = Date.now();
+
       // SCRAPE THIS CHUNK
       const chunkResults = await this.processUrlChunk(chunk, { concurrent, maxTabs });
       results.push(...chunkResults);
@@ -1641,8 +1660,7 @@ async extractAbTastySync(page) {
             datasetId,
             datasetName,
             chunkResults,
-            startTime,
-            urlsToProcess.length
+            batchProcessingStartTime  // Pass batch processing start time for accurate duration
           );
 
           const saveDuration = Date.now() - saveBatchStart;
@@ -1674,8 +1692,7 @@ async extractAbTastySync(page) {
                 datasetId,
                 datasetName,
                 chunkResults,
-                startTime,
-                urlsToProcess.length
+                batchProcessingStartTime  // Use same batch processing start time
               );
               totalChunksSaved++;
               console.log(`✅ Chunk ${chunkNumber}: Saved batch #${retryResult.batchNumber} (after reconnect)`);
@@ -2228,15 +2245,17 @@ async extractAbTastySync(page) {
    * Saves every batch of results without waiting for all processing to complete
    * @param {string} datasetId - Dataset ID
    * @param {string} datasetName - Dataset name
-   * @param {Array} results - Batch of results to save
-   * @param {Date} startTime - Scraping start time
-   * @param {number} totalUrls - Total URLs being scraped (for stats)
+   * @param {Array} results - Batch of results to save (determines batch size and metrics)
+   * @param {number} batchProcessingStartTime - Timestamp when this batch started processing (for accurate duration)
    * @returns {Object} Save result with batch number and status
    */
-  async saveResultsStreamingBatch(datasetId, datasetName, results, startTime, totalUrls) {
+  async saveResultsStreamingBatch(datasetId, datasetName, results, batchProcessingStartTime) {
     try {
-      const endTime = new Date();
-      const duration = `${endTime - startTime}ms`;
+      // Calculate duration for THIS BATCH only
+      // batchProcessingStartTime is passed from the caller (when batch processing started)
+      const batchSaveStartTime = Date.now();  // When we start saving this batch
+      const batchDuration = batchSaveStartTime - batchProcessingStartTime;  // Actual processing time
+      const duration = `${batchDuration}ms`;
 
       // Process results
       const websiteResults = [];
@@ -2307,7 +2326,7 @@ async extractAbTastySync(page) {
         datasetName: datasetName,
         batchNumber: batchNumber,
         totalBatches: 999,  // ← Placeholder, will be updated at end
-        totalUrls: totalUrls,  // Total URLs being processed
+        totalUrls: results.length,  // Total URLs in THIS BATCH (not job total)
         successfulScrapes: successfulScrapes,
         failedScrapes: failedScrapes,
         abTastyDetectedCount: abTastyDetectedCount,
@@ -2316,8 +2335,8 @@ async extractAbTastySync(page) {
         websitesWithoutAbTasty: websitesWithoutAbTasty,
         failedWebsites: failedWebsites,
         scrapingStats: {
-          startedAt: startTime,
-          completedAt: endTime,
+          startedAt: new Date(batchProcessingStartTime),  // Batch processing start
+          completedAt: new Date(batchSaveStartTime),      // When batch save started
           duration: duration,
           abTastyRate: abTastyRate,
           successRate: successRate
