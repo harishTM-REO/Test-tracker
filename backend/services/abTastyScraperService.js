@@ -235,52 +235,56 @@ class AbTastyScraperService {
       // Instead block scripts at the request level
       // await page.setJavaScriptEnabled(false); // DISABLED - breaks extraction
 
-      // Block resource-heavy content but allow scripts needed for data extraction
-      await page.setRequestInterception(true);
-      page.on('request', (req) => {
-        const resourceType = req.resourceType();
-        const url = req.url();
+      // DISABLED: Request interception was causing browser crashes on certain sites
+      // (e.g., voyage-bhoutan.fr, reddragondarts.com)
+      // Instead, let all resources load naturally - sites work better without aggressive blocking
+      // This trades slightly more bandwidth for better stability and compatibility
 
-        // Block these resource types (safe to block)
-        if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
-          req.abort();
-          return;
-        }
+      // await page.setRequestInterception(true);
+      // page.on('request', (req) => {
+      //   const resourceType = req.resourceType();
+      //   const url = req.url();
+      //
+      //   // Block these resource types (safe to block)
+      //   if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+      //     req.abort();
+      //     return;
+      //   }
+      //
+      //   // Block tracking and ad-related scripts (malicious)
+      //   if (resourceType === 'script') {
+      //     const blockedPatterns = [
+      //       'google-analytics',
+      //       'tracking',
+      //       'doubleclick',
+      //       'ads',
+      //       'adsbygoogle',
+      //       'facebook.com',
+      //       'twitter.com',
+      //       'instagram',
+      //       'tiktok',
+      //       'segment.com',
+      //       'mixpanel',
+      //       'amplitude',
+      //       'intercom',
+      //       'drift',
+      //     ];
+      //
+      //     const shouldBlock = blockedPatterns.some(pattern =>
+      //       url.toLowerCase().includes(pattern)
+      //     );
+      //
+      //     if (shouldBlock) {
+      //       req.abort();
+      //       return;
+      //     }
+      //   }
+      //
+      //   // Allow everything else (data, xhr, scripts we need)
+      //   req.continue();
+      // });
 
-        // Block tracking and ad-related scripts (malicious)
-        if (resourceType === 'script') {
-          const blockedPatterns = [
-            'google-analytics',
-            'tracking',
-            'doubleclick',
-            'ads',
-            'adsbygoogle',
-            'facebook.com',
-            'twitter.com',
-            'instagram',
-            'tiktok',
-            'segment.com',
-            'mixpanel',
-            'amplitude',
-            'intercom',
-            'drift',
-          ];
-
-          const shouldBlock = blockedPatterns.some(pattern =>
-            url.toLowerCase().includes(pattern)
-          );
-
-          if (shouldBlock) {
-            req.abort();
-            return;
-          }
-        }
-
-        // Allow everything else (data, xhr, scripts we need)
-        req.continue();
-      });
-
-      console.log('✅ Page configured successfully (JS enabled + smart ad/tracking blocker)');
+      console.log('✅ Page configured successfully (JS enabled, request interception disabled for stability)');
       return page;
     } catch (error) {
       console.error('❌ Error creating page:', error.message);
