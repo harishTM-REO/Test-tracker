@@ -1101,7 +1101,7 @@ class OptimizelyScraperService {
             shouldReleaseBrowser = false; // Don't release in finally since we're restarting
           } else {
             // For other errors, safely return to pool
-            browserPool.releaseBrowser(browser);
+            await browserPool.releaseBrowser(browser);
             console.log(`♻️  Released browser back to pool (after page creation failure)`);
             // Mark as released so finally block doesn't double-release
             shouldReleaseBrowser = false;
@@ -1170,7 +1170,7 @@ class OptimizelyScraperService {
       // This prevents dead browsers from accumulating in the pool
       if (shouldReleaseBrowser && browser && !browserRestartTriggered) {
         try {
-          browserPool.releaseBrowser(browser);
+          await browserPool.releaseBrowser(browser);
           console.log(`♻️  Released browser back to pool`);
         } catch (releaseError) {
           console.error(`❌ Error releasing browser: ${releaseError.message}`);

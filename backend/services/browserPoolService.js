@@ -275,8 +275,9 @@ class BrowserPoolService {
    * Release a browser back to the pool
    * Serves next waiting request if any
    * CRITICAL: Checks if browser needs restart before returning to pool
+   * ✅ FIXED: Now async - waits for restart to complete before returning
    */
-  releaseBrowser(browser) {
+  async releaseBrowser(browser) {
     this.busyBrowsers.delete(browser);
     this.stats.totalReleases++;
 
@@ -288,7 +289,9 @@ class BrowserPoolService {
     // Check if browser needs restart due to page count
     if (this.needsRestart(browser)) {
       console.log(`🔄 Browser reached page limit (${this.pageCountPerBrowser.get(browser)}/${this.maxPagesBeforeRestart}), scheduling restart...`);
-      this.scheduleAsyncRestart(browser);
+      // ✅ FIXED: Now awaiting the restart to complete
+      await this.scheduleAsyncRestart(browser);
+      console.log(`🔓 Restart completed, serving waiting requests...`);
       // Don't put back in queue if it needs restart
       if (this.waitingQueue.length > 0) {
         const resolve = this.waitingQueue.shift();
@@ -343,9 +346,10 @@ class BrowserPoolService {
     // ✅ FIX #1: Mark browser as undergoing restart IMMEDIATELY
     this.browserRestartInProgress.add(browser);
 
-    // ✅ FIX #3: Wait if other browsers are already restarting to stagger them
-    while (this.browserRestartInProgress.size > 1) {
-      console.log(`⏳ Waiting for other browser restarts to complete (${this.browserRestartInProgress.size} browsers restarting)...`);
+    // ✅ FIX #3: Wait if 3+ browsers are already restarting (allows 2 parallel)
+    // Allows 2 browsers to restart simultaneously, 3rd+ waits for slots to free up
+    while (this.browserRestartInProgress.size > 2) {
+      console.log(`⏳ Waiting for other browser restarts to complete (${this.browserRestartInProgress.size} browsers restarting, max 2 parallel)...`);
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
@@ -404,13 +408,14 @@ class BrowserPoolService {
   /**
    * Execute a function with a browser from the pool
    * Automatically acquires and releases browser
+   * ✅ FIXED: Now awaits release to ensure restart completes
    */
   async withBrowser(fn) {
     const browser = await this.acquireBrowser();
     try {
       return await fn(browser);
     } finally {
-      this.releaseBrowser(browser);
+      await this.releaseBrowser(browser);
     }
   }
 
