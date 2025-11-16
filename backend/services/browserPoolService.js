@@ -41,6 +41,12 @@ class BrowserPoolService {
     this.pageCountPerBrowser = new Map();
     this.maxPagesBeforeRestart = parseInt(process.env.MAX_PAGES_BEFORE_RESTART) || 30;
 
+    // ✅ FIX #1: Track browsers currently being restarted to prevent race condition
+    this.browserRestartInProgress = new Set();
+
+    // ✅ FIX #5: Risk-based page limits per browser
+    this.maxPagesPerBrowser = new Map();
+
     this.stats = {
       totalBrowsersCreated: 0,
       totalBrowsersClosed: 0,
@@ -163,22 +169,51 @@ class BrowserPoolService {
       };
 
       if (this.availableBrowsers.length > 0) {
-        const browser = this.availableBrowsers.pop();
-        this.busyBrowsers.add(browser);
-        this.stats.totalAcquisitions++;
-
-        // Track when this browser was acquired
-        if (!this.browserAcquisitionTimes) {
-          this.browserAcquisitionTimes = new WeakMap();
+        // ✅ FIX #1: Skip browsers that are currently being restarted
+        let browser = null;
+        while (this.availableBrowsers.length > 0) {
+          const candidate = this.availableBrowsers.pop();
+          if (!this.browserRestartInProgress.has(candidate)) {
+            browser = candidate;
+            break;
+          } else {
+            // This browser is being restarted, put it back at the end
+            this.availableBrowsers.unshift(candidate);
+            console.log(`⏭️ Skipping browser undergoing restart, trying next available...`);
+            break;
+          }
         }
-        this.browserAcquisitionTimes.set(browser, Date.now());
 
-        const queueLength = this.waitingQueue.length;
-        if (queueLength > 0) {
-          console.log(`📊 Browser acquired (queue was ${queueLength})`);
+        // If we found an available browser (not in restart), use it
+        if (browser) {
+          this.busyBrowsers.add(browser);
+          this.stats.totalAcquisitions++;
+
+          // Track when this browser was acquired
+          if (!this.browserAcquisitionTimes) {
+            this.browserAcquisitionTimes = new WeakMap();
+          }
+          this.browserAcquisitionTimes.set(browser, Date.now());
+
+          const queueLength = this.waitingQueue.length;
+          if (queueLength > 0) {
+            console.log(`📊 Browser acquired (queue was ${queueLength})`);
+          }
+
+          resolve(browser);
+        } else {
+          // No available browsers that aren't restarting, queue the request
+          this.waitingQueue.push(requestHandler);
+          console.log(`⏳ All available browsers undergoing restart, queuing request (queue length: ${this.waitingQueue.length})`);
+          timeoutHandle = setTimeout(() => {
+            const index = this.waitingQueue.indexOf(requestHandler);
+            if (index > -1) {
+              this.waitingQueue.splice(index, 1);
+              console.error(`❌ Browser acquisition timeout after ${queueTimeout}ms - browsers may be stuck!`);
+              reject(new Error(`Browser pool timeout - all browsers either busy or restarting after ${queueTimeout}ms`));
+            }
+          }, queueTimeout);
         }
-
-        resolve(browser);
       } else {
         // All browsers busy, check if we should trigger a health check for stuck browsers
         if (this.waitingQueue.length === 0) {
@@ -227,10 +262,13 @@ class BrowserPoolService {
 
   /**
    * Check if browser needs restart due to page count
+   * ✅ FIX #5: Uses risk-based page limits if available
    */
   needsRestart(browser) {
     const pageCount = this.pageCountPerBrowser.get(browser) || 0;
-    return pageCount >= this.maxPagesBeforeRestart;
+    // ✅ FIX #5: Use risk-based limit if set, otherwise use global limit
+    const limit = this.maxPagesPerBrowser.get(browser) || this.maxPagesBeforeRestart;
+    return pageCount >= limit;
   }
 
   /**
@@ -297,35 +335,70 @@ class BrowserPoolService {
 
   /**
    * Schedule async restart of browser to prevent blocking
+   * ✅ FIX #1: Marks browser as "in restart" to prevent race condition
+   * ✅ FIX #2: Cleans up memory before launching new browser
+   * ✅ FIX #3: Staggered restarts to prevent resource spikes
    */
   async scheduleAsyncRestart(browser) {
-    setTimeout(async () => {
-      try {
-        const browserIndex = this.browsers.indexOf(browser);
-        if (browserIndex === -1) return;
+    // ✅ FIX #1: Mark browser as undergoing restart IMMEDIATELY
+    this.browserRestartInProgress.add(browser);
 
-        console.log(`🔧 Restarting browser ${browserIndex + 1} due to page limit...`);
+    // ✅ FIX #3: Wait if other browsers are already restarting to stagger them
+    while (this.browserRestartInProgress.size > 1) {
+      console.log(`⏳ Waiting for other browser restarts to complete (${this.browserRestartInProgress.size} browsers restarting)...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
 
-        // Close old browser
-        try {
-          await browser.close();
-        } catch (e) {
-          console.warn(`Could not close browser: ${e.message}`);
-        }
-
-        // Launch new one
-        const newBrowser = await this.launchBrowser(browserIndex + 1);
-        this.browsers[browserIndex] = newBrowser;
-        this.pageCountPerBrowser.delete(browser);
-        this.pageCountPerBrowser.set(newBrowser, 0);
-        this.availableBrowsers.push(newBrowser);
-        this.stats.totalBrowserRestarts++;
-
-        console.log(`✅ Browser ${browserIndex + 1} restarted successfully`);
-      } catch (error) {
-        console.error(`❌ Failed to restart browser: ${error.message}`);
+    try {
+      const browserIndex = this.browsers.indexOf(browser);
+      if (browserIndex === -1) {
+        this.browserRestartInProgress.delete(browser);
+        return;
       }
-    }, 0); // Use setImmediate-like behavior
+
+      console.log(`🔧 Restarting browser ${browserIndex + 1} due to page limit (pages: ${this.pageCountPerBrowser.get(browser)})...`);
+
+      // ✅ FIX #2: Close old browser and cleanup memory
+      try {
+        await browser.close();
+        console.log(`✅ Browser ${browserIndex + 1} closed successfully`);
+      } catch (e) {
+        console.warn(`⚠️ Could not close browser ${browserIndex + 1}: ${e.message}`);
+      }
+
+      // ✅ FIX #2: Wait for memory cleanup to complete
+      console.log(`🧹 Waiting 500ms for memory cleanup...`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // ✅ FIX #2: Force garbage collection if available
+      if (global.gc) {
+        console.log(`🧹 Running garbage collection...`);
+        global.gc();
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      // Launch new browser
+      console.log(`🚀 Launching new browser ${browserIndex + 1}...`);
+      const newBrowser = await this.launchBrowser(browserIndex + 1);
+      this.browsers[browserIndex] = newBrowser;
+      this.pageCountPerBrowser.delete(browser);
+      this.pageCountPerBrowser.set(newBrowser, 0);
+
+      // ✅ FIX #5: Reset risk-based limit for new browser
+      this.maxPagesPerBrowser.delete(browser);
+      this.maxPagesPerBrowser.delete(newBrowser); // Reset to default
+
+      this.availableBrowsers.push(newBrowser);
+      this.stats.totalBrowserRestarts++;
+
+      console.log(`✅ Browser ${browserIndex + 1} restarted successfully and ready for use`);
+    } catch (error) {
+      console.error(`❌ Failed to restart browser: ${error.message}`);
+    } finally {
+      // ✅ FIX #1: Mark restart as complete
+      this.browserRestartInProgress.delete(browser);
+      console.log(`🔓 Browser restart tracking cleared (${this.browserRestartInProgress.size} browsers still restarting)`);
+    }
   }
 
   /**
@@ -338,6 +411,71 @@ class BrowserPoolService {
       return await fn(browser);
     } finally {
       this.releaseBrowser(browser);
+    }
+  }
+
+  /**
+   * ✅ FIX #5: Set risk-based page limit for a specific browser
+   * HIGH-RISK domains restart every 5 pages
+   * MEDIUM-RISK domains restart every 10 pages
+   * LOW-RISK domains use default limit
+   */
+  setRiskBasedPageLimit(browser, riskLevel = 'LOW') {
+    let limit;
+    if (riskLevel === 'HIGH') {
+      limit = 5; // Aggressive restart for unstable domains
+      console.log(`⚠️ Browser set to HIGH-RISK mode (restart every 5 pages)`);
+    } else if (riskLevel === 'MEDIUM') {
+      limit = 10;
+      console.log(`⚠️ Browser set to MEDIUM-RISK mode (restart every 10 pages)`);
+    } else {
+      // LOW or DEFAULT
+      limit = this.maxPagesBeforeRestart;
+      console.log(`✅ Browser set to default risk mode (restart every ${limit} pages)`);
+    }
+    this.maxPagesPerBrowser.set(browser, limit);
+  }
+
+  /**
+   * Detect URL risk level based on domain characteristics
+   * Returns 'HIGH', 'MEDIUM', or 'LOW'
+   * ✅ FIX #5: Can be used to automatically set page limits
+   */
+  detectUrlRiskLevel(url) {
+    try {
+      const domain = new URL(url).hostname;
+
+      // High-risk domains that have caused crashes
+      const highRiskDomains = [
+        'cse-cim31.fr',
+        'halliwelljonessouthportbmw.co.uk',
+        'moncsegayet.com',
+        'califloorsdev.com',
+        'formations-rh.fr',
+        'duke-handel.de'
+      ];
+
+      // Check if domain matches high-risk list
+      if (highRiskDomains.some(d => domain.includes(d))) {
+        return 'HIGH';
+      }
+
+      // Medium-risk heuristics (can be expanded)
+      const riskFactors = {
+        hasVideoHosting: domain.includes('youtube') || domain.includes('vimeo'),
+        isAdNetwork: domain.includes('doubleclick') || domain.includes('adsmogo'),
+        isSocialMedia: domain.includes('facebook') || domain.includes('twitter')
+      };
+
+      const riskCount = Object.values(riskFactors).filter(Boolean).length;
+      if (riskCount >= 1) {
+        return 'MEDIUM';
+      }
+
+      return 'LOW';
+    } catch (error) {
+      console.warn(`Could not parse URL for risk detection: ${url}`);
+      return 'LOW';
     }
   }
 

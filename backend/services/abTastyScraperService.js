@@ -1026,6 +1026,12 @@ async extractAbTastySync(page) {
         browser = await browserPool.acquireBrowser();
         shouldReleaseBrowser = true;
         console.log(`🔗 Acquired browser from pool for: ${url}`);
+
+        // ✅ FIX #5: Set risk-based page limit based on URL characteristics
+        const riskLevel = browserPool.detectUrlRiskLevel(url);
+        if (riskLevel !== 'LOW') {
+          browserPool.setRiskBasedPageLimit(browser, riskLevel);
+        }
       }
 
       // Create and configure page
