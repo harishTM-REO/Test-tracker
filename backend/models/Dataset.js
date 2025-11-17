@@ -436,6 +436,10 @@ datasetSchema.index({ createdAt: -1 });
 datasetSchema.index({ 'metadata.fileHash': 1 });
 datasetSchema.index({ status: 1, isDeleted: 1 });
 datasetSchema.index({ tags: 1 });
+// OPTIMIZATION: Added index for scrapingStatus - used in getDatasetById conditional logic
+datasetSchema.index({ scrapingStatus: 1 });
+// OPTIMIZATION: Text index for full-text search - much faster than regex queries
+datasetSchema.index({ name: 'text', description: 'text', originalFileName: 'text' });
 
 // Virtual for formatted file size
 datasetSchema.virtual('formattedFileSize').get(function() {
