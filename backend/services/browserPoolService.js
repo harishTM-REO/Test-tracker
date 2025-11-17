@@ -47,12 +47,16 @@ class BrowserPoolService {
     // ✅ FIX #5: Risk-based page limits per browser
     this.maxPagesPerBrowser = new Map();
 
+    // ✅ ZOMBIE DETECTION: Track interval for periodic zombie scans
+    this.zombieScanInterval = null;
+
     this.stats = {
       totalBrowsersCreated: 0,
       totalBrowsersClosed: 0,
       totalAcquisitions: 0,
       totalReleases: 0,
-      totalBrowserRestarts: 0
+      totalBrowserRestarts: 0,
+      totalZombiesDetected: 0
     };
 
     console.log(`🌐 BrowserPoolService initialized with pool size: ${poolSize}, max pages before restart: ${this.maxPagesBeforeRestart}`);
@@ -85,12 +89,73 @@ class BrowserPoolService {
 
       this.isInitialized = true;
       console.log(`\n✅ Browser pool initialized successfully with ${this.poolSize} browsers\n`);
+
+      // ✅ ZOMBIE DETECTION: Start periodic zombie scanner (every 60 seconds)
+      this.startZombieScan();
     } catch (error) {
       console.error('❌ Failed to initialize browser pool:', error.message);
       // Cleanup any browsers that were successfully launched
       await this.closeAll();
       throw error;
     }
+  }
+
+  /**
+   * ✅ ZOMBIE DETECTION: Periodically scan for zombie browsers
+   * Detects browsers that failed to close properly and are still connected
+   */
+  startZombieScan() {
+    // Clear any existing interval
+    if (this.zombieScanInterval) {
+      clearInterval(this.zombieScanInterval);
+    }
+
+    // Run scan every 60 seconds
+    this.zombieScanInterval = setInterval(async () => {
+      try {
+        let zombieCount = 0;
+
+        for (let i = 0; i < this.browsers.length; i++) {
+          const browser = this.browsers[i];
+          if (!browser) continue;
+
+          // Check if this browser is in the available pool or being restarted
+          const isAvailable = this.availableBrowsers.includes(browser);
+          const isRestarting = this.browserRestartInProgress.has(browser);
+          const isInUse = this.busyBrowsers.has(browser);
+
+          // If browser is not available, not restarting, and not in use - it might be a zombie
+          if (!isAvailable && !isRestarting && !isInUse) {
+            try {
+              const endpoint = browser.wsEndpoint();
+              if (endpoint) {
+                zombieCount++;
+                console.error(`🧟 ZOMBIE BROWSER ${i + 1}: Not in any state but still connected at ${endpoint}`);
+
+                // Try to close it
+                try {
+                  await browser.close();
+                  console.log(`✅ Closed zombie browser ${i + 1}`);
+                  this.stats.totalZombiesDetected++;
+                } catch (closeError) {
+                  console.error(`❌ Failed to close zombie browser ${i + 1}: ${closeError.message}`);
+                }
+              }
+            } catch (checkError) {
+              // Browser is already disconnected (expected)
+            }
+          }
+        }
+
+        if (zombieCount > 0) {
+          console.warn(`⚠️  Zombie scan found ${zombieCount} zombie browser(s)`);
+        }
+      } catch (scanError) {
+        console.error(`❌ Error during zombie scan: ${scanError.message}`);
+      }
+    }, 60000); // Run every 60 seconds
+
+    console.log(`✅ Zombie browser scanner started (runs every 60 seconds)`);
   }
 
   /**
@@ -289,9 +354,11 @@ class BrowserPoolService {
     // Check if browser needs restart due to page count
     if (this.needsRestart(browser)) {
       console.log(`🔄 Browser reached page limit (${this.pageCountPerBrowser.get(browser)}/${this.maxPagesBeforeRestart}), scheduling restart...`);
-      // ✅ FIXED: Now awaiting the restart to complete
-      await this.scheduleAsyncRestart(browser);
-      console.log(`🔓 Restart completed, serving waiting requests...`);
+      // ✅ CRITICAL FIX: Start restart in BACKGROUND (non-blocking)
+      // This prevents deadlock when all browsers hit limit simultaneously
+      this.scheduleAsyncRestart(browser).catch(err => {
+        console.error(`❌ Failed to restart browser: ${err.message}`);
+      });
       // Don't put back in queue if it needs restart
       if (this.waitingQueue.length > 0) {
         const resolve = this.waitingQueue.shift();
@@ -363,11 +430,26 @@ class BrowserPoolService {
       console.log(`🔧 Restarting browser ${browserIndex + 1} due to page limit (pages: ${this.pageCountPerBrowser.get(browser)})...`);
 
       // ✅ FIX #2: Close old browser and cleanup memory
+      let closeFailed = false;
       try {
         await browser.close();
         console.log(`✅ Browser ${browserIndex + 1} closed successfully`);
       } catch (e) {
         console.warn(`⚠️ Could not close browser ${browserIndex + 1}: ${e.message}`);
+        closeFailed = true;
+      }
+
+      // ✅ ZOMBIE DETECTION: If close failed, check if browser is still alive
+      if (closeFailed) {
+        try {
+          const endpoint = browser.wsEndpoint();
+          if (endpoint) {
+            console.error(`🧟 POTENTIAL ZOMBIE: Browser ${browserIndex + 1} close failed but still connected at ${endpoint}`);
+            // Don't block restart, but log the issue for monitoring
+          }
+        } catch (e) {
+          console.log(`✅ Browser ${browserIndex + 1} disconnected after failed close attempt`);
+        }
       }
 
       // ✅ FIX #2: Wait for memory cleanup to complete
@@ -398,6 +480,30 @@ class BrowserPoolService {
       console.log(`✅ Browser ${browserIndex + 1} restarted successfully and ready for use`);
     } catch (error) {
       console.error(`❌ Failed to restart browser: ${error.message}`);
+
+      // ✅ ZOMBIE DETECTION: Check if browser is still running after restart failure
+      const browserIndex = this.browsers.indexOf(browser);
+      if (browserIndex !== -1) {
+        try {
+          // Try to get browser's endpoint - if this works, browser is still alive
+          const endpoint = browser.wsEndpoint();
+          if (endpoint) {
+            console.error(`🧟 ZOMBIE BROWSER DETECTED: Browser ${browserIndex + 1} failed to restart but is still connected!`);
+            console.error(`   Endpoint: ${endpoint}`);
+
+            // Try to force close the zombie
+            try {
+              await browser.close();
+              console.log(`✅ Zombie browser ${browserIndex + 1} forcefully closed`);
+            } catch (forceCloseError) {
+              console.error(`❌ Failed to close zombie browser ${browserIndex + 1}: ${forceCloseError.message}`);
+            }
+          }
+        } catch (checkError) {
+          // Browser is already disconnected (expected case)
+          console.log(`✅ Browser ${browserIndex + 1} properly disconnected after restart failure`);
+        }
+      }
     } finally {
       // ✅ FIX #1: Mark restart as complete
       this.browserRestartInProgress.delete(browser);
@@ -408,14 +514,15 @@ class BrowserPoolService {
   /**
    * Execute a function with a browser from the pool
    * Automatically acquires and releases browser
-   * ✅ FIXED: Now awaits release to ensure restart completes
+   * ✅ FIXED: Non-blocking release to prevent deadlock
    */
   async withBrowser(fn) {
     const browser = await this.acquireBrowser();
     try {
       return await fn(browser);
     } finally {
-      await this.releaseBrowser(browser);
+      // Non-blocking release - don't wait for restart to complete
+      this.releaseBrowser(browser);
     }
   }
 
@@ -540,6 +647,13 @@ class BrowserPoolService {
     console.log('\n🛑 Closing all browsers in pool...');
 
     try {
+      // ✅ ZOMBIE DETECTION: Stop the zombie scanner
+      if (this.zombieScanInterval) {
+        clearInterval(this.zombieScanInterval);
+        console.log(`🛑 Zombie browser scanner stopped`);
+        this.zombieScanInterval = null;
+      }
+
       const closePromises = this.browsers.map((browser, index) => {
         return browser.close()
           .then(() => {
