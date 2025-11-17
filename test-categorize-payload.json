@@ -1,0 +1,54 @@
+{
+  "prioritizedUrls": [
+    {
+      "url": "https://www.weirdfish.co.uk/p",
+      "topChildren": [
+        {
+          "url": "https://www.weirdfish.co.uk",
+          "children": ["https://www.weirdfish.co.uk/p"],
+          "wasCollected": false
+        }
+      ]
+    },
+    {
+      "url": "https://www.weirdfish.co.uk/p/men",
+      "topChildren": [
+        {
+          "url": "https://www.weirdfish.co.uk/p",
+          "children": ["https://www.weirdfish.co.uk/p/men"],
+          "wasCollected": true
+        }
+      ]
+    },
+    {
+      "url": "https://www.weirdfish.co.uk/p/new-arrivals",
+      "topChildren": [
+        {
+          "url": "https://www.weirdfish.co.uk/p",
+          "children": ["https://www.weirdfish.co.uk/p/new-arrivals"],
+          "wasCollected": true
+        }
+      ]
+    },
+    {
+      "url": "https://www.weirdfish.co.uk/account",
+      "topChildren": [
+        {
+          "url": "https://www.weirdfish.co.uk",
+          "children": ["https://www.weirdfish.co.uk/account"],
+          "wasCollected": false
+        }
+      ]
+    },
+    {
+      "url": "https://www.weirdfish.co.uk/help",
+      "topChildren": [
+        {
+          "url": "https://www.weirdfish.co.uk",
+          "children": ["https://www.weirdfish.co.uk/help"],
+          "wasCollected": false
+        }
+      ]
+    }
+  ]
+}

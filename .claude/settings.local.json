@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(md5sum:*)",
+      "Bash(xargs ls:*)",
+      "Bash(node -c:*)",
+      "Bash(node PERFORMANCE_DIAGNOSTICS.js:*)",
+      "Bash(node:*)",
+      "Bash(timeout 30 node:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
