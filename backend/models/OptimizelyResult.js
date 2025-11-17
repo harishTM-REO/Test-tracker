@@ -160,6 +160,9 @@ const optimizelyResultSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// OPTIMIZATION: Added single index on datasetId for fast lookups in getDatasetById()
+optimizelyResultSchema.index({ datasetId: 1 });
+
 // Composite index for datasetId + batchNumber to handle batching
 optimizelyResultSchema.index({ datasetId: 1, batchNumber: 1 }, { unique: true });
 optimizelyResultSchema.index({ "websiteResults.domain": 1 });
