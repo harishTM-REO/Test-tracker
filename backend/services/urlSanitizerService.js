@@ -1,31 +1,17 @@
 /**
  * URL Sanitizer Service
  * Validates, normalizes, and deduplicates URLs before scraping
- * Removes problematic domains that are known to crash browsers
+ * Performs DNS validation and HTTP availability checks
  */
 
 const dns = require('dns').promises;
 const https = require('https');
 const http = require('http');
-const fs = require('fs');
-const path = require('path');
 
 class URLSanitizerService {
   constructor() {
-    // Hardcoded problematic domains
-    const hardcodedDomains = [
-      'polkadotdata.com',
-      'floristeria-mowgli.myshopify.com',
-      'cceifame.com',
-      'cse-uloglangon.fr',
-    ];
-
-    // Load persistent blacklist from file
-    this.blacklistFile = path.join(__dirname, '../data/problematic-domains.json');
-    const persistedDomains = this.loadBlacklist();
-
-    // Combine hardcoded and persisted domains
-    this.problematicDomains = new Set([...hardcodedDomains, ...persistedDomains]);
+    // NOTE: Removed blacklist logic - using retry logic instead for transient failures
+    // (see retryLogic.js for handling timeouts and temporary errors)
 
     this.validatedCache = new Map(); // Cache validation results
     this.stats = {
@@ -33,7 +19,6 @@ class URLSanitizerService {
       validatedURLs: 0,
       duplicatesRemoved: 0,
       deadDomainsRemoved: 0,
-      problematicDomainsRemoved: 0,
       dnsFailures: 0,
       httpFailures: 0,
       finalValidURLs: 0,
@@ -112,30 +97,7 @@ class URLSanitizerService {
   }
 
   /**
-   * Step 3: Check if domain is in problematic list
-   */
-  isProblematicDomain(url) {
-    try {
-      const domain = new URL(url).hostname;
-      const registrableDomain = this.extractRegistrableDomain(url);
-
-      // Check if exact domain or registrable domain is in blacklist
-      for (const problematic of this.problematicDomains) {
-        if (
-          domain.includes(problematic) ||
-          registrableDomain.includes(problematic)
-        ) {
-          return true;
-        }
-      }
-      return false;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
-   * Step 4: DNS Validation
+   * Step 3: DNS Validation
    * Checks if domain resolves (A or AAAA records)
    */
   async validateDNS(url, timeout = 5000) {
@@ -245,14 +207,7 @@ class URLSanitizerService {
     }
     result.registrableDomain = registrableDomain;
 
-    // 3. Check problematic list
-    if (this.isProblematicDomain(normalized)) {
-      result.reasons.push('known_problematic_domain');
-      this.validatedCache.set(url, result);
-      return result;
-    }
-
-    // 4. DNS validation
+    // 3. DNS validation (removed problematic domain check - using retry logic instead)
     const dnsValid = await this.validateDNS(normalized);
     if (!dnsValid) {
       result.reasons.push('dns_resolution_failed');
@@ -319,26 +274,14 @@ class URLSanitizerService {
       } with invalid format)`
     );
 
-    // Step 2: Check problematic domains early (no network calls)
-    const nonProblematic = normalized.filter((url) => {
-      if (this.isProblematicDomain(url)) {
-        this.stats.problematicDomainsRemoved++;
-        return false;
-      }
-      return true;
-    });
-
-    console.log(
-      `⚠️  Filtered problematic domains: ${this.stats.problematicDomainsRemoved} removed`
-    );
-
-    // Step 3: Parallel validation (DNS + HTTP)
+    // Step 2: Parallel validation (DNS + HTTP)
+    // NOTE: Removed problematic domain check - using retry logic for transient failures
     const validated = [];
     let processed = 0;
 
     // Process in batches to avoid overwhelming system
-    for (let i = 0; i < nonProblematic.length; i += parallel) {
-      const batch = nonProblematic.slice(i, i + parallel);
+    for (let i = 0; i < normalized.length; i += parallel) {
+      const batch = normalized.slice(i, i + parallel);
       const results = await Promise.all(
         batch.map((url) => this.validateURL(url))
       );
@@ -389,62 +332,6 @@ class URLSanitizerService {
   }
 
   /**
-   * Load persistent blacklist from file
-   */
-  loadBlacklist() {
-    try {
-      if (fs.existsSync(this.blacklistFile)) {
-        const data = fs.readFileSync(this.blacklistFile, 'utf-8');
-        const domains = JSON.parse(data).domains || [];
-        console.log(`📂 Loaded ${domains.length} domains from persistent blacklist`);
-        return domains;
-      }
-    } catch (error) {
-      console.warn(`⚠️  Failed to load blacklist from file: ${error.message}`);
-    }
-    return [];
-  }
-
-  /**
-   * Save persistent blacklist to file
-   */
-  saveBlacklist() {
-    try {
-      const dir = path.dirname(this.blacklistFile);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      const data = {
-        domains: Array.from(this.problematicDomains),
-        lastUpdated: new Date().toISOString(),
-        count: this.problematicDomains.size
-      };
-      fs.writeFileSync(this.blacklistFile, JSON.stringify(data, null, 2));
-      console.log(`💾 Saved ${this.problematicDomains.size} domains to persistent blacklist`);
-    } catch (error) {
-      console.error(`❌ Failed to save blacklist to file: ${error.message}`);
-    }
-  }
-
-  /**
-   * Add domain to blacklist (when we discover it crashes browsers)
-   * NOW PERSISTS TO FILE
-   */
-  addProblematicDomain(domain) {
-    const lowerDomain = domain.toLowerCase();
-    this.problematicDomains.add(lowerDomain);
-    this.saveBlacklist(); // Persist to file
-    console.log(`⛔ Added ${domain} to problematic domains blacklist (persisted to disk)`);
-  }
-
-  /**
-   * Get all problematic domains
-   */
-  getProblematicDomains() {
-    return Array.from(this.problematicDomains);
-  }
-
-  /**
    * Print validation summary
    */
   printSummary() {
@@ -458,9 +345,6 @@ class URLSanitizerService {
 ║ Dead/Invalid domains:          ${String(this.stats.deadDomainsRemoved).padEnd(
       15
     )}║
-║ Problematic domains (known):   ${String(
-      this.stats.problematicDomainsRemoved
-    ).padEnd(15)}║
 ║ DNS resolution failures:       ${String(this.stats.dnsFailures).padEnd(
       15
     )}║
@@ -494,7 +378,6 @@ class URLSanitizerService {
       validatedURLs: 0,
       duplicatesRemoved: 0,
       deadDomainsRemoved: 0,
-      problematicDomainsRemoved: 0,
       dnsFailures: 0,
       httpFailures: 0,
       finalValidURLs: 0,

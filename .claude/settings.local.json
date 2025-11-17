@@ -6,7 +6,8 @@
       "Bash(node -c:*)",
       "Bash(node PERFORMANCE_DIAGNOSTICS.js:*)",
       "Bash(node:*)",
-      "Bash(timeout 30 node:*)"
+      "Bash(timeout 30 node:*)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []
