@@ -568,12 +568,12 @@ async function getFailedWebsites(req, res) {
 /**
  * GET /api/abtasty/documents/:datasetId
  * Get complete ABTasty document for a dataset
- * Query params: summary=true (for summary view)
+ * Query params: summary=true (for summary view), urlsOnly=true (returns only URLs from websiteResults)
  */
 async function getAbTastyDocuments(req, res) {
   try {
     const { datasetId } = req.params;
-    const { summary, batch, batches, all } = req.query;
+    const { summary, batch, batches, all, urlsOnly } = req.query;
 
     if (!datasetId) {
       return res.status(400).json({
@@ -609,6 +609,31 @@ async function getAbTastyDocuments(req, res) {
       return res.status(404).json({
         success: false,
         message: 'No ABTasty documents found for this dataset'
+      });
+    }
+
+    // If only URLs are requested
+    if (urlsOnly === 'true') {
+      // Handle both single document and array of documents
+      const isArray = Array.isArray(documents);
+      const docsArray = isArray ? documents : [documents];
+
+      // Extract all URLs from websiteResults across all batches
+      const allUrls = docsArray.reduce((urls, doc) => {
+        if (doc.websiteResults && Array.isArray(doc.websiteResults)) {
+          const docUrls = doc.websiteResults.map(result => result.url);
+          urls.push(...docUrls);
+        }
+        return urls;
+      }, []);
+
+      return res.status(200).json({
+        success: true,
+        message: 'All websiteResults URLs retrieved successfully',
+        data: {
+          totalUrls: allUrls.length,
+          urls: allUrls
+        }
       });
     }
 

@@ -921,6 +921,141 @@ async function checkOptimizelyStatus(req, res) {
   }
 }
 
+/**
+ * GET /api/optimizely/documents/:datasetId
+ * Get Optimizely documents for a dataset with batch support
+ * Query params:
+ *   - ?batch=5 - Get a specific batch number
+ *   - ?batches=1,5,10 - Get multiple specific batches
+ *   - ?all=true - Get all batches
+ *   - ?summary=true - Get summary view (metadata only)
+ *   - ?urlsOnly=true - Get only URLs from websiteResults
+ */
+async function getOptimizelyDocuments(req, res) {
+  try {
+    const { datasetId } = req.params;
+    const { summary, batch, batches, all, urlsOnly } = req.query;
+
+    if (!datasetId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Dataset ID is required'
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(datasetId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid dataset ID format'
+      });
+    }
+
+    // Determine which batches to fetch
+    let batchesToFetch = null;
+    if (batch) {
+      // Single batch: ?batch=5
+      batchesToFetch = [parseInt(batch)];
+    } else if (batches) {
+      // Multiple batches: ?batches=1,5,10
+      batchesToFetch = batches.split(',').map(b => parseInt(b.trim())).filter(b => !isNaN(b));
+    } else if (all === 'true') {
+      // All batches: ?all=true
+      // Pass null to fetch all batches without filtering
+      batchesToFetch = null;
+    }
+
+    // Use the new methods from the service
+    let documents;
+    if (batchesToFetch === null && (all === 'true' || (!batch && !batches))) {
+      // Get all or default: use aggregated results
+      documents = await OptimizelyScraperService.getDatasetResultsAggregated(datasetId);
+    } else if (batchesToFetch && batchesToFetch.length > 0) {
+      // Get specific batches
+      documents = await OptimizelyScraperService.getDatasetBatches(datasetId, batchesToFetch);
+    } else {
+      // Default: get summary
+      documents = await OptimizelyScraperService.getDatasetSummary(datasetId);
+    }
+
+    if (!documents) {
+      return res.status(404).json({
+        success: false,
+        message: 'No Optimizely documents found for this dataset'
+      });
+    }
+
+    // If only URLs are requested
+    if (urlsOnly === 'true') {
+      // Handle both single document and array of documents
+      const isArray = Array.isArray(documents);
+      const docsArray = isArray ? documents : [documents];
+
+      // Extract all URLs from websiteResults across all batches
+      const allUrls = docsArray.reduce((urls, doc) => {
+        if (doc.websiteResults && Array.isArray(doc.websiteResults)) {
+          const docUrls = doc.websiteResults.map(result => result.url);
+          urls.push(...docUrls);
+        }
+        return urls;
+      }, []);
+
+      return res.status(200).json({
+        success: true,
+        message: 'All websiteResults URLs retrieved successfully',
+        data: {
+          totalUrls: allUrls.length,
+          urls: allUrls
+        }
+      });
+    }
+
+    // If summary view is requested
+    if (summary === 'true') {
+      // Handle both single document and array of documents
+      const isArray = Array.isArray(documents);
+      const docsArray = isArray ? documents : [documents];
+
+      const summaryData = docsArray.map(doc => ({
+        batchNumber: doc.batchNumber,
+        datasetId: doc.datasetId,
+        datasetName: doc.datasetName,
+        totalUrls: doc.totalUrls,
+        successfulScrapes: doc.successfulScrapes,
+        failedScrapes: doc.failedScrapes,
+        totalExperiments: doc.totalExperiments,
+        optimizelyDetectedCount: doc.optimizelyDetectedCount,
+        stats: doc.scrapingStats,
+        websiteResultsCount: doc.websiteResults?.length || 0,
+        websitesWithoutOptimizelyCount: doc.websitesWithoutOptimizely?.length || 0,
+        failedWebsitesCount: doc.failedWebsites?.length || 0
+      }));
+
+      return res.status(200).json({
+        success: true,
+        message: 'Optimizely document summary retrieved successfully',
+        data: isArray ? summaryData : summaryData[0]
+      });
+    }
+
+    // Return full document
+    res.status(200).json({
+      success: true,
+      message: 'Optimizely document retrieved successfully',
+      data: documents
+    });
+
+  } catch (error) {
+    console.error('Error in getOptimizelyDocuments controller:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve Optimizely documents',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+
 module.exports = {
   scrapeExperiments,
   batchScrapeExperiments,
@@ -934,5 +1069,6 @@ module.exports = {
   getFailedWebsites,
   isValidUrl,
   scrapeFromDatasetBrowserLess,
-  checkOptimizelyStatus
+  checkOptimizelyStatus,
+  getOptimizelyDocuments
 };

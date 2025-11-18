@@ -144,8 +144,13 @@ router.get('/failed-websites/:datasetId', getFailedWebsites);
  * @access  Public
  * @param   datasetId - Dataset ID
  * @query   summary - (optional) Set to 'true' to get summary view instead of full document
+ * @query   urlsOnly - (optional) Set to 'true' to get only URLs from websiteResults across all batches
+ * @query   batch - (optional) Get a specific batch number
+ * @query   batches - (optional) Get multiple batches (comma-separated: '1,5,10')
+ * @query   all - (optional) Set to 'true' to get all batches
  * @example GET /api/abtasty/documents/691301c38b09a64cbbed9e1d
  * @example GET /api/abtasty/documents/691301c38b09a64cbbed9e1d?summary=true
+ * @example GET /api/abtasty/documents/691301c38b09a64cbbed9e1d?urlsOnly=true
  * @features Returns complete ABTasty document with all experiments and results
  */
 router.get('/documents/:datasetId', getAbTastyDocuments);

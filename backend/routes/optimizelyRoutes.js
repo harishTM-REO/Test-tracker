@@ -13,7 +13,8 @@ const {
   getWebsitesWithoutOptimizely,
   getFailedWebsites,
   scrapeFromDatasetBrowserLess,
-  checkOptimizelyStatus
+  checkOptimizelyStatus,
+  getOptimizelyDocuments
 } = require('../controller/optimizelyController');
 
 /**
@@ -136,5 +137,23 @@ router.get('/websites-without-optimizely/:datasetId', getWebsitesWithoutOptimize
  * @features List of websites where scraping failed with error details
  */
 router.get('/failed-websites/:datasetId', getFailedWebsites);
+
+/**
+ * @route   GET /api/optimizely/documents/:datasetId
+ * @desc    Get Optimizely documents for a dataset with batch support
+ * @access  Public
+ * @param   datasetId - Dataset ID
+ * @query   batch - (optional) Get a specific batch number: ?batch=5
+ * @query   batches - (optional) Get multiple batches: ?batches=1,5,10
+ * @query   all - (optional) Get all batches: ?all=true
+ * @query   summary - (optional) Get summary view: ?summary=true
+ * @query   urlsOnly - (optional) Get only URLs: ?urlsOnly=true
+ * @example GET /api/optimizely/documents/691b6073743fe8639655aa05
+ * @example GET /api/optimizely/documents/691b6073743fe8639655aa05?all=true
+ * @example GET /api/optimizely/documents/691b6073743fe8639655aa05?batch=5
+ * @example GET /api/optimizely/documents/691b6073743fe8639655aa05?summary=true
+ * @features Returns complete Optimizely documents with all experiments and results
+ */
+router.get('/documents/:datasetId', getOptimizelyDocuments);
 
 module.exports = router;
