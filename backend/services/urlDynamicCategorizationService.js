@@ -1244,6 +1244,14 @@ URLDynamicCategorizationService.prototype.getBusinessPriority = function(categor
 URLDynamicCategorizationService.prototype.rankAndLimitTopUrls = function(urlDetails = [], limit = 25, perCategoryLimit = 2) {
     if (!Array.isArray(urlDetails)) return [];
 
+    // Categories to exclude from top 25
+    const excludedCategories = new Set([
+        'FAQ / Knowledgebase',
+        'Contact & Support',
+        'Guides & Educational Content',
+        'Accessibility & Special Services'
+    ]);
+
     const bucketed = {}; // category -> count
     const ranked = [];
 
@@ -1275,6 +1283,9 @@ URLDynamicCategorizationService.prototype.rankAndLimitTopUrls = function(urlDeta
 
     for (const r of ranked) {
         const cat = r.category;
+
+        // Skip excluded categories
+        if (excludedCategories.has(cat)) continue;
 
         // Enforce max per-category
         bucketed[cat] = bucketed[cat] || 0;
