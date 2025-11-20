@@ -1249,7 +1249,11 @@ URLDynamicCategorizationService.prototype.rankAndLimitTopUrls = function(urlDeta
         'FAQ / Knowledgebase',
         'Contact & Support',
         'Guides & Educational Content',
-        'Accessibility & Special Services'
+        'Accessibility & Special Services',
+        'Legal & Compliance',
+        'Careers & Jobs',
+        'About / Company',
+        'News & Information'
     ]);
 
     const bucketed = {}; // category -> count
