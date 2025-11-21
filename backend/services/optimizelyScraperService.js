@@ -2206,7 +2206,8 @@ class OptimizelyScraperService {
       const optimizelyRate = `${((optimizelyDetectedCount / results.length) * 100).toFixed(1)}%`;
 
       // ========== CHUNKED SAVING ==========
-      const BATCH_SIZE = 500;
+      // Reduced from 500 to 100 to prevent 16MB MongoDB document limit
+      const BATCH_SIZE = 100;
       const totalBatches = Math.ceil(websiteResults.length / BATCH_SIZE) || 1;
 
       console.log(`💾 Saving results in ${totalBatches} batches (${BATCH_SIZE} websites per batch)...`);
@@ -2277,6 +2278,53 @@ class OptimizelyScraperService {
     } catch (error) {
       console.error('Error saving batch results:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Estimate document size in bytes (rough approximation)
+   * MongoDB has a 16MB document size limit
+   * Supports up to 10,000+ URLs by automatically chunking
+   */
+  estimateDocumentSize(data) {
+    try {
+      // Primary method: Use JSON.stringify for accurate size
+      return Buffer.byteLength(JSON.stringify(data), 'utf8');
+    } catch (e) {
+      // Fallback: Conservative estimate based on array lengths
+      // These values are calibrated for typical Optimizely experiment data
+      const baseSize = 2000; // Base document overhead (metadata, stats, etc.)
+      const websiteBaseSize = 600; // Base size per website (URL, domain, metadata)
+      const experimentBaseSize = 250; // Average size per experiment (name, ID, status, etc.)
+      const experimentDataSize = 150; // Additional size for experiment details
+      
+      let estimatedSize = baseSize;
+      
+      // Estimate websiteResults size
+      if (data.websiteResults && Array.isArray(data.websiteResults)) {
+        data.websiteResults.forEach(site => {
+          estimatedSize += websiteBaseSize;
+          if (site.experiments && Array.isArray(site.experiments)) {
+            // Each experiment has base + data overhead
+            estimatedSize += site.experiments.length * (experimentBaseSize + experimentDataSize);
+          }
+          // Additional fields (cookieType, error, activeCount, etc.)
+          estimatedSize += 100;
+        });
+      }
+      
+      // Estimate websitesWithoutOptimizely size (simpler structure)
+      if (data.websitesWithoutOptimizely && Array.isArray(data.websitesWithoutOptimizely)) {
+        estimatedSize += data.websitesWithoutOptimizely.length * 300;
+      }
+      
+      // Estimate failedWebsites size (includes error messages)
+      if (data.failedWebsites && Array.isArray(data.failedWebsites)) {
+        estimatedSize += data.failedWebsites.length * 400;
+      }
+      
+      // Add 20% safety margin for BSON overhead and metadata
+      return Math.ceil(estimatedSize * 1.2);
     }
   }
 
@@ -2354,42 +2402,144 @@ class OptimizelyScraperService {
         .select('batchNumber')
         .lean();
 
-      const batchNumber = (lastBatch?.batchNumber || 0) + 1;
+      let currentBatchNumber = (lastBatch?.batchNumber || 0) + 1;
 
-      // Save this batch
-      const optimizelyResult = await OptimizelyResult.findOneAndUpdate(
-        { datasetId: datasetId, batchNumber: batchNumber },
-        {
-          datasetId: datasetId,
-          datasetName: datasetName,
-          batchNumber: batchNumber,
-          totalBatches: 999,
-          totalUrls: totalUrls,
-          successfulScrapes: successfulScrapes,
-          failedScrapes: failedScrapes,
-          optimizelyDetectedCount: optimizelyDetectedCount,
-          totalExperiments: totalExperiments,
-          websiteResults: websiteResults,
-          websitesWithoutOptimizely: websitesWithoutOptimizely,
-          failedWebsites: failedWebsites,
-          scrapingStats: {
-            startedAt: startTime,
-            completedAt: endTime,
-            duration: duration,
-            optimizelyRate: optimizelyRate,
-            successRate: successRate
-          }
-        },
-        {
-          upsert: true,
-          new: true,
-          setDefaultsOnInsert: true
+      // CRITICAL FIX: Chunk data to prevent 16MB MongoDB document limit
+      // MongoDB has a 16MB document size limit. We need to split large batches into smaller sub-batches
+      const MAX_DOCUMENT_SIZE_BYTES = 14 * 1024 * 1024; // 14MB safety margin (16MB limit)
+      const MAX_WEBSITES_PER_BATCH = 100; // Conservative limit per MongoDB document
+
+      // Calculate how many sub-batches we need
+      const totalWebsites = websiteResults.length + websitesWithoutOptimizely.length + failedWebsites.length;
+      let subBatchesNeeded = Math.ceil(totalWebsites / MAX_WEBSITES_PER_BATCH);
+
+      // Estimate document size and adjust if needed
+      const testDocument = {
+        datasetId,
+        datasetName,
+        batchNumber: currentBatchNumber,
+        totalBatches: 999,
+        totalUrls,
+        successfulScrapes,
+        failedScrapes,
+        optimizelyDetectedCount,
+        totalExperiments,
+        websiteResults: websiteResults.slice(0, MAX_WEBSITES_PER_BATCH),
+        websitesWithoutOptimizely: websitesWithoutOptimizely.slice(0, Math.floor(websitesWithoutOptimizely.length / subBatchesNeeded)),
+        failedWebsites: failedWebsites.slice(0, Math.floor(failedWebsites.length / subBatchesNeeded)),
+        scrapingStats: {
+          startedAt: startTime,
+          completedAt: endTime,
+          duration,
+          optimizelyRate,
+          successRate
         }
-      );
+      };
 
-      console.log(`  ✅ Streamed batch ${batchNumber} (${websiteResults.length} with Optimizely, ${websitesWithoutOptimizely.length} without, ${failedWebsites.length} failed)`);
+      const estimatedSize = this.estimateDocumentSize(testDocument);
+      if (estimatedSize > MAX_DOCUMENT_SIZE_BYTES) {
+        // Reduce batch size if estimated size is too large
+        const sizeRatio = estimatedSize / MAX_DOCUMENT_SIZE_BYTES;
+        const adjustedMaxWebsites = Math.floor(MAX_WEBSITES_PER_BATCH / sizeRatio);
+        subBatchesNeeded = Math.ceil(totalWebsites / Math.max(1, adjustedMaxWebsites));
+        console.log(`⚠️  Large document detected (${Math.round(estimatedSize / 1024 / 1024)}MB), splitting into ${subBatchesNeeded} sub-batches`);
+      }
 
-      return { success: true, batchNumber, websiteCount: websiteResults.length };
+      // If we need multiple sub-batches, split the data
+      if (subBatchesNeeded > 1) {
+        console.log(`📦 Splitting large batch into ${subBatchesNeeded} sub-batches to prevent 16MB limit`);
+        
+        const websitesPerSubBatch = Math.ceil(websiteResults.length / subBatchesNeeded);
+        const withoutPerSubBatch = Math.ceil(websitesWithoutOptimizely.length / subBatchesNeeded);
+        const failedPerSubBatch = Math.ceil(failedWebsites.length / subBatchesNeeded);
+
+        for (let i = 0; i < subBatchesNeeded; i++) {
+          const startIdx = i * websitesPerSubBatch;
+          const endIdx = Math.min(startIdx + websitesPerSubBatch, websiteResults.length);
+          const withoutStartIdx = i * withoutPerSubBatch;
+          const withoutEndIdx = Math.min(withoutStartIdx + withoutPerSubBatch, websitesWithoutOptimizely.length);
+          const failedStartIdx = i * failedPerSubBatch;
+          const failedEndIdx = Math.min(failedStartIdx + failedPerSubBatch, failedWebsites.length);
+
+          const subBatchWebsiteResults = websiteResults.slice(startIdx, endIdx);
+          const subBatchWithoutOptimizely = websitesWithoutOptimizely.slice(withoutStartIdx, withoutEndIdx);
+          const subBatchFailed = failedWebsites.slice(failedStartIdx, failedEndIdx);
+
+          // Calculate sub-batch stats
+          const subBatchOptimizelyCount = subBatchWebsiteResults.length;
+          const subBatchExperiments = subBatchWebsiteResults.reduce((sum, site) => sum + (site.experimentCount || 0), 0);
+
+          const optimizelyResult = await OptimizelyResult.findOneAndUpdate(
+            { datasetId: datasetId, batchNumber: currentBatchNumber },
+            {
+              datasetId: datasetId,
+              datasetName: datasetName,
+              batchNumber: currentBatchNumber,
+              totalBatches: 999,
+              totalUrls: totalUrls,
+              successfulScrapes: subBatchWebsiteResults.length + subBatchWithoutOptimizely.length,
+              failedScrapes: subBatchFailed.length,
+              optimizelyDetectedCount: subBatchOptimizelyCount,
+              totalExperiments: subBatchExperiments,
+              websiteResults: subBatchWebsiteResults,
+              websitesWithoutOptimizely: subBatchWithoutOptimizely,
+              failedWebsites: subBatchFailed,
+              scrapingStats: {
+                startedAt: startTime,
+                completedAt: endTime,
+                duration: duration,
+                optimizelyRate: optimizelyRate,
+                successRate: successRate
+              }
+            },
+            {
+              upsert: true,
+              new: true,
+              setDefaultsOnInsert: true
+            }
+          );
+
+          console.log(`  ✅ Streamed sub-batch ${currentBatchNumber} (${subBatchWebsiteResults.length} with Optimizely, ${subBatchWithoutOptimizely.length} without, ${subBatchFailed.length} failed)`);
+          currentBatchNumber++;
+        }
+
+        return { success: true, batchNumber: currentBatchNumber - 1, websiteCount: websiteResults.length, subBatches: subBatchesNeeded };
+      } else {
+        // Single batch is small enough, save normally
+        const optimizelyResult = await OptimizelyResult.findOneAndUpdate(
+          { datasetId: datasetId, batchNumber: currentBatchNumber },
+          {
+            datasetId: datasetId,
+            datasetName: datasetName,
+            batchNumber: currentBatchNumber,
+            totalBatches: 999,
+            totalUrls: totalUrls,
+            successfulScrapes: successfulScrapes,
+            failedScrapes: failedScrapes,
+            optimizelyDetectedCount: optimizelyDetectedCount,
+            totalExperiments: totalExperiments,
+            websiteResults: websiteResults,
+            websitesWithoutOptimizely: websitesWithoutOptimizely,
+            failedWebsites: failedWebsites,
+            scrapingStats: {
+              startedAt: startTime,
+              completedAt: endTime,
+              duration: duration,
+              optimizelyRate: optimizelyRate,
+              successRate: successRate
+            }
+          },
+          {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true
+          }
+        );
+
+        console.log(`  ✅ Streamed batch ${currentBatchNumber} (${websiteResults.length} with Optimizely, ${websitesWithoutOptimizely.length} without, ${failedWebsites.length} failed)`);
+
+        return { success: true, batchNumber: currentBatchNumber, websiteCount: websiteResults.length };
+      }
     } catch (error) {
       console.error('Error saving streaming batch results:', error);
       throw error;

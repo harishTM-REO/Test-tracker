@@ -1,0 +1,82 @@
+require('dotenv').config({ path: '../.env' });
+
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+
+const { connectDB } = require('../db/connection');
+const BackgroundScrapingService = require('../services/backgroundScrapingService');
+
+const app = express();
+const port = process.env.WORKER_PORT || 4000;
+
+// Trust upstream proxies (Railway, etc.)
+app.set('trust proxy', 1);
+
+// Core middleware
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  credentials: true
+}));
+app.use(helmet());
+app.use(compression());
+
+// Rate limiting scoped to API routes
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: {
+    success: false,
+    message: 'Too many requests from this IP, please try again later.'
+  }
+});
+app.use('/worker/api/', limiter);
+
+// Routes
+const optimizelyRoutes = require('./routes/optimizelyWorkerRoutes');
+const abTastyRoutes = require('./routes/abTastyWorkerRoutes');
+
+app.use('/worker/api/optimizely', optimizelyRoutes);
+app.use('/worker/api/abtasty', abTastyRoutes);
+
+// Worker health check
+app.get('/worker/health', (req, res) => {
+  res.json({
+    success: true,
+    service: 'scraper-worker',
+    message: 'Scraper worker is running',
+    timestamp: new Date(),
+    uptime: process.uptime()
+  });
+});
+
+// Start server
+app.listen(port, async () => {
+  console.log(`Scraper worker running on http://localhost:${port}`);
+  console.log(`Available endpoints:`);
+  console.log(`  GET /worker/api/optimizely/scrape?url=<URL>`);
+  console.log(`  GET /worker/api/abtasty/scrape?url=<URL>`);
+  console.log(`  GET /worker/health`);
+
+  // Initialize database connection
+  try {
+    await connectDB();
+    console.log('✅ MongoDB connected for worker');
+  } catch (error) {
+    console.error('❌ Failed to connect to MongoDB:', error.message);
+  }
+
+  // Initialize browser pool for scraping
+  try {
+    await BackgroundScrapingService.initialize();
+    console.log('✅ Browser pool initialized for worker');
+  } catch (error) {
+    console.error('❌ Failed to initialize browser pool:', error.message);
+  }
+});
+
+module.exports = app;

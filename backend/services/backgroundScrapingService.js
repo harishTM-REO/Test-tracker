@@ -337,9 +337,9 @@ class BackgroundScrapingService {
         scraperService = require('./abTastyScraperService');
       }
 
-      const STREAM_BATCH_SIZE = 500;
+      const STREAM_BATCH_SIZE = 100; // Reduced from 500 to prevent 16MB MongoDB document limit
 
-      // Save results in batches of 500 URLs
+      // Save results in batches of 100 URLs (will be further chunked if needed)
       let savedBatchCount = 0;
       for (let i = 0; i < allResults.length; i += STREAM_BATCH_SIZE) {
         const streamBatch = allResults.slice(i, i + STREAM_BATCH_SIZE);

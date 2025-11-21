@@ -2233,6 +2233,53 @@ async extractAbTastySync(page) {
    * @param {number} totalUrls - Total URLs being scraped (for stats)
    * @returns {Object} Save result with batch number and status
    */
+  /**
+   * Estimate document size in bytes (rough approximation)
+   * MongoDB has a 16MB document size limit
+   * Supports up to 10,000+ URLs by automatically chunking
+   */
+  estimateDocumentSize(data) {
+    try {
+      // Primary method: Use JSON.stringify for accurate size
+      return Buffer.byteLength(JSON.stringify(data), 'utf8');
+    } catch (e) {
+      // Fallback: Conservative estimate based on array lengths
+      // These values are calibrated for typical AbTasty experiment data
+      const baseSize = 2000; // Base document overhead (metadata, stats, etc.)
+      const websiteBaseSize = 600; // Base size per website (URL, domain, metadata)
+      const experimentBaseSize = 250; // Average size per experiment (name, ID, status, etc.)
+      const experimentDataSize = 150; // Additional size for experiment details
+      
+      let estimatedSize = baseSize;
+      
+      // Estimate websiteResults size
+      if (data.websiteResults && Array.isArray(data.websiteResults)) {
+        data.websiteResults.forEach(site => {
+          estimatedSize += websiteBaseSize;
+          if (site.experiments && Array.isArray(site.experiments)) {
+            // Each experiment has base + data overhead
+            estimatedSize += site.experiments.length * (experimentBaseSize + experimentDataSize);
+          }
+          // Additional fields (cookieType, error, etc.)
+          estimatedSize += 100;
+        });
+      }
+      
+      // Estimate websitesWithoutAbTasty size (simpler structure)
+      if (data.websitesWithoutAbTasty && Array.isArray(data.websitesWithoutAbTasty)) {
+        estimatedSize += data.websitesWithoutAbTasty.length * 300;
+      }
+      
+      // Estimate failedWebsites size (includes error messages)
+      if (data.failedWebsites && Array.isArray(data.failedWebsites)) {
+        estimatedSize += data.failedWebsites.length * 400;
+      }
+      
+      // Add 20% safety margin for BSON overhead and metadata
+      return Math.ceil(estimatedSize * 1.2);
+    }
+  }
+
   async saveResultsStreamingBatch(datasetId, datasetName, results, startTime, totalUrls) {
     try {
       const endTime = new Date();
@@ -2298,52 +2345,163 @@ async extractAbTastySync(page) {
         .select('batchNumber')
         .lean();
 
-      const batchNumber = (lastBatch?.batchNumber || 0) + 1;
+      let currentBatchNumber = (lastBatch?.batchNumber || 0) + 1;
 
-      // Save this batch
-      const queryData = { datasetId: datasetId, batchNumber: batchNumber };
-      const updateData = {
-        datasetId: datasetId,
-        datasetName: datasetName,
-        batchNumber: batchNumber,
-        totalBatches: 999,  // ← Placeholder, will be updated at end
-        totalUrls: totalUrls,  // Total URLs being processed
-        successfulScrapes: successfulScrapes,
-        failedScrapes: failedScrapes,
-        abTastyDetectedCount: abTastyDetectedCount,
-        totalExperiments: totalExperiments,
-        websiteResults: websiteResults,
-        websitesWithoutAbTasty: websitesWithoutAbTasty,
-        failedWebsites: failedWebsites,
+      // CRITICAL FIX: Chunk data to prevent 16MB MongoDB document limit
+      // MongoDB has a 16MB document size limit. We need to split large batches into smaller sub-batches
+      const MAX_DOCUMENT_SIZE_BYTES = 14 * 1024 * 1024; // 14MB safety margin (16MB limit)
+      const MAX_WEBSITES_PER_BATCH = 100; // Conservative limit per MongoDB document
+
+      // Calculate how many sub-batches we need
+      const totalWebsites = websiteResults.length + websitesWithoutAbTasty.length + failedWebsites.length;
+      let subBatchesNeeded = Math.ceil(totalWebsites / MAX_WEBSITES_PER_BATCH);
+
+      // Estimate document size and adjust if needed
+      const testDocument = {
+        datasetId,
+        datasetName,
+        batchNumber: currentBatchNumber,
+        totalBatches: 999,
+        totalUrls,
+        successfulScrapes,
+        failedScrapes,
+        abTastyDetectedCount,
+        totalExperiments,
+        websiteResults: websiteResults.slice(0, MAX_WEBSITES_PER_BATCH),
+        websitesWithoutAbTasty: websitesWithoutAbTasty.slice(0, Math.floor(websitesWithoutAbTasty.length / subBatchesNeeded)),
+        failedWebsites: failedWebsites.slice(0, Math.floor(failedWebsites.length / subBatchesNeeded)),
         scrapingStats: {
           startedAt: startTime,
           completedAt: endTime,
-          duration: duration,
-          abTastyRate: abTastyRate,
-          successRate: successRate
+          duration,
+          abTastyRate,
+          successRate
         }
-      };
-      const saveOptions = {
-        upsert: true,
-        new: true,
-        setDefaultsOnInsert: true
       };
 
-      let abTastyResult;
-      try {
-        abTastyResult = await AbTastyResult.findOneAndUpdate(queryData, updateData, saveOptions);
-      } catch (error) {
-        if (error.code === 11000 && error.message.includes('datasetId')) {
-          // Handle duplicate key error with auto-fix
-          abTastyResult = await this.handleDuplicateKeyError(error, queryData, updateData, saveOptions);
-        } else {
-          throw error;
-        }
+      const estimatedSize = this.estimateDocumentSize(testDocument);
+      if (estimatedSize > MAX_DOCUMENT_SIZE_BYTES) {
+        // Reduce batch size if estimated size is too large
+        const sizeRatio = estimatedSize / MAX_DOCUMENT_SIZE_BYTES;
+        const adjustedMaxWebsites = Math.floor(MAX_WEBSITES_PER_BATCH / sizeRatio);
+        subBatchesNeeded = Math.ceil(totalWebsites / Math.max(1, adjustedMaxWebsites));
+        console.log(`⚠️  Large document detected (${Math.round(estimatedSize / 1024 / 1024)}MB), splitting into ${subBatchesNeeded} sub-batches`);
       }
 
-      console.log(`  ✅ Streamed batch ${batchNumber} (${websiteResults.length} with AbTasty, ${websitesWithoutAbTasty.length} without, ${failedWebsites.length} failed)`);
+      // If we need multiple sub-batches, split the data
+      if (subBatchesNeeded > 1) {
+        console.log(`📦 Splitting large batch into ${subBatchesNeeded} sub-batches to prevent 16MB limit`);
+        
+        const websitesPerSubBatch = Math.ceil(websiteResults.length / subBatchesNeeded);
+        const withoutPerSubBatch = Math.ceil(websitesWithoutAbTasty.length / subBatchesNeeded);
+        const failedPerSubBatch = Math.ceil(failedWebsites.length / subBatchesNeeded);
 
-      return { success: true, batchNumber, websiteCount: websiteResults.length };
+        for (let i = 0; i < subBatchesNeeded; i++) {
+          const startIdx = i * websitesPerSubBatch;
+          const endIdx = Math.min(startIdx + websitesPerSubBatch, websiteResults.length);
+          const withoutStartIdx = i * withoutPerSubBatch;
+          const withoutEndIdx = Math.min(withoutStartIdx + withoutPerSubBatch, websitesWithoutAbTasty.length);
+          const failedStartIdx = i * failedPerSubBatch;
+          const failedEndIdx = Math.min(failedStartIdx + failedPerSubBatch, failedWebsites.length);
+
+          const subBatchWebsiteResults = websiteResults.slice(startIdx, endIdx);
+          const subBatchWithoutAbTasty = websitesWithoutAbTasty.slice(withoutStartIdx, withoutEndIdx);
+          const subBatchFailed = failedWebsites.slice(failedStartIdx, failedEndIdx);
+
+          // Calculate sub-batch stats
+          const subBatchAbTastyCount = subBatchWebsiteResults.length;
+          const subBatchExperiments = subBatchWebsiteResults.reduce((sum, site) => sum + (site.experimentCount || 0), 0);
+
+          const queryData = { datasetId: datasetId, batchNumber: currentBatchNumber };
+          const updateData = {
+            datasetId: datasetId,
+            datasetName: datasetName,
+            batchNumber: currentBatchNumber,
+            totalBatches: 999,  // ← Placeholder, will be updated at end
+            totalUrls: totalUrls,
+            successfulScrapes: subBatchWebsiteResults.length + subBatchWithoutAbTasty.length,
+            failedScrapes: subBatchFailed.length,
+            abTastyDetectedCount: subBatchAbTastyCount,
+            totalExperiments: subBatchExperiments,
+            websiteResults: subBatchWebsiteResults,
+            websitesWithoutAbTasty: subBatchWithoutAbTasty,
+            failedWebsites: subBatchFailed,
+            scrapingStats: {
+              startedAt: startTime,
+              completedAt: endTime,
+              duration: duration,
+              abTastyRate: abTastyRate,
+              successRate: successRate
+            }
+          };
+          const saveOptions = {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true
+          };
+
+          let abTastyResult;
+          try {
+            abTastyResult = await AbTastyResult.findOneAndUpdate(queryData, updateData, saveOptions);
+          } catch (error) {
+            if (error.code === 11000 && error.message.includes('datasetId')) {
+              abTastyResult = await this.handleDuplicateKeyError(error, queryData, updateData, saveOptions);
+            } else {
+              throw error;
+            }
+          }
+
+          console.log(`  ✅ Streamed sub-batch ${currentBatchNumber} (${subBatchWebsiteResults.length} with AbTasty, ${subBatchWithoutAbTasty.length} without, ${subBatchFailed.length} failed)`);
+          currentBatchNumber++;
+        }
+
+        return { success: true, batchNumber: currentBatchNumber - 1, websiteCount: websiteResults.length, subBatches: subBatchesNeeded };
+      } else {
+        // Single batch is small enough, save normally
+        const queryData = { datasetId: datasetId, batchNumber: currentBatchNumber };
+        const updateData = {
+          datasetId: datasetId,
+          datasetName: datasetName,
+          batchNumber: currentBatchNumber,
+          totalBatches: 999,  // ← Placeholder, will be updated at end
+          totalUrls: totalUrls,  // Total URLs being processed
+          successfulScrapes: successfulScrapes,
+          failedScrapes: failedScrapes,
+          abTastyDetectedCount: abTastyDetectedCount,
+          totalExperiments: totalExperiments,
+          websiteResults: websiteResults,
+          websitesWithoutAbTasty: websitesWithoutAbTasty,
+          failedWebsites: failedWebsites,
+          scrapingStats: {
+            startedAt: startTime,
+            completedAt: endTime,
+            duration: duration,
+            abTastyRate: abTastyRate,
+            successRate: successRate
+          }
+        };
+        const saveOptions = {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true
+        };
+
+        let abTastyResult;
+        try {
+          abTastyResult = await AbTastyResult.findOneAndUpdate(queryData, updateData, saveOptions);
+        } catch (error) {
+          if (error.code === 11000 && error.message.includes('datasetId')) {
+            // Handle duplicate key error with auto-fix
+            abTastyResult = await this.handleDuplicateKeyError(error, queryData, updateData, saveOptions);
+          } else {
+            throw error;
+          }
+        }
+
+        console.log(`  ✅ Streamed batch ${currentBatchNumber} (${websiteResults.length} with AbTasty, ${websitesWithoutAbTasty.length} without, ${failedWebsites.length} failed)`);
+
+        return { success: true, batchNumber: currentBatchNumber, websiteCount: websiteResults.length };
+      }
     } catch (error) {
       console.error('Error saving streaming batch results:', error);
       throw error;

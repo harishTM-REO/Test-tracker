@@ -1253,7 +1253,8 @@ URLDynamicCategorizationService.prototype.rankAndLimitTopUrls = function(urlDeta
         'Legal & Compliance',
         'Careers & Jobs',
         'About / Company',
-        'News & Information'
+        'News & Information',
+        'Loyalty & Rewards'
     ]);
 
     const bucketed = {}; // category -> count
