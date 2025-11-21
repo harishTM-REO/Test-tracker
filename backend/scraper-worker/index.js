@@ -1,13 +1,15 @@
-require('dotenv').config({ path: '../.env' });
-
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 
-const { connectDB } = require('../db/connection');
-const BackgroundScrapingService = require('../services/backgroundScrapingService');
+// Resolve paths correctly for both local and production environments
+const backendRoot = path.join(__dirname, '..');
+const { connectDB } = require(path.join(backendRoot, 'db/connection'));
+const BackgroundScrapingService = require(path.join(backendRoot, 'services/backgroundScrapingService'));
 
 const app = express();
 const port = process.env.WORKER_PORT || 4000;

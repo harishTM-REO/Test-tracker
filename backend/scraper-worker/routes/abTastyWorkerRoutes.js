@@ -1,7 +1,8 @@
+const path = require('path');
 const express = require('express');
 const router = express.Router();
-const AbTastyScraperService = require('../../services/abTastyScraperService');
-const { isValidUrl } = require('../../utils/urlValidator');
+const AbTastyScraperService = require(path.join(__dirname, '../../services/abTastyScraperService'));
+const { isValidUrl } = require(path.join(__dirname, '../../utils/urlValidator'));
 
 /**
  * @route   GET /worker/api/abtasty/scrape

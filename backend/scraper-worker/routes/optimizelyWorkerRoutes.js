@@ -1,7 +1,8 @@
+const path = require('path');
 const express = require('express');
 const router = express.Router();
-const OptimizelyScraperService = require('../../services/optimizelyScraperService');
-const { isValidUrl } = require('../../utils/urlValidator');
+const OptimizelyScraperService = require(path.join(__dirname, '../../services/optimizelyScraperService'));
+const { isValidUrl } = require(path.join(__dirname, '../../utils/urlValidator'));
 
 /**
  * @route   GET /worker/api/optimizely/scrape
