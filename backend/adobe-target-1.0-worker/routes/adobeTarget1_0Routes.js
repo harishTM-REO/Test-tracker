@@ -1,0 +1,267 @@
+const express = require('express');
+const router = express.Router();
+const path = require('path');
+const AdobeTarget1_0Service = require(path.join(__dirname, '../services/adobeTarget1_0Service'));
+const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
+const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
+
+/**
+ * POST /at10/api/scrape
+ * Initiate Adobe Target 1.0 scraping job for a dataset
+ *
+ * Request body:
+ * {
+ *   "datasetId": "ObjectId",
+ *   "datasetName": "string",
+ *   "urls": ["url1", "url2", ...],
+ *   "options": {
+ *     "concurrency": 4,
+ *     "batchNumber": 1,
+ *     "totalBatches": 1
+ *   }
+ * }
+ */
+router.post('/scrape', async (req, res) => {
+  try {
+    const { datasetId, datasetName, urls, options = {} } = req.body;
+
+    console.log(`\n🎯 Received AT 1.0 scraping request`);
+    console.log(`   Dataset: ${datasetName} (${datasetId})`);
+    console.log(`   URLs to process: ${urls?.length || 0}`);
+
+    // Validate input
+    if (!datasetId || !datasetName || !urls || urls.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: datasetId, datasetName, urls (non-empty array)'
+      });
+    }
+
+    // Create job
+    const job = jobQueue.createJob('adobe-target-1.0-scraping', {
+      datasetId,
+      datasetName,
+      urls,
+      options: {
+        concurrency: options.concurrency || 4,
+        batchNumber: options.batchNumber || 1,
+        totalBatches: options.totalBatches || 1
+      }
+    });
+
+    console.log(`   Job created: ${job.id}`);
+    console.log(`   Status: ${job.status}`);
+
+    res.status(202).json({
+      success: true,
+      message: 'Adobe Target 1.0 scraping job initiated',
+      jobId: job.id,
+      status: job.status,
+      dataset: {
+        id: datasetId,
+        name: datasetName,
+        urlsCount: urls.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Error initiating AT 1.0 scraping job:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initiate scraping job',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /at10/api/status/:jobId
+ * Get the status of a specific job
+ */
+router.get('/status/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+
+    console.log(`📊 Fetching status for job: ${jobId}`);
+
+    const job = jobQueue.getJob(jobId);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: 'Job not found',
+        jobId
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      job: {
+        id: job.id,
+        type: job.type,
+        status: job.status,
+        progress: job.progress,
+        data: {
+          datasetId: job.data?.datasetId,
+          datasetName: job.data?.datasetName,
+          urlsCount: job.data?.urls?.length || 0
+        },
+        createdAt: job.createdAt,
+        startedAt: job.startedAt,
+        completedAt: job.completedAt,
+        error: job.error,
+        result: job.result ? {
+          success: job.result.success,
+          message: job.result.message,
+          resultId: job.result.resultId,
+          summary: job.result.summary
+        } : null
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching job status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch job status',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /at10/api/results/:resultId
+ * Get the detailed results of an AT 1.0 scraping job
+ */
+router.get('/results/:resultId', async (req, res) => {
+  try {
+    const { resultId } = req.params;
+
+    console.log(`📊 Fetching results for: ${resultId}`);
+
+    const result = await AdobeTarget1_0Result.findById(resultId);
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: 'Result not found',
+        resultId
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: result,
+      summary: result.getSummary()
+    });
+
+  } catch (error) {
+    console.error('Error fetching results:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch results',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /at10/api/results/dataset/:datasetId
+ * Get all AT 1.0 results for a specific dataset
+ */
+router.get('/results/dataset/:datasetId', async (req, res) => {
+  try {
+    const { datasetId } = req.params;
+
+    console.log(`📊 Fetching results for dataset: ${datasetId}`);
+
+    const results = await AdobeTarget1_0Result.find({ datasetId })
+      .sort({ createdAt: -1 })
+      .limit(10);
+
+    res.status(200).json({
+      success: true,
+      count: results.length,
+      data: results,
+      summaries: results.map(r => r.getSummary())
+    });
+
+  } catch (error) {
+    console.error('Error fetching dataset results:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch dataset results',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /at10/api/status/dataset/:datasetId
+ * Get the overall status of an AT 1.0 dataset (combines job + results)
+ */
+router.post('/status/dataset/:datasetId', async (req, res) => {
+  try {
+    const { datasetId } = req.params;
+
+    console.log(`🔍 Fetching AT 1.0 status for dataset: ${datasetId}`);
+
+    // Check for active jobs
+    const allJobs = jobQueue.getAllJobs();
+    const activeJob = allJobs.find(j =>
+      j.type === 'adobe-target-1.0-scraping' &&
+      j.data?.datasetId === datasetId &&
+      (j.status === 'pending' || j.status === 'running')
+    );
+
+    if (activeJob) {
+      return res.status(200).json({
+        success: true,
+        status: 'in_progress',
+        jobId: activeJob.id,
+        progress: activeJob.progress || 0,
+        message: activeJob.data?.datasetName ? `Processing: ${activeJob.data.datasetName}` : 'Processing...',
+        isActive: true,
+        startedAt: activeJob.startedAt,
+        data: {
+          datasetId,
+          urlsCount: activeJob.data?.urls?.length || 0
+        }
+      });
+    }
+
+    // Check for completed results
+    const result = await AdobeTarget1_0Result.findOne({ datasetId })
+      .sort({ createdAt: -1 });
+
+    if (result) {
+      return res.status(200).json({
+        success: true,
+        status: result.status,
+        resultId: result._id,
+        isActive: false,
+        summary: result.getSummary(),
+        completedAt: result.completedAt,
+        duration: result.duration
+      });
+    }
+
+    // No job or result found
+    res.status(404).json({
+      success: false,
+      message: 'No active job or completed results found for this dataset',
+      status: 'not_started',
+      datasetId
+    });
+
+  } catch (error) {
+    console.error('Error fetching dataset status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch dataset status',
+      error: error.message
+    });
+  }
+});
+
+module.exports = router;

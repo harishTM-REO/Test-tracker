@@ -9,10 +9,10 @@ const rateLimit = require('express-rate-limit');
 // Resolve paths correctly for both local and production environments
 const backendRoot = path.join(__dirname, '..');
 const { connectDB } = require(path.join(backendRoot, 'db/connection'));
-const BackgroundScrapingService = require(path.join(backendRoot, 'services/backgroundScrapingService'));
+const AdobeTarget1_0Service = require(path.join(__dirname, 'services/adobeTarget1_0Service'));
 
 const app = express();
-const port = process.env.WORKER_PORT || 4000;
+const port = process.env.WORKER_AT10_PORT || 4001;
 
 // Trust upstream proxies (Railway, etc.)
 app.set('trust proxy', 1);
@@ -36,21 +36,19 @@ const limiter = rateLimit({
     message: 'Too many requests from this IP, please try again later.'
   }
 });
-app.use('/worker/api/', limiter);
+app.use('/at10/api/', limiter);
 
 // Routes
-const optimizelyRoutes = require('./routes/optimizelyWorkerRoutes');
-const abTastyRoutes = require('./routes/abTastyWorkerRoutes');
+const at10Routes = require('./routes/adobeTarget1_0Routes');
 
-app.use('/worker/api/optimizely', optimizelyRoutes);
-app.use('/worker/api/abtasty', abTastyRoutes);
+app.use('/at10/api', at10Routes);
 
-// Worker health check
-app.get('/worker/health', (req, res) => {
+// Health check endpoint
+app.get('/at10/health', (req, res) => {
   res.json({
     success: true,
-    service: 'scraper-worker',
-    message: 'Scraper worker is running',
+    service: 'adobe-target-1.0-worker',
+    message: 'Adobe Target 1.0 worker is running',
     timestamp: new Date(),
     uptime: process.uptime()
   });
@@ -58,26 +56,30 @@ app.get('/worker/health', (req, res) => {
 
 // Start server
 app.listen(port, async () => {
-  console.log(`Scraper worker running on http://localhost:${port}`);
-  console.log(`Available endpoints:`);
-  console.log(`  GET /worker/api/optimizely/scrape?url=<URL>`);
-  console.log(`  GET /worker/api/abtasty/scrape?url=<URL>`);
-  console.log(`  GET /worker/health`);
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`🎯 Adobe Target 1.0 Worker Service`);
+  console.log(`${'='.repeat(60)}`);
+  console.log(`✅ Server running on http://localhost:${port}`);
+  console.log(`\n📋 Available endpoints:`);
+  console.log(`   POST /at10/api/scrape`);
+  console.log(`   GET  /at10/api/status/:jobId`);
+  console.log(`   GET  /at10/health`);
+  console.log(`${'='.repeat(60)}\n`);
 
   // Initialize database connection
   try {
     await connectDB();
-    console.log('✅ MongoDB connected for worker');
+    console.log('✅ MongoDB connected for AT 1.0 worker');
   } catch (error) {
     console.error('❌ Failed to connect to MongoDB:', error.message);
   }
 
-  // Initialize browser pool for scraping
+  // Initialize AT 1.0 Service
   try {
-    await BackgroundScrapingService.initialize();
-    console.log('✅ Browser pool initialized for worker');
+    await AdobeTarget1_0Service.initialize();
+    console.log('✅ Adobe Target 1.0 Service initialized');
   } catch (error) {
-    console.error('❌ Failed to initialize browser pool:', error.message);
+    console.error('❌ Failed to initialize AT 1.0 Service:', error.message);
   }
 });
 

@@ -16,6 +16,7 @@ const CheckpointService = require('./checkpointService'); // Import checkpoint s
 const urlSanitizer = require('./urlSanitizerService'); // Import URL sanitizer
 const retryLogic = require('./retryLogic'); // Import retry logic for failed URLs
 const mongoDBResilience = require('./mongoDBResilience'); // Import MongoDB resilience module
+const { isUrlReachable } = require('../utils/urlValidator'); // Import URL reachability check
 
 const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
 const CHECKPOINT_ENABLED = process.env.CHECKPOINT_ENABLED === 'true';
@@ -117,6 +118,28 @@ class AbTastyScraperService {
     let savedData = null;
     try {
       console.log(`Starting AbTasty scrape for: ${url}`);
+
+      // Quick reachability check before attempting to scrape
+      console.log(`⏱️  Checking if URL is reachable...`);
+      const isReachable = await isUrlReachable(url);
+      if (!isReachable) {
+        console.warn(`⚠️  URL is not reachable: ${url}`);
+        return {
+          success: false,
+          error: 'URL is not reachable',
+          url: url,
+          abTasty: {
+            detected: false,
+            experimentCount: 0,
+            activeCount: 0,
+            experiments: [],
+            cookieType: 'unreachable'
+          },
+          duration: (Date.now() - startTime) / 1000
+        };
+      }
+
+      console.log(`✅ URL is reachable, proceeding with scrape...`);
 
       // Step 1: Get or create website record (optional if ExperimentService not available)
       let website = null;

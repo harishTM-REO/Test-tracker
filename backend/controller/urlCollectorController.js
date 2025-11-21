@@ -1152,7 +1152,7 @@ async function liveCrawlAndPrioritize(req, res) {
 
         // Launch browser
         browser = await playwright.chromium.launch({
-            headless: true,
+            headless: false,
             args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
 

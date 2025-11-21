@@ -1,0 +1,35 @@
+{
+  "name": "adobe-target-1.0-worker",
+  "version": "1.0.0",
+  "description": "Adobe Target 1.0 worker service for advanced URL prioritization, categorization, and experiment scraping",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "adobe-target",
+    "worker",
+    "scraping",
+    "url-prioritization",
+    "categorization"
+  ],
+  "author": "Your Team",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^6.7.0",
+    "dotenv": "^16.0.3",
+    "mongoose": "^7.0.0",
+    "axios": "^1.4.0",
+    "playwright": "^1.40.0",
+    "node-uuid": "^1.4.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

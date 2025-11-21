@@ -148,10 +148,46 @@ function validateAndSanitize(url) {
   };
 }
 
+/**
+ * Quick reachability check - sends HEAD request to see if URL is accessible
+ * Returns quickly to fail fast on unreachable URLs
+ * @param {string} url - Full URL with protocol to check
+ * @returns {Promise<boolean>} True if URL is reachable, false otherwise
+ */
+async function isUrlReachable(url) {
+  try {
+    const axios = require('axios');
+
+    // Quick HEAD request with short timeout
+    const response = await axios.head(url, {
+      timeout: 5000, // 5 second timeout for quick fail
+      maxRedirects: 3,
+      validateStatus: (status) => status < 500 // Accept any status < 500
+    });
+
+    return response.status < 400; // 2xx and 3xx are good
+  } catch (error) {
+    // If HEAD fails, try GET with just head
+    try {
+      const axios = require('axios');
+      const response = await axios.get(url, {
+        timeout: 5000,
+        maxRedirects: 3,
+        maxContentLength: 1024, // Only fetch 1KB to check if reachable
+        validateStatus: (status) => status < 500
+      });
+      return response.status < 400;
+    } catch (getError) {
+      return false;
+    }
+  }
+}
+
 module.exports = {
   isValidUrl,
   sanitizeUrl,
   domainToUrl,
   batchSanitizeUrls,
-  validateAndSanitize
+  validateAndSanitize,
+  isUrlReachable
 };
