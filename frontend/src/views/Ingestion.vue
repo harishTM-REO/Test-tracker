@@ -3,7 +3,7 @@
     <h4 class="heading">File Data Dashboard</h4>
     <v-col class="type-select">
       <h5 class="sub-heading">Please select a testing tool</h5>
-      <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely','Optimizely Edge', 'Adobe Target']"  variant="solo"></v-select>
+      <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely','Optimizely Edge', 'Adobe Target', 'Adobe Target 1.0']"  variant="solo"></v-select>
     </v-col>
     <!-- File Upload Section -->
     <v-card class="upload-card" elevation="2" v-if="selectedToolType">
@@ -937,6 +937,9 @@ export default {
           if (this.selectedToolType === 'Optimizely Edge') {
             // Redirect to Optimizely Edge dashboard
             this.$router.push(`/optimizely-edge/${result.data._id}`);
+          } else if (this.selectedToolType === 'Adobe Target 1.0') {
+            // Redirect to AT 1.0 dashboard
+            this.$router.push(`/adobe-target-1.0/${result.data._id}`);
           } else {
             // Redirect to datasets page for other tool types
             this.$router.push('/datasets');
