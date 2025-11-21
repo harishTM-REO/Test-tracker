@@ -2230,7 +2230,7 @@ class OptimizelyScraperService {
 
       // ========== CHUNKED SAVING ==========
       // Reduced from 500 to 100 to prevent 16MB MongoDB document limit
-      const BATCH_SIZE = 1;
+      const BATCH_SIZE = 100;
       const totalBatches = Math.ceil(websiteResults.length / BATCH_SIZE) || 1;
 
       console.log(`💾 Saving results in ${totalBatches} batches (${BATCH_SIZE} websites per batch)...`);
