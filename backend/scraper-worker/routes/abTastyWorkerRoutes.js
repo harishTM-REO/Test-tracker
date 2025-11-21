@@ -2,7 +2,7 @@ const path = require('path');
 const express = require('express');
 const router = express.Router();
 const AbTastyScraperService = require(path.join(__dirname, '../../services/abTastyScraperService'));
-const { isValidUrl } = require(path.join(__dirname, '../../utils/urlValidator'));
+const { isValidUrl, isUrlReachable } = require(path.join(__dirname, '../../utils/urlValidator'));
 
 /**
  * @route   GET /worker/api/abtasty/scrape
@@ -40,6 +40,21 @@ router.get('/scrape', async (req, res) => {
 
     console.log(`[ABTasty] 🔍 Starting scrape for: ${url}`);
     const startTime = Date.now();
+
+    // Quick reachability check (5 second timeout)
+    console.log(`[ABTasty] ⏱️  Checking if URL is reachable...`);
+    const isReachable = await isUrlReachable(url);
+    if (!isReachable) {
+      console.warn(`[ABTasty] ⚠️  URL is not reachable: ${url}`);
+      return res.status(400).json({
+        success: false,
+        message: 'URL is not reachable',
+        url: url,
+        note: 'The URL returned 4xx/5xx status or is unreachable'
+      });
+    }
+
+    console.log(`[ABTasty] ✅ URL is reachable, starting scrape...`);
 
     // Scrape the website using service
     const result = await AbTastyScraperService.scrapeAbTastyExperiments(url, res);

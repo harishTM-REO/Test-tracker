@@ -449,6 +449,7 @@ const datasetController = {
         // Start background scraping if companies are available
         let scrapingInitiated = false;
         let optimizelyEdgeInitiated = false;
+        let adobeTarget1_0Initiated = false;
 
         if (datasetData.companies && datasetData.companies.length > 0) {
           // Check if this is an Optimizely Edge dataset
@@ -463,6 +464,17 @@ const datasetController = {
             } catch (edgeError) {
               console.error(`❌ Failed to start Optimizely Edge job:`, edgeError.message);
             }
+          } else if (datasetData.toolType === 'Adobe Target 1.0') {
+            // Adobe Target 1.0 workflow
+            console.log(`Initiating Adobe Target 1.0 workflow for dataset: ${savedDataset._id}`);
+            try {
+              const AdobeTarget1_0JobService = require('../services/adobeTarget1_0JobService');
+              const result = await AdobeTarget1_0JobService.startAdobeTarget1_0Scraping(savedDataset._id.toString());
+              adobeTarget1_0Initiated = result.success;
+              console.log(`✅ Adobe Target 1.0 job started: ${adobeTarget1_0Initiated}`);
+            } catch (at10Error) {
+              console.error(`❌ Failed to start Adobe Target 1.0 job:`, at10Error.message);
+            }
           } else {
             // For other tool types, use normal background scraping
             console.log(`Initiating background scraping for dataset: ${savedDataset._id}`);
@@ -476,7 +488,8 @@ const datasetController = {
           data: savedDataset,
           companiesExtracted: datasetData.companies ? datasetData.companies.length : 0,
           scrapingInitiated: scrapingInitiated,
-          optimizelyEdgeInitiated: optimizelyEdgeInitiated
+          optimizelyEdgeInitiated: optimizelyEdgeInitiated,
+          adobeTarget1_0Initiated: adobeTarget1_0Initiated
         });
 
         console.log('Dataset created successfully');
