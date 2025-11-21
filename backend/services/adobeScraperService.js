@@ -566,7 +566,7 @@ class AdobeScraperService {
                 adobeTargetObject: experimentData.adobeTargetObject,
                 activityNames: experimentData.mboxData?.activityNames || [],
                 activityIds: experimentData.mboxData?.activityIds || [],
-                mboxData: experimentData.offers,
+                mboxData: experimentData.mboxData,
                 cookieType: experimentData.cookieType || 'unknown',
             },
             saved: !!savedData,

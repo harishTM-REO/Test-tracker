@@ -314,20 +314,33 @@ class AdobeTarget1_0Service {
 
         const batchPromises = batch.map(urlItem =>
           AdobeScraperService.scrapeAdobeTargetExperiments(urlItem.url)
-            .then(scrapingResult => ({
-              url: urlItem.url,
-              category: urlItem.category,
-              priority: urlItem.priority,
-              success: true,
-              adobeTargetDetected: scrapingResult.success && scrapingResult.data?.adobeTarget?.detected,
-              experimentCount: scrapingResult.data?.adobeTarget?.experimentCount || 0,
-              experiments: scrapingResult.data?.adobeTarget?.experiments || [],
-              version: scrapingResult.data?.adobeTarget?.version,
-              activityNames: scrapingResult.data?.adobeTarget?.activityNames || [],
-              activityIds: scrapingResult.data?.adobeTarget?.activityIds || [],
-              mboxData: scrapingResult.data?.adobeTarget?.mboxData,
-              scrapedAt: new Date()
-            }))
+            .then(scrapingResult => {
+              const adobeTargetData = scrapingResult.data?.adobeTarget || {};
+              const activityNames = adobeTargetData.activityNames || [];
+              const activityIds = adobeTargetData.activityIds || [];
+
+              // Adobe Target is detected if we have activity names/IDs or explicit detected flag
+              const isDetected = scrapingResult.success && (
+                adobeTargetData.detected === true ||
+                (activityNames.length > 0) ||
+                (activityIds.length > 0)
+              );
+
+              return {
+                url: urlItem.url,
+                category: urlItem.category,
+                priority: urlItem.priority,
+                success: true,
+                adobeTargetDetected: isDetected,
+                experimentCount: adobeTargetData.experimentCount || activityIds.length || 0,
+                experiments: adobeTargetData.experiments || [],
+                version: adobeTargetData.version,
+                activityNames: activityNames,
+                activityIds: activityIds,
+                mboxData: adobeTargetData.mboxData,
+                scrapedAt: new Date()
+              };
+            })
             .catch(error => ({
               url: urlItem.url,
               category: urlItem.category,
@@ -349,6 +362,7 @@ class AdobeTarget1_0Service {
             if (result.adobeTargetDetected) {
               summary.adobeTargetDetectedInTop25 += 1;
               summary.totalExperimentsInTop25 += result.experimentCount;
+              console.log(`      ✅ Adobe Target DETECTED: ${result.url} (${result.activityIds.length} activities)`);
             }
           } else {
             summary.failedScrapedUrls += 1;
