@@ -158,7 +158,7 @@ const abTastyResultSchema = new mongoose.Schema({
 });
 
 // OPTIMIZATION: Added single index on datasetId for fast lookups in controller methods
-abTastyResultSchema.index({ datasetId: 1 });
+// abTastyResultSchema.index({ datasetId: 1 });
 
 // Composite index for datasetId + batchNumber to handle batching
 abTastyResultSchema.index({ datasetId: 1, batchNumber: 1 }, { unique: true });
