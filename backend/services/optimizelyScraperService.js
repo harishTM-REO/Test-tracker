@@ -319,7 +319,9 @@ class OptimizelyScraperService {
    * @param {string} url - URL to navigate to
    */
   async navigateToPage(page, url) {
-    const maxRetries = 3;
+    // Reduced retries for faster failure on slow URLs
+    const maxRetries = parseInt(process.env.NAVIGATION_MAX_RETRIES) || 1;
+    const navigationTimeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000; // Reduced default to 30s
     let lastError;
 
     // Validate and normalize URL first
@@ -328,13 +330,13 @@ class OptimizelyScraperService {
       throw new Error(`Invalid or unreachable URL: ${url}`);
     }
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
       try {
-        console.log(`Navigating to: ${normalizedUrl} (attempt ${attempt}/${maxRetries})`);
+        console.log(`Navigating to: ${normalizedUrl} (attempt ${attempt}/${maxRetries + 1})`);
 
         await page.goto(normalizedUrl, {
           waitUntil: 'domcontentloaded',
-          timeout: process.env.PAGE_NAVIGATION_TIMEOUT || 30000, // 30 seconds timeout
+          timeout: navigationTimeout, // Use reduced timeout
         });
 
         console.log("Page loaded successfully");
@@ -342,6 +344,12 @@ class OptimizelyScraperService {
       } catch (error) {
         lastError = error;
         console.error(`Navigation attempt ${attempt} failed:`, error.message);
+
+        // CRITICAL: Don't retry on timeout - fail fast to move to next URL
+        if (error.message.includes('timeout') || error.message.includes('Navigation timeout')) {
+          console.warn(`⏱️  Navigation timeout after ${navigationTimeout}ms - skipping retries to save time`);
+          throw new Error(`Navigation timeout of ${navigationTimeout} ms exceeded`);
+        }
 
         // Handle different types of network errors
         if (error.message.includes('ERR_NAME_NOT_RESOLVED')) {
@@ -355,7 +363,7 @@ class OptimizelyScraperService {
               try {
                 await page.goto(alternativeUrl, {
                   waitUntil: 'domcontentloaded',
-                  timeout: 30000
+                  timeout: navigationTimeout // Use same reduced timeout
                 });
                 console.log("Page loaded successfully with alternative URL");
                 return;

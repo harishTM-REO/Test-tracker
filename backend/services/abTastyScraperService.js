@@ -94,7 +94,8 @@ class AbTastyScraperService {
    */
   async scrapeAbTastyExperiments(url, res = null) {
     // Wrap entire scraping operation with timeout to prevent hanging URLs
-    const overallTimeout = parseInt(process.env.OVERALL_SCRAPE_TIMEOUT) || 30000; // 30 seconds default
+    // Reduced default to 60s for faster failure on slow URLs
+    const overallTimeout = parseInt(process.env.OVERALL_SCRAPE_TIMEOUT) || 60000; // 60 seconds default (reduced from 90s)
 
     return Promise.race([
       this.scrapeAbTastyExperimentsInternal(url, res),
@@ -322,12 +323,11 @@ class AbTastyScraperService {
    * @param {string} url - URL to navigate to
    */
   async navigateToPage(page, url) {
+    // Reduced timeout for faster failure on slow URLs
+    const navigationTimeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000; // 30 seconds default (reduced from 60s)
+    
     try {
-      console.log(`Navigating to: ${url}`);
-
-      // Increased from 15s to 30s to handle slow sites
-      // This reduces timeouts for legitimate slow-loading pages
-      const navigationTimeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000; // 30 seconds default
+      console.log(`Navigating to: ${url} (timeout: ${navigationTimeout}ms)`);
 
       await page.goto(url, {
         waitUntil: 'domcontentloaded',
@@ -336,6 +336,12 @@ class AbTastyScraperService {
 
       console.log("Page loaded successfully");
     } catch (error) {
+      // CRITICAL: Fail fast on timeout - don't retry to save processing time
+      if (error.message.includes('timeout') || error.message.includes('Navigation timeout')) {
+        console.warn(`⏱️  Navigation timeout after ${navigationTimeout}ms - failing fast to save time`);
+        throw new Error(`Navigation timeout of ${navigationTimeout} ms exceeded`);
+      }
+      
       console.error('Error navigating to page:', error);
       throw new Error(`Failed to navigate to ${url}: ${error.message}`);
     }
@@ -999,7 +1005,8 @@ async extractAbTastySync(page) {
    */
   async scrapeExperimentsFromPage(url) {
     // Wrap with timeout to prevent individual URLs from hanging
-    const pageTimeout = parseInt(process.env.PAGE_SCRAPE_TIMEOUT) || 25000; // 25 seconds default
+    // Reduced default to 50s for faster failure (navigation 30s + processing 20s buffer)
+    const pageTimeout = parseInt(process.env.PAGE_SCRAPE_TIMEOUT) || 50000; // 50 seconds default (reduced from 75s)
 
     return Promise.race([
       this.scrapeExperimentsFromPageInternal(url),
