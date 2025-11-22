@@ -1551,11 +1551,15 @@ async extractAbTastySync(page) {
     const jobQueue = require('./jobQueue');
     const adaptiveOptions = jobQueue.getAdaptiveScrapeOptions();
 
+    // Get pool size from env and ensure concurrent doesn't exceed it
+    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+    const envConcurrent = parseInt(process.env.CONCURRENT_URLS) || poolSize;
+    
     const {
-      concurrent = 10,  // OPTIMIZED: 10 concurrent browsers for 10K URL runs
+      concurrent = Math.min(envConcurrent, poolSize),  // Respect pool size limit
       delay = adaptiveOptions.delay || parseInt(process.env.BATCH_DELAY) || 2000,
-      batchSize = 200,  // OPTIMIZED: 200 URLs/batch = SAFE (12 min processing, 50 batches for 10K)
-      maxTabs = adaptiveOptions.maxTabs,
+      batchSize = parseInt(process.env.BATCH_SIZE) || 200,  // Use env var or default to 200
+      maxTabs = adaptiveOptions.maxTabs || 1,  // Sequential processing per browser
       jobId = `scrape-${Date.now()}`,
       datasetId = null,
       datasetName = 'Dataset'
@@ -1563,6 +1567,14 @@ async extractAbTastySync(page) {
 
     if (!datasetId) {
       throw new Error('datasetId is required for streaming saves');
+    }
+
+    // Ensure the shared browser pool is ready before starting long batch jobs
+    try {
+      await browserPool.initialize();
+    } catch (poolError) {
+      console.error('❌ Failed to initialize browser pool for batch scraping:', poolError.message);
+      throw poolError;
     }
 
     const startTime = new Date();
@@ -1890,70 +1902,57 @@ async extractAbTastySync(page) {
    * @returns {Array} Results for this chunk
    */
   async processUrlChunk(urls, options = {}) {
-    const { concurrent = 3, maxTabs = 7 } = options;
+    // Get pool size and ensure concurrent respects it
+    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+    const envConcurrent = parseInt(process.env.CONCURRENT_URLS) || poolSize;
+    const { concurrent = Math.min(envConcurrent, poolSize), maxTabs = 1 } = options;
     const results = [];
-    const browsers = [];
 
     try {
-      // Calculate optimal browser count to ensure all URLs are processed
-      // We need enough browsers to handle all URLs within the maxTabs constraint
+      // Calculate optimal browser count (respect pool size limit)
       const optimalBrowserCount = Math.ceil(urls.length / maxTabs);
-      const actualBrowserCount = Math.min(optimalBrowserCount, concurrent);
-      
-      console.log(`Launching ${actualBrowserCount} browsers for ${urls.length} URLs (optimal: ${optimalBrowserCount}, max concurrent: ${concurrent})`);
-      
-      for (let i = 0; i < actualBrowserCount; i++) {
-        // const browser = await this.connectWithRetry();
-        const browser = await this.launchBrowser();
-        browsers.push(browser);
-      }
+      const actualBrowserCount = Math.max(1, Math.min(optimalBrowserCount, concurrent, poolSize));
 
-      // Distribute URLs across browsers with improved algorithm
-      const urlBatches = this.distributeUrlsAcrossBrowsers(urls, browsers.length, maxTabs);
-      
+      console.log(`🌐 Using browser pool (${actualBrowserCount}/${poolSize} browsers) for ${urls.length} URLs`);
+
+      // Distribute URLs across browsers
+      const urlBatches = this.distributeUrlsAcrossBrowsers(urls, actualBrowserCount, maxTabs);
+
       // Verify all URLs are distributed
       const totalDistributedUrls = urlBatches.flat().length;
       if (totalDistributedUrls !== urls.length) {
         console.warn(`⚠️ URL distribution mismatch: ${totalDistributedUrls}/${urls.length} URLs distributed`);
         console.warn('URL batches:', urlBatches.map((batch, i) => `Browser ${i}: ${batch.length} URLs`));
       }
-      
-      // Process each browser's batch with memory monitoring
-      // IMPROVED: Check memory between browser batches and restart if needed
-      for (let browserIndex = 0; browserIndex < urlBatches.length; browserIndex++) {
-        const urlBatch = urlBatches[browserIndex];
-        const browser = browsers[browserIndex];
 
-        try {
-          console.log(`\n📂 Processing browser batch ${browserIndex + 1}/${urlBatches.length}`);
-
-          // Scrape this browser's batch
-          const batchResult = await this.processBrowserBatch(browser, urlBatch);
-          results.push(...batchResult);
-
-          // Check memory after each browser batch
-          const shouldRestart = await this.shouldRestartBrowser(browser);
-          if (shouldRestart) {
-            console.log(`\n🔄 Memory pressure detected, restarting browser ${browserIndex}...`);
-            await this.closeBrowser(browser);
-
-            // Create new browser
-            const newBrowser = await this.launchBrowser();
-            browsers[browserIndex] = newBrowser;
-            console.log(`✅ Browser ${browserIndex} restarted`);
+      // Process each browser's batch using the pool (CRITICAL: uses pool, not direct launch)
+      const batchPromises = urlBatches.map(async (urlBatch, browserIndex) => {
+        return browserPool.withBrowser(async (browser) => {
+          try {
+            console.log(`\n📂 Processing browser batch ${browserIndex + 1}/${urlBatches.length}`);
+            const batchResult = await this.processBrowserBatch(browser, urlBatch);
+            return batchResult;
+          } catch (error) {
+            console.error(`Error processing browser batch ${browserIndex}:`, error.message);
+            // Return empty array on error so other batches can continue
+            return [];
           }
+        });
+      });
 
-        } catch (error) {
-          console.error(`Error processing browser batch ${browserIndex}:`, error.message);
-          // Continue with other browsers
+      const batchResults = await Promise.allSettled(batchPromises);
+
+      // Flatten results
+      batchResults.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value) {
+          results.push(...result.value);
+        } else if (result.status === 'rejected') {
+          console.error(`❌ Batch ${index + 1} processing failed:`, result.reason?.message || result.reason);
         }
-      }
+      });
 
     } catch (error) {
       console.error('Error in processUrlChunk:', error);
-    } finally {
-      // Clean up all browsers
-      await Promise.all(browsers.map(browser => this.closeBrowser(browser)));
     }
 
     return results;

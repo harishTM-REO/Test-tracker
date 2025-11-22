@@ -1655,11 +1655,15 @@ class OptimizelyScraperService {
     const jobQueue = require('./jobQueue');
     const adaptiveOptions = jobQueue.getAdaptiveScrapeOptions();
 
+    // Get pool size from env and ensure concurrent doesn't exceed it
+    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+    const envConcurrent = parseInt(process.env.CONCURRENT_URLS) || poolSize;
+    
     const {
-      concurrent = 10,  // OPTIMIZED: 10 concurrent browsers for 10K URL runs
+      concurrent = Math.min(envConcurrent, poolSize),  // Respect pool size limit
       delay = adaptiveOptions.delay || parseInt(process.env.BATCH_DELAY) || 2000,
-      batchSize = 200,  // OPTIMIZED: 200 URLs/batch = SAFE (12 min processing, 50 batches for 10K)
-      maxTabs = adaptiveOptions.maxTabs,
+      batchSize = parseInt(process.env.BATCH_SIZE) || 200,  // Use env var or default to 200
+      maxTabs = adaptiveOptions.maxTabs || 1,  // Sequential processing per browser
       jobId = `scrape-${Date.now()}`,
       datasetId = null,
       datasetName = 'Dataset'
@@ -1994,26 +1998,21 @@ class OptimizelyScraperService {
    * @returns {Array} Results for this chunk
    */
   async processUrlChunk(urls, options = {}) {
-    const { concurrent = 3, maxTabs = 7 } = options;
+    // Get pool size and ensure concurrent respects it
+    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+    const envConcurrent = parseInt(process.env.CONCURRENT_URLS) || poolSize;
+    const { concurrent = Math.min(envConcurrent, poolSize), maxTabs = 1 } = options;
     const results = [];
-    const browsers = [];
 
     try {
-      // Calculate optimal browser count to ensure all URLs are processed
-      // We need enough browsers to handle all URLs within the maxTabs constraint
+      // Calculate optimal browser count (respect pool size limit)
       const optimalBrowserCount = Math.ceil(urls.length / maxTabs);
-      const actualBrowserCount = Math.min(optimalBrowserCount, concurrent);
+      const actualBrowserCount = Math.max(1, Math.min(optimalBrowserCount, concurrent, poolSize));
 
-      console.log(`Launching ${actualBrowserCount} browsers for ${urls.length} URLs (optimal: ${optimalBrowserCount}, max concurrent: ${concurrent})`);
+      console.log(`🌐 Using browser pool (${actualBrowserCount}/${poolSize} browsers) for ${urls.length} URLs`);
 
-      for (let i = 0; i < actualBrowserCount; i++) {
-        // const browser = await this.connectWithRetry();
-        const browser = await this.launchBrowser();
-        browsers.push(browser);
-      }
-
-      // Distribute URLs across browsers with improved algorithm
-      const urlBatches = this.distributeUrlsAcrossBrowsers(urls, browsers.length, maxTabs);
+      // Distribute URLs across browsers
+      const urlBatches = this.distributeUrlsAcrossBrowsers(urls, actualBrowserCount, maxTabs);
 
       // Verify all URLs are distributed
       const totalDistributedUrls = urlBatches.flat().length;
@@ -2022,11 +2021,11 @@ class OptimizelyScraperService {
         console.warn('URL batches:', urlBatches.map((batch, i) => `Browser ${i}: ${batch.length} URLs`));
       }
 
-      // Process each browser's batch
-      const batchPromises = urlBatches.map(async (urlBatch, browserIndex) => {
-        const browser = browsers[browserIndex];
-        // Scrapping happens in this function
-        return await this.processBrowserBatch(browser, urlBatch);
+      // Process each browser's batch using the pool (CRITICAL: uses pool, not direct launch)
+      const batchPromises = urlBatches.map(async (urlBatch) => {
+        return browserPool.withBrowser(async (browser) => {
+          return await this.processBrowserBatch(browser, urlBatch);
+        });
       });
 
       const batchResults = await Promise.allSettled(batchPromises);
@@ -2035,14 +2034,13 @@ class OptimizelyScraperService {
       batchResults.forEach(result => {
         if (result.status === 'fulfilled' && result.value) {
           results.push(...result.value);
+        } else if (result.status === 'rejected') {
+          console.error('❌ Batch processing failed:', result.reason?.message || result.reason);
         }
       });
 
     } catch (error) {
       console.error('Error in processUrlChunk:', error);
-    } finally {
-      // Clean up all browsers
-      await Promise.all(browsers.map(browser => this.closeBrowser(browser)));
     }
 
     return results;
