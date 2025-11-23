@@ -1113,21 +1113,33 @@ class OptimizelyScraperService {
       } catch (pageError) {
         console.error(`❌ Failed to create page for ${url}: ${pageError.message}`);
 
-        // CRITICAL: If it's a crash/connection error, add to problematic domains
-        if (pageError.message.includes('Connection closed') ||
-            pageError.message.includes('Target closed') ||
-            pageError.message.includes('Protocol error')) {
+        const browserSessionErrors = [
+          'Connection closed',
+          'Target closed',
+          'Protocol error',
+          'Session closed',
+          'Browser has been closed'
+        ];
+        const isBrowserSessionError = browserSessionErrors.some(msg =>
+          pageError.message.includes(msg)
+        );
+
+        // Only blacklist the domain when the error is likely URL-specific.
+        if (!isBrowserSessionError) {
           const domain = new URL(url).hostname;
           urlSanitizer.addProblematicDomain(domain);
           console.error(`🚨 Browser crash detected on ${domain} - added to blacklist`);
+        } else {
+          console.warn('Detected browser-level session error; skipping domain blacklist and scheduling browser restart.');
         }
 
         // If page creation fails, handle it appropriately
         if (shouldReleaseBrowser && browser) {
-          // CRITICAL: If it's a timeout, force restart the browser (don't return to pool)
-          // Timeout means browser is unresponsive, returning it will just cause more timeouts
-          if (pageError.message.includes('timeout')) {
-            console.log(`⚠️  Page creation timeout detected, force-restarting browser instead of returning to pool...`);
+          const shouldForceRestart =
+            pageError.message.includes('timeout') || isBrowserSessionError;
+
+          if (shouldForceRestart) {
+            console.log(`⚠️  Page creation failure indicates browser instability, force-restarting browser instead of returning to pool...`);
             await browserPool.forceRestartBrowser(browser);
             // CRITICAL FIX: Set flag to prevent double-release in finally block
             browserRestartTriggered = true;
