@@ -39,7 +39,8 @@ class OptimizelyScraperService {
         return await puppeteer.connect({
           browserWSEndpoint: `wss://production-sfo.browserless.io?token=${BROWSERLESS_API_TOKEN}`,
           defaultViewport: null,
-          ignoreHTTPSErrors: true
+          ignoreHTTPSErrors: true,
+          protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000 // 60 seconds for CDP communication
         });
       } catch (error) {
         if (i < retries - 1) {
@@ -203,6 +204,8 @@ class OptimizelyScraperService {
         let browserOptions = {
           headless: true,
           ignoreHTTPSErrors: true,
+          // CRITICAL: protocolTimeout prevents CDP communication hangs
+          protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000, // 60 seconds for CDP communication
           args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
