@@ -937,11 +937,8 @@ export default {
           if (this.selectedToolType === 'Optimizely Edge') {
             // Redirect to Optimizely Edge dashboard
             this.$router.push(`/optimizely-edge/${result.data._id}`);
-          } else if (this.selectedToolType === 'Adobe Target 1.0') {
-            // Redirect to AT 1.0 dashboard
-            this.$router.push(`/adobe-target-1.0/${result.data._id}`);
           } else {
-            // Redirect to datasets page for other tool types
+            // Redirect to datasets page for other tool types (including Adobe Target 1.0)
             this.$router.push('/datasets');
           }
         }, 2000); // 2 second delay to show success message

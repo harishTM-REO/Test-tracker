@@ -38,7 +38,7 @@ router.post('/scrape', async (req, res) => {
     }
 
     // Create job
-    const job = jobQueue.createJob('adobe-target-1.0-scraping', {
+    const jobId = jobQueue.createJob('adobe-target-1.0-scraping', {
       datasetId,
       datasetName,
       urls,
@@ -49,14 +49,16 @@ router.post('/scrape', async (req, res) => {
       }
     });
 
-    console.log(`   Job created: ${job.id}`);
-    console.log(`   Status: ${job.status}`);
+    const job = jobQueue.getJob(jobId);
+
+    console.log(`   Job created: ${jobId}`);
+    console.log(`   Status: ${job?.status || 'pending'}`);
 
     res.status(202).json({
       success: true,
       message: 'Adobe Target 1.0 scraping job initiated',
-      jobId: job.id,
-      status: job.status,
+      jobId: jobId,
+      status: job?.status || 'pending',
       dataset: {
         id: datasetId,
         name: datasetName,

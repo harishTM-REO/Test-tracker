@@ -41,6 +41,30 @@ class AdobeTarget1_0Service {
       console.log(`\n🎯 Starting Adobe Target 1.0 workflow for: ${datasetName}`);
       console.log(`📊 Processing ${urls.length} URLs from datalist\n`);
 
+      // Update dataset status to reflect active scraping
+      let datasetDoc = await Dataset.findById(datasetId);
+      if (datasetDoc) {
+        if (datasetDoc.scrapingStatus !== 'in_progress') {
+          datasetDoc = await datasetDoc.startScraping();
+        }
+
+        datasetDoc.scrapingStatus = 'in_progress';
+        datasetDoc.scrapingLastUpdate = new Date();
+        datasetDoc.scrapingStats = {
+          ...(datasetDoc.scrapingStats || {}),
+          totalUrls: urls.length,
+          processedUrls: 0,
+          successfulScans: 0,
+          failedScans: 0,
+          adobeTargetDetected: 0,
+          totalExperiments: 0
+        };
+        await datasetDoc.save();
+        console.log('📡 Dataset status marked as in_progress for Adobe Target 1.0 workflow');
+      } else {
+        console.warn(`⚠️ Dataset ${datasetId} not found when initializing AT 1.0 scraping status`);
+      }
+
       const startTime = new Date();
 
       // Create result document
@@ -62,7 +86,9 @@ class AdobeTarget1_0Service {
           totalTop25UrlsSuccessful: 0,
           totalTop25UrlsFailed: 0,
           adobeTargetDetectedCount: 0,
-          totalExperimentsFound: 0
+          totalExperimentsFound: 0,
+          uniqueExperimentsFound: 0,
+          uniqueExperimentIds: []
         },
         urlWorkflowResults: []
       });
@@ -115,6 +141,11 @@ class AdobeTarget1_0Service {
           result.overallStats.adobeTargetDetectedCount += scrapingResults.summary.adobeTargetDetectedInTop25;
           result.overallStats.totalExperimentsFound += scrapingResults.summary.totalExperimentsInTop25;
 
+          const aggregatedUniqueIds = new Set(result.overallStats.uniqueExperimentIds || []);
+          (scrapingResults.summary.uniqueExperimentIds || []).forEach(id => aggregatedUniqueIds.add(id));
+          result.overallStats.uniqueExperimentIds = Array.from(aggregatedUniqueIds);
+          result.overallStats.uniqueExperimentsFound = result.overallStats.uniqueExperimentIds.length;
+
           result.urlWorkflowResults.push(workflowResult);
 
           console.log(`  ✅ URL ${i + 1} completed: ${scrapingResults.summary.successfulScrapedUrls}/${scrapingResults.summary.totalTop25Urls} top URLs scraped successfully`);
@@ -160,9 +191,29 @@ class AdobeTarget1_0Service {
       console.log(`✅ Total Top 25 URLs Processed: ${result.overallStats.totalTop25UrlsProcessed}`);
       console.log(`✅ Adobe Target Detected: ${result.overallStats.adobeTargetDetectedCount}`);
       console.log(`✅ Total Experiments Found: ${result.overallStats.totalExperimentsFound}`);
+      console.log(`✅ Unique Experiments Found: ${result.overallStats.uniqueExperimentsFound}`);
       console.log(`${'='.repeat(60)}\n`);
 
       progressCallback(100, { message: 'Workflow completed successfully' });
+
+      // Mark dataset as completed with summary stats for UI consumption
+      const completionStats = {
+        totalUrls: result.overallStats.totalTop25UrlsProcessed,
+        processedUrls: result.overallStats.totalTop25UrlsProcessed,
+        successfulScans: result.overallStats.totalTop25UrlsSuccessful,
+        failedScans: result.overallStats.totalTop25UrlsFailed,
+        adobeTargetDetected: result.overallStats.adobeTargetDetectedCount,
+        totalExperiments: result.overallStats.totalExperimentsFound,
+        uniqueExperiments: result.overallStats.uniqueExperimentsFound || 0
+      };
+
+      const completedDataset = await Dataset.findById(datasetId);
+      if (completedDataset) {
+        await completedDataset.completeScraping(completionStats);
+        console.log(`✅ Dataset ${datasetId} marked as completed in MongoDB`);
+      } else {
+        console.warn(`⚠️ Dataset ${datasetId} not found when marking completion`);
+      }
 
       return {
         success: true,
@@ -283,12 +334,15 @@ class AdobeTarget1_0Service {
   async scrapeTop25Urls(categorizationResult, options = {}) {
     const concurrency = options.concurrency || 4; // 4 concurrent URLs
     const results = [];
+    const uniqueExperimentIds = new Set();
     let summary = {
       totalTop25Urls: 0,
       successfulScrapedUrls: 0,
       failedScrapedUrls: 0,
       adobeTargetDetectedInTop25: 0,
-      totalExperimentsInTop25: 0
+      totalExperimentsInTop25: 0,
+      uniqueExperimentCount: 0,
+      uniqueExperimentIds: []
     };
 
     try {
@@ -315,12 +369,15 @@ class AdobeTarget1_0Service {
         const batchPromises = batch.map(urlItem =>
           AdobeScraperService.scrapeAdobeTargetExperiments(urlItem.url)
             .then(scrapingResult => {
-              const adobeTargetData = scrapingResult.data?.adobeTarget || {};
+              const adobeTargetData = scrapingResult.adobeTarget || scrapingResult.data?.adobeTarget || {};
               const activityNames = adobeTargetData.activityNames || [];
               const activityIds = adobeTargetData.activityIds || [];
 
+              // Treat undefined success as true (legacy service never sets the flag)
+              const requestSucceeded = scrapingResult.success ?? true;
+
               // Adobe Target is detected if we have activity names/IDs or explicit detected flag
-              const isDetected = scrapingResult.success && (
+              const isDetected = requestSucceeded && (
                 adobeTargetData.detected === true ||
                 (activityNames.length > 0) ||
                 (activityIds.length > 0)
@@ -330,7 +387,7 @@ class AdobeTarget1_0Service {
                 url: urlItem.url,
                 category: urlItem.category,
                 priority: urlItem.priority,
-                success: true,
+                success: requestSucceeded,
                 adobeTargetDetected: isDetected,
                 experimentCount: adobeTargetData.experimentCount || activityIds.length || 0,
                 experiments: adobeTargetData.experiments || [],
@@ -363,6 +420,18 @@ class AdobeTarget1_0Service {
               summary.adobeTargetDetectedInTop25 += 1;
               summary.totalExperimentsInTop25 += result.experimentCount;
               console.log(`      ✅ Adobe Target DETECTED: ${result.url} (${result.activityIds.length} activities)`);
+
+              if (Array.isArray(result.experiments) && result.experiments.length > 0) {
+                result.experiments.forEach(exp => {
+                  if (exp.experimentId) {
+                    uniqueExperimentIds.add(exp.experimentId);
+                  } else if (Array.isArray(exp.activityIds)) {
+                    exp.activityIds.forEach(id => uniqueExperimentIds.add(id));
+                  }
+                });
+              } else if (Array.isArray(result.activityIds)) {
+                result.activityIds.forEach(id => uniqueExperimentIds.add(id));
+              }
             }
           } else {
             summary.failedScrapedUrls += 1;
@@ -378,6 +447,9 @@ class AdobeTarget1_0Service {
       }
 
       console.log(`    ✅ Scraping complete: ${summary.successfulScrapedUrls}/${summary.totalTop25Urls} URLs succeeded`);
+      summary.uniqueExperimentIds = Array.from(uniqueExperimentIds);
+      summary.uniqueExperimentCount = summary.uniqueExperimentIds.length;
+      console.log(`    🎯 Unique experiments detected so far: ${summary.uniqueExperimentCount}`);
 
     } catch (error) {
       console.error(`    ❌ Error during scraping:`, error.message);

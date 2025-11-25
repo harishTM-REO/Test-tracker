@@ -27,6 +27,7 @@ const IndexValidationService = require('./services/indexValidationService');
 const optimizelyRoutes = require('./routes/optimizelyRoutes');
 const abTastyRoutes = require('./routes/abTastyRoutes');
 const adobeTargetRoutes = require('./routes/adobeRoutes');
+const adobeTarget1_0Routes = require('./routes/adobeTarget1_0Routes');
 const pageCrawlerRoutes = require('./routes/pageCrawlerRoutes');
 const experimentsRoutes = require('./routes/experimentsRoutes');
 const urlCollectorRoutes = require('./routes/urlCollectorRoutes');
@@ -101,6 +102,7 @@ app.use('/api/abtasty', abTastyRoutes);
 
 // Adobe Target Routes[batch, scrape, etc..]
 app.use('/api/adobetarget', adobeTargetRoutes);
+app.use('/api/adobe-target-1.0', adobeTarget1_0Routes);
 
 // Page Crawler Routes
 app.use('/api/crawler', pageCrawlerRoutes);

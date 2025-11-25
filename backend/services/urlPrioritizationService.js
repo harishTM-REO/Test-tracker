@@ -938,11 +938,66 @@ class UrlPrioritizationService {
       console.log(`\n✅ Generated ${prioritizedUrls.length} prioritized entries`);
       console.log(`🌍 Locales detected: ${localesDetected}`);
 
+      // Fallback: if hierarchy produced no entries, build a best-effort list
+      if (prioritizedUrls.length === 0) {
+        console.warn('⚠️  No hierarchical parents discovered; using fallback prioritization');
+        const fallbackEntries = this.buildFallbackPrioritizedEntries(samedomainUrls, baseDomain, options.fallbackLimit || 10);
+        prioritizedUrls.push(...fallbackEntries);
+      }
+
       return { prioritizedUrls, localesDetected };
     } catch (error) {
       console.error('Error in prioritizeUrls:', error);
       throw error;
     }
+  }
+
+  /**
+   * Build fallback prioritized entries when no parent/child hierarchy is found.
+   * Uses direct children of the root (and their top descendants) to maintain coverage.
+   *
+   * @param {Array<string>} urls - Same-domain URLs from crawl
+   * @param {string} baseDomain - Domain used during crawl
+   * @param {number} limit - Maximum fallback entries
+   * @returns {Array<Object>} Fallback prioritized structures
+   */
+  buildFallbackPrioritizedEntries(urls = [], baseDomain, limit = 10) {
+    if (!Array.isArray(urls) || urls.length === 0) {
+      return [];
+    }
+
+    const rootChildren = this.getDirectChildren(urls, '/', baseDomain);
+    const normalizedSet = new Set(urls.map(url => this.removeQueryString(url)));
+    const fallback = [];
+
+    for (const childUrl of rootChildren) {
+      if (fallback.length >= limit) break;
+
+      let childPath = '/';
+      try {
+        const parsed = new URL(childUrl);
+        childPath = parsed.pathname || '/';
+      } catch (e) {
+        // Skip invalid URL entries
+        continue;
+      }
+
+      const grandChildren = this.getDirectChildren(urls, childPath, baseDomain);
+      const rankedChildren = this.getTopChildren(grandChildren, normalizedSet, 2);
+
+      fallback.push({
+        url: childUrl,
+        topChildren: rankedChildren.length ? rankedChildren : []
+      });
+    }
+
+    // If still empty, surface the first N URLs as a last resort
+    if (fallback.length === 0) {
+      const limited = Array.from(normalizedSet).slice(0, limit);
+      limited.forEach(url => fallback.push({ url, topChildren: [] }));
+    }
+
+    return fallback;
   }
 }
 

@@ -7,8 +7,11 @@ const Dataset = require('../models/Dataset');
  * and initiates scraping jobs for datasets
  */
 class AdobeTarget1_0JobService {
-  constructor() {
-    this.at10WorkerUrl = process.env.WORKER_AT10_URL || 'http://localhost:4001';
+  /**
+   * Resolve the worker base URL (Railway/Local)
+   */
+  static getWorkerUrl() {
+    return process.env.WORKER_AT10_URL || 'http://localhost:4001';
   }
 
   /**
@@ -46,10 +49,28 @@ class AdobeTarget1_0JobService {
         throw new Error('No valid URLs found in dataset companies');
       }
 
+      // Mark dataset as pending while the remote worker spins up
+      dataset.scrapingStatus = 'pending';
+      dataset.scrapingError = null;
+      dataset.scrapingStartedAt = null;
+      dataset.scrapingCompletedAt = null;
+      dataset.scrapingStats = {
+        ...(dataset.scrapingStats || {}),
+        totalUrls: urls.length,
+        processedUrls: 0,
+        successfulScans: 0,
+        failedScans: 0,
+        adobeTargetDetected: 0,
+        totalExperiments: 0
+      };
+      dataset.scrapingLastUpdate = new Date();
+      await dataset.save();
+      console.log('⏱️ Dataset marked as pending while AT 1.0 worker initializes');
+
       console.log(`✅ Extracted ${urls.length} URLs from companies`);
 
       // Call AT 1.0 worker service to initiate scraping
-      const workerServiceUrl = `${this.at10WorkerUrl}/at10/api/scrape`;
+      const workerServiceUrl = `${this.getWorkerUrl()}/at10/api/scrape`;
 
       console.log(`🔗 Calling AT 1.0 worker service: ${workerServiceUrl}`);
 
@@ -89,7 +110,7 @@ class AdobeTarget1_0JobService {
         console.error(`   Response: ${JSON.stringify(error.response.data)}`);
       } else if (error.request) {
         console.error(`   No response received from AT 1.0 worker`);
-        console.error(`   Make sure the AT 1.0 worker service is running at ${this.at10WorkerUrl}`);
+        console.error(`   Make sure the AT 1.0 worker service is running at ${this.getWorkerUrl()}`);
       }
 
       return {
@@ -107,7 +128,7 @@ class AdobeTarget1_0JobService {
    */
   static async getJobStatus(jobId) {
     try {
-      const statusUrl = `${this.at10WorkerUrl}/at10/api/status/${jobId}`;
+      const statusUrl = `${this.getWorkerUrl()}/at10/api/status/${jobId}`;
 
       const response = await axios.get(statusUrl, {
         timeout: 10000
@@ -131,7 +152,7 @@ class AdobeTarget1_0JobService {
    */
   static async getDatasetResults(datasetId) {
     try {
-      const resultsUrl = `${this.at10WorkerUrl}/at10/api/results/dataset/${datasetId}`;
+      const resultsUrl = `${this.getWorkerUrl()}/at10/api/results/dataset/${datasetId}`;
 
       const response = await axios.get(resultsUrl, {
         timeout: 10000
@@ -155,7 +176,7 @@ class AdobeTarget1_0JobService {
    */
   static async getDatasetStatus(datasetId) {
     try {
-      const statusUrl = `${this.at10WorkerUrl}/at10/api/status/dataset/${datasetId}`;
+      const statusUrl = `${this.getWorkerUrl()}/at10/api/status/dataset/${datasetId}`;
 
       const response = await axios.post(statusUrl, {}, {
         timeout: 10000
@@ -179,7 +200,7 @@ class AdobeTarget1_0JobService {
    */
   static async isWorkerAvailable() {
     try {
-      const healthUrl = `${this.at10WorkerUrl}/at10/health`;
+      const healthUrl = `${this.getWorkerUrl()}/at10/health`;
 
       const response = await axios.get(healthUrl, {
         timeout: 5000

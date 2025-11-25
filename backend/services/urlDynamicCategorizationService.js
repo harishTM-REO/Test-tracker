@@ -1257,7 +1257,8 @@ URLDynamicCategorizationService.prototype.rankAndLimitTopUrls = function(urlDeta
         'Loyalty & Rewards'
     ]);
 
-    const bucketed = {}; // category -> count
+    const bucketed = {}; // category -> count selected
+    const categoryTotals = {}; // category -> number of eligible urls
     const ranked = [];
 
     for (const item of urlDetails) {
@@ -1270,6 +1271,8 @@ URLDynamicCategorizationService.prototype.rankAndLimitTopUrls = function(urlDeta
         const priority = this.getBusinessPriority(category, path);
         const finalScore = (priority * 2) + confidence;
 
+        if (excludedCategories.has(category)) continue;
+
         ranked.push({
             url: item.url,
             category,
@@ -1279,27 +1282,60 @@ URLDynamicCategorizationService.prototype.rankAndLimitTopUrls = function(urlDeta
             reason: item.reason || '',
             signal: item.signal || ''
         });
+
+        categoryTotals[category] = (categoryTotals[category] || 0) + 1;
     }
+
+    const eligibleCount = ranked.length || 1;
 
     // Sort by finalScore descending
     ranked.sort((a, b) => b.finalScore - a.finalScore);
 
-    const output = [];
+    // Dynamically compute per-category slot ceilings (proportional share, capped)
+    const categorySlotCaps = {};
+    for (const cat of Object.keys(categoryTotals)) {
+        const share = categoryTotals[cat] / eligibleCount;
+        const baseSlots = Math.max(1, Math.ceil(share * limit * 0.6));
+        const priorityBoost = ranked.find(r => r.category === cat)?.priority || 0;
+        const maxAllowed = priorityBoost >= 80 ? 4 : 3;
+        categorySlotCaps[cat] = Math.min(maxAllowed, Math.max(perCategoryLimit, baseSlots));
+    }
 
-    for (const r of ranked) {
-        const cat = r.category;
-
-        // Skip excluded categories
-        if (excludedCategories.has(cat)) continue;
-
-        // Enforce max per-category
+    const addCandidate = (candidate, output) => {
+        const cat = candidate.category;
         bucketed[cat] = bucketed[cat] || 0;
-        if (bucketed[cat] >= perCategoryLimit) continue;
+
+        // Enforce per-category cap
+        if (bucketed[cat] >= (categorySlotCaps[cat] || perCategoryLimit)) {
+            return false;
+        }
 
         bucketed[cat]++;
-        output.push(r);
+        output.push(candidate);
+        return true;
+    };
 
+    const output = [];
+
+    // Coverage pass: guarantee at least one URL from each high-value category
+    const coveredCategories = new Set();
+    for (const candidate of ranked) {
         if (output.length >= limit) break;
+        const { category, priority } = candidate;
+        if (coveredCategories.has(category)) continue;
+        if (priority < 50) continue; // skip low business value categories in coverage pass
+
+        if (addCandidate(candidate, output)) {
+            coveredCategories.add(category);
+        }
+    }
+
+    // Fill remaining slots by score while respecting caps
+    for (const candidate of ranked) {
+        if (output.length >= limit) break;
+        if (output.some(entry => entry.url === candidate.url)) continue; // already selected
+
+        addCandidate(candidate, output);
     }
 
     return output;
