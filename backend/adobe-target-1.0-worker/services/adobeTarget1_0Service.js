@@ -1,8 +1,13 @@
 const axios = require('axios');
 const path = require('path');
 const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
+const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/AdobeTargetValidationResult'));
 const Dataset = require(path.join(__dirname, '../../models/Dataset'));
 const AdobeScraperService = require(path.join(__dirname, '../../services/adobeScraperService'));
+const browserPool = require(path.join(__dirname, '../../services/browserPoolService'));
+const {
+  sanitizeWorkflowResult
+} = require(path.join(__dirname, '../../utils/adobeTargetResultSanitizer'));
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
 
 class AdobeTarget1_0Service {
@@ -21,6 +26,11 @@ class AdobeTarget1_0Service {
       // Register the AT 1.0 scraping worker
       jobQueue.registerWorker('adobe-target-1.0-scraping', async (jobData, progressCallback) => {
         return await AdobeTarget1_0Service.prototype.performScraping.call(new AdobeTarget1_0Service(), jobData, progressCallback);
+      });
+
+      // Register Adobe Target validation worker
+      jobQueue.registerWorker('adobe-target-validation', async (jobData, progressCallback) => {
+        return await AdobeTarget1_0Service.prototype.performValidation.call(new AdobeTarget1_0Service(), jobData, progressCallback);
       });
 
       console.log('✅ Adobe Target 1.0 Service initialized with job queue worker');
@@ -117,18 +127,16 @@ class AdobeTarget1_0Service {
 
           // Step 3: Scrape Adobe Target from top 25
           console.log(`  ➤ Step 3: Scraping Adobe Target from top 25 URLs...`);
-          const scrapingResults = await this.scrapeTop25Urls(categorizationResult, options);
+          const scrapingResults = await this.scrapeTop25Urls(categorizationResult, options, originalUrl);
 
           // Create workflow result entry
-          const workflowResult = {
+          const workflowResult = sanitizeWorkflowResult({
             originalUrl: originalUrl,
-            prioritizationResult: prioritizationResult,
-            categorizationResult: categorizationResult,
             topUrlsScrapingResults: scrapingResults.results,
             summary: scrapingResults.summary,
             status: 'completed',
             completedAt: new Date()
-          };
+          });
 
           // Update overall stats
           result.overallStats.successfulPrioritizations += prioritizationResult.prioritizationSuccess ? 1 : 0;
@@ -154,12 +162,13 @@ class AdobeTarget1_0Service {
           console.error(`  ❌ Error processing URL ${i + 1}: ${error.message}`);
 
           // Create failure workflow result entry
-          const failureResult = {
+          const failureResult = sanitizeWorkflowResult({
             originalUrl: originalUrl,
             status: 'failed',
             error: error.message,
-            completedAt: new Date()
-          };
+            completedAt: new Date(),
+            topUrlsScrapingResults: []
+          });
 
           result.overallStats.failedPrioritizations += 1;
           result.urlWorkflowResults.push(failureResult);
@@ -331,10 +340,12 @@ class AdobeTarget1_0Service {
   /**
    * Step 3: Scrape Adobe Target from top 25 URLs with concurrency control
    */
-  async scrapeTop25Urls(categorizationResult, options = {}) {
+  async scrapeTop25Urls(categorizationResult, options = {}, seedUrl) {
     const concurrency = options.concurrency || 4; // 4 concurrent URLs
     const results = [];
     const uniqueExperimentIds = new Set();
+    const uniqueActivityIds = new Set();
+    const uniqueExperimentNames = new Set();
     let summary = {
       totalTop25Urls: 0,
       successfulScrapedUrls: 0,
@@ -342,29 +353,76 @@ class AdobeTarget1_0Service {
       adobeTargetDetectedInTop25: 0,
       totalExperimentsInTop25: 0,
       uniqueExperimentCount: 0,
-      uniqueExperimentIds: []
+      uniqueExperimentIds: [],
+      uniqueActivityIds: [],
+      uniqueActivityCount: 0,
+      uniqueExperimentNames: [],
+      allActivityIds: [],
+      allActivityCount: 0,
+      seedUrl: seedUrl || null,
+      seedUrlScraped: false,
+      seedUrlSuccessful: false,
+      seedUrlAdobeTargetDetected: false,
+      seedUrlExperimentCount: 0,
+      seedUrlError: null
     };
 
     try {
-      if (!categorizationResult.categorizationSuccess) {
-        console.log(`    ❌ Categorization failed, skipping scraping`);
-        return { results, summary };
+      const top25Urls = (categorizationResult?.categorizationSuccess && categorizationResult.prioritizedTop25)
+        ? categorizationResult.prioritizedTop25
+        : [];
+
+      if (!categorizationResult?.categorizationSuccess) {
+        console.log(`    ⚠️  Categorization failed; falling back to seed URL only`);
       }
 
-      const top25Urls = categorizationResult.prioritizedTop25 || [];
       summary.totalTop25Urls = top25Urls.length;
 
-      if (top25Urls.length === 0) {
-        console.log(`    ⚠️  No top 25 URLs to scrape`);
+      const normalizeUrl = urlString => {
+        if (!urlString) return '';
+        try {
+          const parsed = new URL(urlString);
+          const pathname = parsed.pathname?.replace(/\/$/, '') || '';
+          return `${parsed.protocol}//${parsed.host}${pathname}`.toLowerCase();
+        } catch (error) {
+          return urlString.trim().replace(/\/$/, '').toLowerCase();
+        }
+      };
+
+      const normalizedSeed = seedUrl ? normalizeUrl(seedUrl) : null;
+
+      const queue = [];
+      if (seedUrl) {
+        queue.push({
+          url: seedUrl,
+          category: 'seed_url',
+          priority: Number.NEGATIVE_INFINITY,
+          isSeedUrl: true
+        });
+      }
+
+      top25Urls.forEach(item => {
+        const isSeedDuplicate = normalizedSeed && normalizeUrl(item.url) === normalizedSeed;
+        if (isSeedDuplicate) {
+          return;
+        }
+        queue.push({
+          ...item,
+          isSeedUrl: false
+        });
+      });
+
+      if (queue.length === 0) {
+        console.log(`    ⚠️  No URLs available to scrape (no seed URL and no prioritized URLs)`);
         return { results, summary };
       }
 
-      console.log(`    🚀 Scraping Adobe Target from ${top25Urls.length} URLs (${concurrency} concurrent)...`);
+      console.log(`    🚀 Scraping Adobe Target from ${queue.length} URLs (${concurrency} concurrent)...`);
 
       // Process URLs with concurrency control
-      for (let i = 0; i < top25Urls.length; i += concurrency) {
-        const batch = top25Urls.slice(i, i + concurrency);
-        console.log(`    📍 Scraping batch ${Math.floor(i / concurrency) + 1}/${Math.ceil(top25Urls.length / concurrency)}: URLs ${i + 1}-${Math.min(i + concurrency, top25Urls.length)}`);
+      for (let i = 0; i < queue.length; i += concurrency) {
+        const batch = queue.slice(i, i + concurrency);
+        console.log(`    📍 Scraping batch ${Math.floor(i / concurrency) + 1}/${Math.ceil(queue.length / concurrency)}: URLs ${i + 1}-${Math.min(i + concurrency, queue.length)}`);
 
         const batchPromises = batch.map(urlItem =>
           AdobeScraperService.scrapeAdobeTargetExperiments(urlItem.url)
@@ -395,7 +453,8 @@ class AdobeTarget1_0Service {
                 activityNames: activityNames,
                 activityIds: activityIds,
                 mboxData: adobeTargetData.mboxData,
-                scrapedAt: new Date()
+                scrapedAt: new Date(),
+                isSeedUrl: urlItem.isSeedUrl === true
               };
             })
             .catch(error => ({
@@ -405,7 +464,8 @@ class AdobeTarget1_0Service {
               success: false,
               adobeTargetDetected: false,
               error: error.message,
-              scrapedAt: new Date()
+              scrapedAt: new Date(),
+              isSeedUrl: urlItem.isSeedUrl === true
             }))
         );
 
@@ -414,12 +474,42 @@ class AdobeTarget1_0Service {
 
         // Update summary
         batchResults.forEach(result => {
+          const isSeedResult = result.isSeedUrl === true;
+
+          const appendActivityIds = ids => {
+            if (!Array.isArray(ids)) {
+              return;
+            }
+            ids.forEach(id => {
+              if (!id) {
+                return;
+              }
+              summary.allActivityIds.push(id);
+              uniqueActivityIds.add(id);
+            });
+          };
+
+          if (isSeedResult) {
+            summary.seedUrlScraped = true;
+          }
+
           if (result.success) {
-            summary.successfulScrapedUrls += 1;
+            if (isSeedResult) {
+              summary.seedUrlSuccessful = true;
+            } else {
+              summary.successfulScrapedUrls += 1;
+            }
+
             if (result.adobeTargetDetected) {
-              summary.adobeTargetDetectedInTop25 += 1;
-              summary.totalExperimentsInTop25 += result.experimentCount;
-              console.log(`      ✅ Adobe Target DETECTED: ${result.url} (${result.activityIds.length} activities)`);
+              if (isSeedResult) {
+                summary.seedUrlAdobeTargetDetected = true;
+                summary.seedUrlExperimentCount = result.experimentCount || 0;
+              } else {
+                summary.adobeTargetDetectedInTop25 += 1;
+                summary.totalExperimentsInTop25 += result.experimentCount;
+              }
+
+              console.log(`      ✅ Adobe Target DETECTED: ${result.url} (${result.activityIds?.length || 0} activities)`);
 
               if (Array.isArray(result.experiments) && result.experiments.length > 0) {
                 result.experiments.forEach(exp => {
@@ -428,18 +518,31 @@ class AdobeTarget1_0Service {
                   } else if (Array.isArray(exp.activityIds)) {
                     exp.activityIds.forEach(id => uniqueExperimentIds.add(id));
                   }
+                  if (exp.experimentName) {
+                    uniqueExperimentNames.add(exp.experimentName);
+                  }
+                  if (!Array.isArray(result.activityIds) || result.activityIds.length === 0) {
+                    appendActivityIds(exp.activityIds);
+                  }
                 });
               } else if (Array.isArray(result.activityIds)) {
                 result.activityIds.forEach(id => uniqueExperimentIds.add(id));
               }
+
+              appendActivityIds(result.activityIds);
             }
           } else {
-            summary.failedScrapedUrls += 1;
+            if (isSeedResult) {
+              summary.seedUrlSuccessful = false;
+              summary.seedUrlError = result.error;
+            } else {
+              summary.failedScrapedUrls += 1;
+            }
           }
         });
 
         // Delay between batches for resource recovery
-        if (i + concurrency < top25Urls.length) {
+        if (i + concurrency < queue.length) {
           const delayMs = 2000;
           console.log(`    ⏱️  Waiting ${delayMs}ms between batches...`);
           await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -449,6 +552,10 @@ class AdobeTarget1_0Service {
       console.log(`    ✅ Scraping complete: ${summary.successfulScrapedUrls}/${summary.totalTop25Urls} URLs succeeded`);
       summary.uniqueExperimentIds = Array.from(uniqueExperimentIds);
       summary.uniqueExperimentCount = summary.uniqueExperimentIds.length;
+      summary.uniqueActivityIds = Array.from(uniqueActivityIds);
+      summary.uniqueActivityCount = summary.uniqueActivityIds.length;
+      summary.uniqueExperimentNames = Array.from(uniqueExperimentNames);
+      summary.allActivityCount = summary.allActivityIds.length;
       console.log(`    🎯 Unique experiments detected so far: ${summary.uniqueExperimentCount}`);
 
     } catch (error) {
@@ -456,6 +563,388 @@ class AdobeTarget1_0Service {
     }
 
     return { results, summary };
+  }
+
+  /**
+   * Lightweight validation workflow to detect Adobe Target presence for seed URLs
+   */
+  async performValidation(jobData, progressCallback) {
+    const { datasetId, datasetName, urls = [] } = jobData;
+
+    if (!urls || urls.length === 0) {
+      throw new Error('No URLs provided for Adobe Target validation');
+    }
+
+    let datasetDoc = null;
+    let validationResultDoc = null;
+    const startTime = new Date();
+
+    try {
+      progressCallback(5, { message: 'Starting Adobe Target validation run' });
+
+      datasetDoc = await Dataset.findById(datasetId);
+      if (datasetDoc) {
+        const initialStats = {
+          totalUrls: urls.length,
+          processedUrls: 0,
+          successfulScans: 0,
+          failedScans: 0,
+          optimizelyDetected: 0,
+          totalExperiments: 0,
+          duration: null
+        };
+
+        datasetDoc.adobeTargetValidation = {
+          ...(datasetDoc.adobeTargetValidation || {}),
+          status: 'in_progress',
+          lastRunAt: startTime,
+          summary: {
+            totalUrls: urls.length,
+            positiveCount: 0,
+            negativeCount: 0,
+            failedCount: 0,
+            detectionRate: 0
+          }
+        };
+        datasetDoc.scrapingStatus = 'in_progress';
+        datasetDoc.scrapingStats = {
+          ...(datasetDoc.scrapingStats || {}),
+          ...initialStats
+        };
+        datasetDoc.scrapingStartedAt = startTime;
+        datasetDoc.scrapingCompletedAt = null;
+        datasetDoc.scrapingLastUpdate = new Date();
+        await datasetDoc.save();
+      }
+
+      validationResultDoc = await AdobeTargetValidationResult.create({
+        datasetId,
+        datasetName,
+        totalUrls: urls.length,
+        status: 'in_progress',
+        startedAt: startTime,
+        summary: {
+          totalUrls: urls.length,
+          positiveCount: 0,
+          negativeCount: 0,
+          failedCount: 0,
+          detectionRate: 0,
+          startedAt: startTime
+        }
+      });
+
+      const positiveUrls = [];
+      const negativeUrls = [];
+      const failedUrls = [];
+      const scrapingStats = datasetDoc?.scrapingStats ? {
+        ...datasetDoc.scrapingStats
+      } : {
+        totalUrls: urls.length,
+        processedUrls: 0,
+        successfulScans: 0,
+        failedScans: 0,
+        optimizelyDetected: 0,
+        totalExperiments: 0,
+        duration: null
+      };
+
+      try {
+        await browserPool.initialize();
+      } catch (poolError) {
+        console.warn(`⚠️ Browser pool initialization failed for validation: ${poolError.message}`);
+      }
+
+      const validationBatchSize = parseInt(process.env.ADOBE_VALIDATION_BATCH_SIZE) || 25;
+      const validationConcurrent = parseInt(process.env.ADOBE_VALIDATION_CONCURRENT) ||
+        parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+      const validationMaxTabs = parseInt(process.env.ADOBE_VALIDATION_MAX_TABS) || 1;
+
+      let processedUrlsCounter = 0;
+
+      for (let i = 0; i < urls.length; i += validationBatchSize) {
+        const chunk = urls.slice(i, i + validationBatchSize);
+        console.log(`\n🔁 Processing validation chunk ${Math.floor(i / validationBatchSize) + 1}/${Math.ceil(urls.length / validationBatchSize)} (${chunk.length} URLs)`);
+
+        const chunkResults = await this.processValidationChunk(chunk, {
+          concurrent: validationConcurrent,
+          maxTabs: validationMaxTabs
+        });
+
+        chunkResults.forEach(result => {
+          const targetUrl = result?.url;
+          if (!targetUrl) {
+            return;
+          }
+
+          if (!result.success) {
+            failedUrls.push(targetUrl);
+            scrapingStats.failedScans += 1;
+            scrapingStats.processedUrls += 1;
+            console.error(`❌ Adobe Target validation failed for ${targetUrl}: ${result.error || 'Unknown error'}`);
+            return;
+          }
+
+          const adobeTargetData = result.adobeTargetData || {};
+          const activityNames = adobeTargetData.activityNames || [];
+          const activityIds = adobeTargetData.activityIds || [];
+          const explicitDetected = adobeTargetData.detected === true;
+          const hasCaptcha = adobeTargetData.captchaDetected === true;
+          
+          const isDetected = !hasCaptcha && (
+            explicitDetected === true ||
+            activityNames.length > 0 ||
+            activityIds.length > 0
+          );
+
+          console.log(`🔍 Validation for ${targetUrl}: detected=${isDetected}, explicit=${explicitDetected}, captcha=${hasCaptcha}`);
+          console.log(`   activities=${activityIds.length}, names=${activityNames.length}`);
+
+          if (isDetected) {
+            positiveUrls.push(targetUrl);
+            scrapingStats.optimizelyDetected += 1;
+            console.log(`✅ Adobe Target DETECTED: ${targetUrl}`);
+          } else {
+            negativeUrls.push(targetUrl);
+            console.log(`❌ Adobe Target NOT detected: ${targetUrl}`);
+          }
+
+          scrapingStats.successfulScans += 1;
+          scrapingStats.processedUrls += 1;
+        });
+
+        processedUrlsCounter = Math.min(scrapingStats.processedUrls, urls.length);
+        const progress = 5 + Math.floor((processedUrlsCounter / urls.length) * 90);
+        progressCallback(Math.min(progress, 95), {
+          message: `Validated ${processedUrlsCounter}/${urls.length} URLs`,
+          currentUrl: chunkResults[chunkResults.length - 1]?.url || null,
+          processed: processedUrlsCounter,
+          total: urls.length
+        });
+
+        if (datasetDoc) {
+          datasetDoc.scrapingStats = {
+            ...(datasetDoc.scrapingStats || {}),
+            ...scrapingStats
+          };
+          datasetDoc.scrapingLastUpdate = new Date();
+          await datasetDoc.save();
+        }
+      }
+
+      const endTime = new Date();
+      const summary = {
+        totalUrls: urls.length,
+        positiveCount: positiveUrls.length,
+        negativeCount: negativeUrls.length,
+        failedCount: failedUrls.length,
+        detectionRate: urls.length > 0 ? Number(((positiveUrls.length / urls.length) * 100).toFixed(2)) : 0,
+        startedAt: startTime,
+        completedAt: endTime,
+        durationMs: endTime - startTime
+      };
+
+      validationResultDoc.status = 'completed';
+      validationResultDoc.completedAt = endTime;
+      validationResultDoc.durationMs = summary.durationMs;
+      validationResultDoc.summary = summary;
+      validationResultDoc.positiveUrls = positiveUrls;
+      validationResultDoc.negativeUrls = negativeUrls;
+      validationResultDoc.failedUrls = failedUrls;
+      await validationResultDoc.save();
+
+      console.log(`\n📊 Validation Summary:`);
+      console.log(`   Positive URLs: ${positiveUrls.length}`);
+      console.log(`   Negative URLs: ${negativeUrls.length}`);
+      console.log(`   Failed URLs: ${failedUrls.length}`);
+      console.log(`   Detection Rate: ${summary.detectionRate}%`);
+      console.log(`   Result ID: ${validationResultDoc._id}`);
+
+      if (datasetDoc) {
+        scrapingStats.duration = (endTime - startTime) / 1000;
+        datasetDoc.scrapingStats = {
+          ...(datasetDoc.scrapingStats || {}),
+          ...scrapingStats
+        };
+        datasetDoc.adobeTargetValidation = {
+          status: 'completed',
+          lastRunAt: endTime,
+          lastResultId: validationResultDoc._id,
+          summary: {
+            totalUrls: summary.totalUrls,
+            positiveCount: summary.positiveCount,
+            negativeCount: summary.negativeCount,
+            failedCount: summary.failedCount,
+            detectionRate: summary.detectionRate
+          }
+        };
+        datasetDoc.scrapingStatus = 'completed';
+        datasetDoc.scrapingCompletedAt = endTime;
+        datasetDoc.scrapingLastUpdate = endTime;
+        datasetDoc.scrapingStats.duration = `${Math.floor((endTime - startTime) / 60000)}m ${Math.floor(((endTime - startTime) % 60000) / 1000)}s`;
+        await datasetDoc.save();
+      }
+
+      progressCallback(100, { message: 'Adobe Target validation completed' });
+
+      return {
+        success: true,
+        message: 'Adobe Target validation completed successfully',
+        resultId: validationResultDoc._id,
+        summary
+      };
+    } catch (error) {
+      console.error('Error during Adobe Target validation workflow:', error);
+
+      if (validationResultDoc) {
+        validationResultDoc.status = 'failed';
+        validationResultDoc.error = error.message;
+        validationResultDoc.completedAt = new Date();
+        await validationResultDoc.save();
+      }
+
+      if (datasetDoc) {
+        datasetDoc.adobeTargetValidation = {
+          ...(datasetDoc.adobeTargetValidation || {}),
+          status: 'failed',
+          lastResultId: validationResultDoc?._id || datasetDoc.adobeTargetValidation?.lastResultId || null,
+          summary: {
+            totalUrls: urls.length,
+            positiveCount: 0,
+            negativeCount: 0,
+            failedCount: urls.length,
+            detectionRate: 0
+          }
+        };
+        datasetDoc.scrapingStatus = 'failed';
+        datasetDoc.scrapingError = error.message;
+        datasetDoc.scrapingCompletedAt = new Date();
+        datasetDoc.scrapingLastUpdate = new Date();
+        await datasetDoc.save();
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Process a chunk of validation URLs using the shared browser pool
+   */
+  async processValidationChunk(urls, options = {}) {
+    if (!urls || urls.length === 0) {
+      return [];
+    }
+
+    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+    const {
+      concurrent = poolSize,
+      maxTabs = 1
+    } = options;
+
+    const actualConcurrent = Math.max(1, Math.min(concurrent, poolSize));
+    const urlBatches = this.distributeValidationUrls(urls, actualConcurrent, maxTabs);
+
+    const batchPromises = urlBatches.map((urlBatch, index) =>
+      browserPool.withBrowser(async (browser) => {
+        console.log(`🧪 Validation browser batch ${index + 1}/${urlBatches.length} (${urlBatch.length} URLs)`);
+        return this.processBrowserValidationBatch(browser, urlBatch);
+      })
+    );
+
+    const settled = await Promise.allSettled(batchPromises);
+    const results = [];
+
+    settled.forEach(result => {
+      if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+        results.push(...result.value);
+      } else if (result.status === 'rejected') {
+        console.error('❌ Validation batch failed:', result.reason?.message || result.reason);
+      }
+    });
+
+    return results;
+  }
+
+  /**
+   * Sequentially process a set of URLs inside a single browser instance
+   */
+  async processBrowserValidationBatch(browser, urlEntries = []) {
+    const results = [];
+
+    for (let i = 0; i < urlEntries.length; i++) {
+      const entry = urlEntries[i];
+      const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+      const targetUrl = normalizedEntry.url;
+
+      if (!targetUrl) {
+        results.push({ success: false, url: null, error: 'Invalid URL in dataset' });
+        continue;
+      }
+
+      console.log(`🔸 [${i + 1}/${urlEntries.length}] Validating ${targetUrl}`);
+
+      try {
+        const scrapeResult = await AdobeScraperService.scrapeAdobeTargetExperiments(
+          targetUrl,
+          null,
+          { browserInstance: browser }
+        );
+        const adobeTargetData = scrapeResult.adobeTarget || scrapeResult.data?.adobeTarget || {};
+
+        results.push({
+          success: true,
+          url: targetUrl,
+          adobeTargetData
+        });
+      } catch (error) {
+        results.push({
+          success: false,
+          url: targetUrl,
+          error: error.message || 'Unknown scraping error'
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Distribute URLs evenly across browsers while respecting max tabs
+   */
+  distributeValidationUrls(urls, browserCount, maxTabs) {
+    const batches = Array.from({ length: browserCount }, () => []);
+    let currentBrowserIndex = 0;
+
+    urls.forEach((urlEntry, idx) => {
+      let attempts = 0;
+      while (batches[currentBrowserIndex].length >= maxTabs && attempts < browserCount) {
+        currentBrowserIndex = (currentBrowserIndex + 1) % browserCount;
+        attempts++;
+      }
+
+      if (attempts >= browserCount) {
+        currentBrowserIndex = idx % browserCount;
+      }
+
+      batches[currentBrowserIndex].push(urlEntry);
+      currentBrowserIndex = (currentBrowserIndex + 1) % browserCount;
+    });
+
+    return batches.filter(batch => batch.length > 0);
+  }
+
+  extractDomain(url) {
+    if (!url) {
+      return null;
+    }
+    try {
+      const parsed = new URL(url);
+      return parsed.hostname?.replace(/^www\./i, '') || parsed.hostname;
+    } catch (error) {
+      return url
+        .replace(/^https?:\/\//i, '')
+        .split('/')[0]
+        .replace(/^www\./i, '');
+    }
   }
 }
 

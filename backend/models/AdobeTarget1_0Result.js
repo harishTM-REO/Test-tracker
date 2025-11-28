@@ -70,6 +70,10 @@ const topUrlScrapingResultSchema = new mongoose.Schema({
   },
   category: String,
   priority: Number,
+  isSeedUrl: {
+    type: Boolean,
+    default: false
+  },
   success: {
     type: Boolean,
     default: false
@@ -125,7 +129,53 @@ const urlWorkflowResultSchema = new mongoose.Schema({
     totalExperimentsInTop25: {
       type: Number,
       default: 0
-    }
+    },
+    uniqueExperimentIds: {
+      type: [String],
+      default: []
+    },
+    uniqueExperimentCount: {
+      type: Number,
+      default: 0
+    },
+    uniqueActivityIds: {
+      type: [String],
+      default: []
+    },
+    uniqueActivityCount: {
+      type: Number,
+      default: 0
+    },
+    uniqueExperimentNames: {
+      type: [String],
+      default: []
+    },
+    allActivityIds: {
+      type: [String],
+      default: []
+    },
+    allActivityCount: {
+      type: Number,
+      default: 0
+    },
+    seedUrl: String,
+    seedUrlScraped: {
+      type: Boolean,
+      default: false
+    },
+    seedUrlSuccessful: {
+      type: Boolean,
+      default: false
+    },
+    seedUrlAdobeTargetDetected: {
+      type: Boolean,
+      default: false
+    },
+    seedUrlExperimentCount: {
+      type: Number,
+      default: 0
+    },
+    seedUrlError: String
   },
   status: {
     type: String,

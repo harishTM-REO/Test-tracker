@@ -852,7 +852,7 @@ async function performExperimentDetection(datasetId, crawledPages) {
         console.log(`${pageLabel} [${i + 1}/${orderedPages.length}] Scraping experiments from: ${crawledPage.url}`);
 
         // Use the shared page to scrape this URL
-        const result = await AdobeScraperService.scrapeExperimentsFromPage(crawledPage.url, page);
+        const result = await AdobeScraperService.scrapeExperimentsFromPage(crawledPage.url, { sharedPage: page });
 
         // Reset timeout counter on success
         consecutiveTimeouts = 0;

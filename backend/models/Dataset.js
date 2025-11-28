@@ -358,6 +358,31 @@ const datasetSchema = new mongoose.Schema({
     default: null
   },
 
+  // Adobe Target validation tracking
+  adobeTargetValidation: {
+    status: {
+      type: String,
+      enum: ['not_started', 'pending', 'in_progress', 'completed', 'failed'],
+      default: 'not_started'
+    },
+    lastRunAt: {
+      type: Date,
+      default: null
+    },
+    lastResultId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AdobeTargetValidationResult',
+      default: null
+    },
+    summary: {
+      totalUrls: { type: Number, default: 0 },
+      positiveCount: { type: Number, default: 0 },
+      negativeCount: { type: Number, default: 0 },
+      failedCount: { type: Number, default: 0 },
+      detectionRate: { type: Number, default: 0 }
+    }
+  },
+
   // Experiment Detection Status (Phase 2)
   experimentDetectionStartedAt: {
     type: Date,

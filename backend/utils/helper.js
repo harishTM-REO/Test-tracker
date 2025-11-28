@@ -93,46 +93,38 @@ const extractDomain = (url) => {
  * @returns {Object} Puppeteer browser instance
  */
 const launchBrowser = async (fallbackOptions = {}) => {
-    const maxRetries = 2;
+    const maxRetries = parseInt(process.env.BROWSER_LAUNCH_MAX_RETRIES) || 2;
     let lastError;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             console.log(`Launching browser (attempt ${attempt}/${maxRetries})`);
 
-            // Check if we're in a serverless environment or local development
             const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
-
             let browserOptions = {
-                headless: true,
+                headless: false,
                 ignoreHTTPSErrors: true,
+                protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-gpu',
                     '--disable-dev-shm-usage',
-                    // '--window-size=1366,768', // Larger viewport for better cookie detection
                     '--disable-accelerated-2d-canvas',
                     '--no-first-run',
                     '--no-zygote',
                     '--disable-background-timer-throttling',
                     '--disable-backgrounding-occluded-windows',
                     '--disable-renderer-backgrounding',
-
-                    // CRITICAL: These flags help with cookie consent detection in headless
-                    '--disable-blink-features=AutomationControlled', // Hide automation detection
+                    '--disable-blink-features=AutomationControlled',
                     '--disable-web-security',
                     '--allow-running-insecure-content',
-                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', // Real user agent
-
-                    // HTTP/2 protocol error fixes
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     '--disable-http2',
                     '--disable-features=VizServiceDisplay',
                     '--force-device-scale-factor=1',
                     '--disable-extensions',
                     '--disable-plugins',
-
-                    // Additional stability flags for retry attempts
                     ...(attempt > 1 ? [
                         '--disable-features=TranslateUI',
                         '--disable-ipc-flooding-protection',
@@ -140,21 +132,16 @@ const launchBrowser = async (fallbackOptions = {}) => {
                         '--disable-backgrounding-occluded-windows',
                         '--disable-features=Translate'
                     ] : [])
-
                 ],
-
-                // Apply any fallback options
                 ...fallbackOptions
             };
 
-            // Use chromium for production/serverless, regular puppeteer for local
             if (!isLocal) {
                 browserOptions.executablePath = await chromium.executablePath();
                 browserOptions.headless = chromium.headless;
             }
 
             const browser = await puppeteer.launch(browserOptions);
-
             console.log('Browser launched successfully');
             return browser;
         } catch (error) {
@@ -169,26 +156,31 @@ const launchBrowser = async (fallbackOptions = {}) => {
     }
 
     console.error('All browser launch attempts failed');
-    throw new Error(`Failed to launch browser after ${maxRetries} attempts: ${lastError.message}`);
+    throw new Error(`Failed to launch browser after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`);
 }
 
 const createPage = async (browser) => {
     try {
-        const page = await browser.newPage();
+        const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 15000;
+        const pagePromise = browser.newPage();
 
-        // Set smaller viewport as in your working code
-        await page.setViewport({width: 1440, height: 1024});
+        const page = await Promise.race([
+            pagePromise,
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Page creation timeout after ${pageCreationTimeout}ms`)), pageCreationTimeout)
+            )
+        ]);
 
-        // Your optimized request interception
-        // await page.setRequestInterception(true);
-        // page.on('request', (req) => {
-        //     const resourceType = req.resourceType();
-        //     if (['image',  'font'].includes(resourceType)) {
-        //         req.abort();
-        //     } else {
-        //         req.continue();
-        //     }
-        // });
+        await page.setViewport({width: 1080, height: 1024});
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            const resourceType = req.resourceType();
+            if (['image', 'stylesheet', 'font'].includes(resourceType)) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
 
         console.log('Page configured successfully');
         return page;
@@ -204,43 +196,44 @@ const createPage = async (browser) => {
  * @param {string} url - URL to navigate to
  */
 const navigateToPage = async (page, url) => {
-    const maxRetries = 2; // Reduced from 3 to 2 for faster failure
+    const maxRetries = parseInt(process.env.NAVIGATION_MAX_RETRIES) || 1;
+    const navigationTimeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000;
     let lastError;
 
-    // Validate and normalize URL first
     const normalizedUrl = await validateAndNormalizeUrl(url);
     if (!normalizedUrl) {
         throw new Error(`Invalid or unreachable URL: ${url}`);
     }
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
         try {
-            console.log(`Navigating to: ${normalizedUrl} (attempt ${attempt}/${maxRetries})`);
-
+            console.log(`Navigating to: ${normalizedUrl} (attempt ${attempt}/${maxRetries + 1})`);
             await page.goto(normalizedUrl, {
                 waitUntil: 'domcontentloaded',
-                timeout: 30000, // 30 seconds timeout - faster failure for unresponsive sites
+                timeout: navigationTimeout,
             });
-
             console.log("Page loaded successfully");
             return;
         } catch (error) {
             lastError = error;
             console.error(`Navigation attempt ${attempt} failed:`, error.message);
 
-            // Handle different types of network errors
+            if (error.message.includes('timeout') || error.message.includes('Navigation timeout')) {
+                console.warn(`⏱️  Navigation timeout after ${navigationTimeout}ms - skipping retries to save time`);
+                throw new Error(`Navigation timeout of ${navigationTimeout} ms exceeded`);
+            }
+
             if (error.message.includes('ERR_NAME_NOT_RESOLVED')) {
                 console.log('DNS resolution error detected, trying alternative approaches...');
 
                 if (attempt < maxRetries) {
-                    // Try alternative URL formats
                     const alternativeUrl = await tryAlternativeUrl(normalizedUrl, attempt);
                     if (alternativeUrl && alternativeUrl !== normalizedUrl) {
                         console.log(`Trying alternative URL: ${alternativeUrl}`);
                         try {
                             await page.goto(alternativeUrl, {
                                 waitUntil: 'domcontentloaded',
-                                timeout: 30000
+                                timeout: navigationTimeout
                             });
                             console.log("Page loaded successfully with alternative URL");
                             return;
@@ -282,7 +275,6 @@ const navigateToPage = async (page, url) => {
                     continue;
                 }
             } else {
-                // For other errors, break after first attempt unless it's the last retry
                 if (attempt >= maxRetries) break;
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
@@ -290,7 +282,7 @@ const navigateToPage = async (page, url) => {
     }
 
     console.error('All navigation attempts failed');
-    throw new Error(`Failed to navigate to ${url} after ${maxRetries} attempts: ${lastError.message}`);
+    throw new Error(`Failed to navigate to ${url} after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`);
 }
 
 /**
@@ -389,19 +381,18 @@ const tryAlternativeUrl = async (url, attempt) => {
 const detectCaptcha = async (page) => {
     try {
         console.log("🕵️  Running captcha detection...");
-        const captchaResult = await page.evaluate(() => {
-            const selectors = [
-                '#g-recaptcha',          // Google reCAPTCHA
-                'div.g-recaptcha',
-                '[data-sitekey]',        // Common attribute for captchas
-                '#h-captcha',            // hCaptcha
-                'div.h-captcha',
-                '.cf-turnstile',         // Cloudflare Turnstile
-                '.frc-captcha',          // FunCaptcha / Arkose Labs
-                '#captcha-container',
-                '[class*="captcha"]'
-            ];
 
+        const fastSelectorCheck = await page.$(
+            '#g-recaptcha, div.g-recaptcha, [data-sitekey], #h-captcha,' +
+            'div.h-captcha, .cf-turnstile, .frc-captcha, #captcha-container,' +
+            '[class*="captcha"]'
+        );
+
+        if (fastSelectorCheck) {
+            return {detected: true, reason: 'Fast selector match'};
+        }
+
+        const captchaResult = await page.evaluate(() => {
             const iframeKeywords = [
                 'recaptcha',
                 'hcaptcha',
@@ -409,72 +400,19 @@ const detectCaptcha = async (page) => {
                 'arkoselabs'
             ];
 
-            const textKeywords = [
-                'verify you are human',
-                'prove you\'re not a robot',
-                'security check',
-                'are you a robot',
-                'just a moment...' // Cloudflare DDoS page
-            ];
-
-            // 1. Check for specific selectors
-            for (const selector of selectors) {
-                const elements = document.querySelectorAll(selector);
-                // Check if any element is a real captcha (not notify-related)
-                for (const element of elements) {
-                    const elementClasses = element.className || '';
-                    const classString = typeof elementClasses === 'string' ? elementClasses : (elementClasses.baseVal || '');
-                    const lowerClassString = classString.toLowerCase();
-
-                    // Skip elements with class containing "notify" (e.g., notifyme-recaptcha)
-                    if (lowerClassString.includes('notify')) {
-                        continue;
-                    }
-
-                    // Skip elements that have "recaptcha" but NOT "grecaptcha" or "g-recaptcha"
-                    // (these are typically notify/terms elements, not actual captchas)
-                    if (lowerClassString.includes('recaptcha') &&
-                        !lowerClassString.includes('grecaptcha') &&
-                        !lowerClassString.includes('g-recaptcha')) {
-                        continue;
-                    }
-
-                    // Skip grecaptcha elements (invisible reCAPTCHA v3 that doesn't block scraping)
-                    // This includes grecaptcha-badge, grecaptcha-logo, grecaptcha-error, etc.
-                    if (lowerClassString.includes('grecaptcha')) {
-                        continue;
-                    }
-
-                    // Found a captcha element that's not notify-related
-                    return {detected: true, reason: `Found selector: ${selector} with classes: ${classString}`};
-                }
-            }
-
-            // 2. Check iframe sources
             for (const iframe of document.querySelectorAll('iframe')) {
-                const src = iframe.src || '';
-                const iframeClasses = iframe.className || '';
-                // Skip iframes with class containing "notify"
-                if (typeof iframeClasses === 'string' && iframeClasses.toLowerCase().includes('notify')) {
-                    continue;
-                }
-                if (iframeKeywords.some(keyword => src.includes(keyword))) {
-                    return {detected: true, reason: `Found iframe with src: ${src}`};
+                try {
+                    const src = iframe.src || '';
+                    if (iframeKeywords.some(k => src.includes(k))) {
+                        return {detected: true, reason: `iframe src contains: ${src}`};
+                    }
+                } catch (e) {
                 }
             }
 
-            // 3. Check for keywords in page text content
-            const bodyText = document.body.innerText.toLowerCase();
-            for (const keyword of textKeywords) {
-                if (bodyText.includes(keyword)) {
-                    return {detected: true, reason: `Found text keyword: "${keyword}"`};
-                }
-            }
-
-            // 4. Check page title
-            const pageTitle = document.title.toLowerCase();
-            if (textKeywords.some(keyword => pageTitle.includes(keyword))) {
-                return {detected: true, reason: `Found keyword in title: "${document.title}"`};
+            const title = document.title.toLowerCase();
+            if (title.includes('verify') || title.includes('robot')) {
+                return {detected: true, reason: `title: ${document.title}`};
             }
 
             return {detected: false, reason: 'No captcha indicators found'};
@@ -490,7 +428,6 @@ const detectCaptcha = async (page) => {
 
     } catch (error) {
         console.error('Error during captcha detection:', error.message);
-        // Fail safely, assuming no captcha if the check itself fails
         return {detected: false, reason: 'Error in detection function'};
     }
 }
@@ -501,9 +438,8 @@ const detectCaptcha = async (page) => {
  * @param {Object} page - Puppeteer page instance
  * @returns {string} Cookie type detected
  */
-const handleCookieConsent= async(page)=> {
+const handleCookieConsent = async (page) => {
     try {
-        // Check if page is still valid
         if (!page || page.isClosed()) {
             console.warn('Page is closed, skipping cookie consent handling');
             return 'page_closed';
@@ -517,184 +453,177 @@ const handleCookieConsent= async(page)=> {
                 return new Promise((resolve) => {
                     let cookieType = 'custom';
 
-                function acceptCookie(btn, interval) {
-                    if (interval) {
-                        clearInterval(interval);
+                    function acceptCookie(btn, interval) {
+                        if (interval) {
+                            clearInterval(interval);
+                        }
+                        btn.click();
+                        console.log(`Clicked cookie consent button: ${btn.textContent}`);
+                        resolve(cookieType);
                     }
-                    btn.click();
-                    console.log(`Clicked cookie consent button: ${btn.textContent}`);
-                    resolve(cookieType);
-                }
 
-                const cookieProviderAcceptSelector = [
-                    {
-                        cookieType: 'onetrust',
-                        cookieSelector: '#onetrust-accept-btn-handler',
-                    },
-                    {
-                        cookieType: 'Cookie Bot',
-                        cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
-                    },
-                    {
-                        cookieType: 'cookielaw',
-                        cookieSelector: '.cc-dismiss',
-                    },
-                    {
-                        cookieType: 'gdpr',
-                        cookieSelector: '.gdpr-accept',
-                    },
-                    {
-                        cookieType: 'consent-manager',
-                        cookieSelector: '[data-testid="consent-accept-all"]',
-                    },
-                    {
-                        cookieType: 'evidon',
-                        cookieSelector: '[id="_evidon-accept-button"]',
-                    },
-                    {
-                        cookieType: 'quantcast',
-                        cookieSelector: '.qc-cmp2-summary-buttons > button[mode="primary"]',
-                    },
-                    {
-                        cookieType: 'bbc',
-                        cookieSelector: '.piano-bbc-close-button',
-                    },
-                    {
-                        cookieType: 'howden',
-                        cookieSelector: '.iubenda-cs-accept-btn',
-                    }
-                ];
+                    const cookieProviderAcceptSelector = [
+                        {
+                            cookieType: 'onetrust',
+                            cookieSelector: '#onetrust-accept-btn-handler',
+                        },
+                        {
+                            cookieType: 'Cookie Bot',
+                            cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+                        },
+                        {
+                            cookieType: 'cookielaw',
+                            cookieSelector: '.cc-dismiss',
+                        },
+                        {
+                            cookieType: 'gdpr',
+                            cookieSelector: '.gdpr-accept',
+                        },
+                        {
+                            cookieType: 'consent-manager',
+                            cookieSelector: '[data-testid="consent-accept-all"]',
+                        },
+                        {
+                            cookieType: 'evidon',
+                            cookieSelector: '[id="_evidon-accept-button"]',
+                        },
+                        {
+                            cookieType: 'quantcast',
+                            cookieSelector: '.qc-cmp2-summary-buttons > button[mode="primary"]',
+                        },
+                        {
+                            cookieType: 'bbc',
+                            cookieSelector: '.piano-bbc-close-button',
+                        },
+                        {
+                            cookieType: 'howden',
+                            cookieSelector: '.iubenda-cs-accept-btn',
+                        }
+                    ];
 
-                let attempts = 0;
-                const maxAttempts = 50;
+                    let attempts = 0;
+                    const maxAttempts = 50;
 
-                let interval = setInterval(() => {
-                    attempts++;
+                    let interval = setInterval(() => {
+                        attempts++;
 
-                    if (attempts > maxAttempts) {
-                        clearInterval(interval);
+                        if (attempts > maxAttempts) {
+                            clearInterval(interval);
 
-                        // Multi-layer cookie consent detection algorithm
-                        let found = false;
+                            let found = false;
 
-                        // Layer 1: Specific cookie container selectors
-                        const specificCookieSelectors = [
-                            '[class*="cookie"] button[class*="accept"]',
-                            '[class*="consent"] button[class*="accept"]',
-                            '[class*="cookie"] button[class*="allow"]',
-                            '[class*="consent"] button[class*="allow"]',
-                            '[id*="cookie"] button',
-                            '[class*="banner"] button[class*="accept"]',
-                            '[class*="privacy"] button[class*="accept"]',
-                            '[data-testid*="cookie"] button',
-                            '[data-testid*="consent"] button',
-                            '[class="piano-bbc-close-button"]'
-                        ];
+                            const specificCookieSelectors = [
+                                '[class*="cookie"] button[class*="accept"]',
+                                '[class*="consent"] button[class*="accept"]',
+                                '[class*="cookie"] button[class*="allow"]',
+                                '[class*="consent"] button[class*="allow"]',
+                                '[id*="cookie"] button',
+                                '[class*="banner"] button[class*="accept"]',
+                                '[class*="privacy"] button[class*="accept"]',
+                                '[data-testid*="cookie"] button',
+                                '[data-testid*="consent"] button',
+                                '[class="piano-bbc-close-button"]'
+                            ];
 
-                        // Layer 2: Look for common button patterns in potential cookie areas
-                        if (!found) {
-                            const potentialCookieAreas = document.querySelectorAll([
-                                '[class*="cookie"]', '[class*="consent"]', '[class*="privacy"]',
-                                '[class*="banner"]', '[class*="notice"]', '[class*="popup"]',
-                                '[id*="cookie"]', '[id*="consent"]', '[id*="privacy"]'
-                            ].join(','));
+                            if (!found) {
+                                const potentialCookieAreas = document.querySelectorAll([
+                                    '[class*="cookie"]', '[class*="consent"]', '[class*="privacy"]',
+                                    '[class*="banner"]', '[class*="notice"]', '[class*="popup"]',
+                                    '[id*="cookie"]', '[id*="consent"]', '[id*="privacy"]'
+                                ].join(','));
 
-                            for (const area of potentialCookieAreas) {
-                                if (found) break;
-                                const buttons = area.querySelectorAll('button, a[role="button"], div[role="button"]');
-                                for (const button of buttons) {
-                                    if (button.offsetParent && button.getBoundingClientRect().width > 0) {
-                                        const text = button.textContent?.toLowerCase() || '';
-                                        const acceptTerms = ['accept all', 'accept cookies', 'allow all', 'agree', 'accept', 'allow', 'ok', 'got it', 'understood'];
-                                        const rejectTerms = ['reject', 'decline', 'deny', 'close', 'dismiss'];
+                                for (const area of potentialCookieAreas) {
+                                    if (found) break;
+                                    const buttons = area.querySelectorAll('button, a[role="button"], div[role="button"]');
+                                    for (const button of buttons) {
+                                        if (button.offsetParent && button.getBoundingClientRect().width > 0) {
+                                            const text = button.textContent?.toLowerCase() || '';
+                                            const acceptTerms = ['accept all', 'accept cookies', 'allow all', 'agree', 'accept', 'allow', 'ok', 'got it', 'understood'];
+                                            const rejectTerms = ['reject', 'decline', 'deny', 'close', 'dismiss'];
 
-                                        if (acceptTerms.some(term => text.includes(term)) && !rejectTerms.some(term => text.includes(term))) {
-                                            cookieType = 'pattern-matched';
-                                            found = true;
-                                            button.click();
-                                            console.log(`Layer 2 - Clicked pattern matched: ${text}`);
-                                            break;
+                                            if (acceptTerms.some(term => text.includes(term)) && !rejectTerms.some(term => text.includes(term))) {
+                                                cookieType = 'pattern-matched';
+                                                found = true;
+                                                button.click();
+                                                console.log(`Layer 2 - Clicked pattern matched: ${text}`);
+                                                break;
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        // Layer 3: Heuristic approach - look for buttons in fixed/absolute positioned elements
-                        if (!found) {
-                            const allButtons = document.querySelectorAll('button, a[role="button"], div[role="button"]');
-                            for (const button of allButtons) {
-                                if (found) break;
-                                const computedStyle = window.getComputedStyle(button);
-                                const isFixedOrAbsolute = ['fixed', 'absolute'].includes(computedStyle.position);
+                            if (!found) {
+                                const allButtons = document.querySelectorAll('button, a[role="button"], div[role="button"]');
+                                for (const button of allButtons) {
+                                    if (found) break;
+                                    const computedStyle = window.getComputedStyle(button);
+                                    const isFixedOrAbsolute = ['fixed', 'absolute'].includes(computedStyle.position);
 
-                                if (isFixedOrAbsolute && button.offsetParent) {
-                                    const rect = button.getBoundingClientRect();
-                                    const isBottomOrTop = rect.bottom > window.innerHeight * 0.8 || rect.top < window.innerHeight * 0.2;
+                                    if (isFixedOrAbsolute && button.offsetParent) {
+                                        const rect = button.getBoundingClientRect();
+                                        const isBottomOrTop = rect.bottom > window.innerHeight * 0.8 || rect.top < window.innerHeight * 0.2;
 
-                                    if (isBottomOrTop) {
-                                        const text = button.textContent?.toLowerCase() || '';
-                                        const navigationTerms = ['login', 'signup', 'register', 'menu', 'search', 'back', 'next', 'submit', 'buy', 'cart', 'checkout'];
-                                        const hasNavTerms = navigationTerms.some(term => text.includes(term));
+                                        if (isBottomOrTop) {
+                                            const text = button.textContent?.toLowerCase() || '';
+                                            const navigationTerms = ['login', 'signup', 'register', 'menu', 'search', 'back', 'next', 'submit', 'buy', 'cart', 'checkout'];
+                                            const hasNavTerms = navigationTerms.some(term => text.includes(term));
 
-                                        if (!hasNavTerms && ['accept', 'allow', 'agree', 'ok', 'continue', 'got it'].some(term => text.includes(term))) {
-                                            cookieType = 'heuristic';
-                                            found = true;
-                                            button.click();
-                                            console.log(`Layer 3 - Clicked heuristic match: ${text}`);
-                                            break;
+                                            if (!hasNavTerms && ['accept', 'allow', 'agree', 'ok', 'continue', 'got it'].some(term => text.includes(term))) {
+                                                cookieType = 'heuristic';
+                                                found = true;
+                                                button.click();
+                                                console.log(`Layer 3 - Clicked heuristic match: ${text}`);
+                                                break;
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        // Layer 4: Last resort - look for any "accept" button that's prominently positioned
-                        if (!found) {
-                            const acceptButtons = Array.from(document.querySelectorAll('button, a[role="button"], div[role="button"]'))
-                                .filter(btn => {
-                                    const text = btn.textContent?.toLowerCase() || '';
-                                    return text.includes('accept') && btn.offsetParent && btn.getBoundingClientRect().width > 50;
-                                })
-                                .sort((a, b) => {
-                                    const aRect = a.getBoundingClientRect();
-                                    const bRect = b.getBoundingClientRect();
-                                    return (bRect.width * bRect.height) - (aRect.width * aRect.height);
-                                });
+                            if (!found) {
+                                const acceptButtons = Array.from(document.querySelectorAll('button, a[role="button"], div[role="button"]'))
+                                    .filter(btn => {
+                                        const text = btn.textContent?.toLowerCase() || '';
+                                        return text.includes('accept') && btn.offsetParent && btn.getBoundingClientRect().width > 50;
+                                    })
+                                    .sort((a, b) => {
+                                        const aRect = a.getBoundingClientRect();
+                                        const bRect = b.getBoundingClientRect();
+                                        return (bRect.width * bRect.height) - (aRect.width * aRect.height);
+                                    });
 
-                            if (acceptButtons[0]) {
-                                const button = acceptButtons[0];
-                                const text = button.textContent?.toLowerCase() || '';
-                                const badTerms = ['newsletter', 'subscription', 'login', 'signup', 'register'];
+                                if (acceptButtons[0]) {
+                                    const button = acceptButtons[0];
+                                    const text = button.textContent?.toLowerCase() || '';
+                                    const badTerms = ['newsletter', 'subscription', 'login', 'signup', 'register'];
 
-                                if (!badTerms.some(term => text.includes(term))) {
-                                    cookieType = 'last-resort';
-                                    found = true;
-                                    button.click();
-                                    console.log(`Layer 4 - Clicked last resort: ${text}`);
+                                    if (!badTerms.some(term => text.includes(term))) {
+                                        cookieType = 'last-resort';
+                                        found = true;
+                                        button.click();
+                                        console.log(`Layer 4 - Clicked last resort: ${text}`);
+                                    }
                                 }
                             }
-                        }
 
-                        resolve(found ? cookieType : 'not_found');
-                        return;
-                    }
-
-                    for (const cookie of cookieProviderAcceptSelector) {
-                        const element = document.querySelector(cookie.cookieSelector);
-                        if (element && element.offsetParent) {
-                            cookieType = cookie.cookieType;
-                            acceptCookie(element, interval);
+                            resolve(found ? cookieType : 'not_found');
                             return;
                         }
-                    }
-                }, 100);
-            });
+
+                        for (const cookie of cookieProviderAcceptSelector) {
+                            const element = document.querySelector(cookie.cookieSelector);
+                            if (element && element.offsetParent) {
+                                cookieType = cookie.cookieType;
+                                acceptCookie(element, interval);
+                                return;
+                            }
+                        }
+                    }, 100);
+                });
             }),
-            // Timeout after 10 seconds to prevent hanging
             new Promise((resolve) => setTimeout(() => resolve('timeout'), 10000))
         ]).catch((error) => {
-            // Handle context destruction gracefully
             if (error.message.includes('Execution context was destroyed') ||
                 error.message.includes('Target closed')) {
                 console.log('Page context destroyed during cookie consent - likely due to navigation');
@@ -706,7 +635,6 @@ const handleCookieConsent= async(page)=> {
         console.log(`Cookie consent handling completed for ${currentUrl}. Type detected: ${cookieType}`);
         return cookieType;
     } catch (error) {
-        // More specific error handling
         if (error.message.includes('Execution context was destroyed') ||
             error.message.includes('Target closed') ||
             error.message.includes('Session closed')) {

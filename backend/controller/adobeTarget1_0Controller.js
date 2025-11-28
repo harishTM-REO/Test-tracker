@@ -1,5 +1,8 @@
 const mongoose = require('mongoose');
 const AdobeTarget1_0Result = require('../models/AdobeTarget1_0Result');
+const {
+  sanitizeAdobeTargetDocument
+} = require('../utils/adobeTargetResultSanitizer');
 
 /**
  * GET /api/adobe-target-1.0/documents/:datasetId
@@ -151,10 +154,12 @@ async function getAdobeTargetDocuments(req, res) {
     }
 
     // Full payload
+    const sanitizedDocs = docsArray.map(sanitizeAdobeTargetDocument);
+
     res.status(200).json({
       success: true,
       message: 'Adobe Target 1.0 document retrieved successfully',
-      data: documents
+      data: Array.isArray(documents) ? sanitizedDocs : sanitizedDocs[0]
     });
 
   } catch (error) {

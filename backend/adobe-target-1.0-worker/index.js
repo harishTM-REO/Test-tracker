@@ -63,6 +63,8 @@ app.listen(port, async () => {
   console.log(`\n📋 Available endpoints:`);
   console.log(`   POST /at10/api/scrape`);
   console.log(`   GET  /at10/api/status/:jobId`);
+  console.log(`   POST /at10/api/validation`);
+  console.log(`   GET  /at10/api/validation/results/:datasetId`);
   console.log(`   GET  /at10/health`);
   console.log(`${'='.repeat(60)}\n`);
 

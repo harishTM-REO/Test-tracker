@@ -7,6 +7,7 @@ const {
     handleCookieConsent,
     closeBrowser, createPage, navigateToPage
 } = require('../utils/helper');
+const browserPool = require('./browserPoolService');
 let puppeteer;
 try {
     puppeteer = require('puppeteer');
@@ -16,6 +17,10 @@ try {
 
 class AdobeScraperService {
 
+    constructor() {
+        this.browserPool = browserPool;
+    }
+
     /**
      * Main function to scrape Adobe Target experiments from a URL
      * @param {string} url - The website URL to scrape
@@ -23,7 +28,7 @@ class AdobeScraperService {
      * @returns {Object} Scraping results
      */
 
-    async scrapeAdobeTargetExperiments(url, res = null) {
+    async scrapeAdobeTargetExperiments(url, res = null, options = {}) {
         const startTime = Date.now();
         let savedData = null;
         try {
@@ -50,7 +55,7 @@ class AdobeScraperService {
                 };
             }
 
-            const experimentData = await this.scrapeExperimentsFromPage(url);
+            const experimentData = await this.scrapeExperimentsFromPage(url, options);
             console.log('the invoking function->',experimentData)
             return this.formatResponse(url, website, experimentData, savedData, startTime);
 
@@ -60,11 +65,148 @@ class AdobeScraperService {
         }
     }
 
-    async scrapeExperimentsFromPage(url, sharedPage = null) {
+    /**
+     * Lightweight detector to quickly determine if Adobe Target is present on a page
+     * @param {string} url
+     * @returns {Promise<{detected: boolean, httpStatusCode?: number, captchaDetected?: boolean, captchaStatus?: string, detectionSource?: object}>}
+     */
+    async detectAdobeTargetPresence(url) {
         let browser = null;
+        let page = null;
+        let documentStatusCode = null;
+
+        try {
+            browser = await launchBrowser();
+            page = await createPage(browser);
+
+            // Track HTTP status code only
+            // page.on('response', (response) => {
+            //     try {
+            //         if (!documentStatusCode && response.request().resourceType() === 'document') {
+            //             documentStatusCode = response.status();
+            //         }
+            //     } catch (responseError) {
+            //         console.warn('Error processing response for status code:', responseError.message);
+            //     }
+            // });
+
+            await navigateToPage(page, url);
+
+            const captchaCheck = await detectCaptcha(page);
+            if (captchaCheck.detected) {
+                return {
+                    detected: false,
+                    captchaDetected: true,
+                    captchaStatus: captchaCheck.reason,
+                    httpStatusCode: documentStatusCode
+                };
+            }
+
+            // const cookieHandlingResult = await handleCookieConsent(page);
+
+            // if (cookieHandlingResult === 'context_destroyed') {
+            //     try {
+            //         await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 });
+            //     } catch (navError) {
+            //         console.warn('Navigation wait after cookie consent failed:', navError.message);
+            //     }
+            // }
+
+            await new Promise(resolve => setTimeout(resolve, 3500));
+
+            // Use the more efficient page evaluation that checks window.adobe.target['VERSION']
+            const adobeTargetData = await page.evaluate(() => {
+                try {
+                    if (!window.adobe || !window.adobe.target) {
+                        return {
+                            detected: false,
+                            version: null,
+                            hasMboxCookie: document.cookie.includes('mbox='),
+                            hasAdobeScript: Array.from(document.scripts || []).some(script => {
+                                const src = script.src || '';
+                                return src.includes('tt.omtrdc.net') || src.includes('target.js') || src.includes('adobetarget');
+                            })
+                        };
+                    }
+
+                    const version = parseInt(window.adobe.target['VERSION']);
+                    console.log('Adobe Target VERSION:', version);
+
+                    if (version === 1) {
+                        console.log('Adobe Target version 1 detected');
+                    } else if (version === 2) {
+                        console.log('Adobe Target version 2 detected');
+                    }
+
+                    return {
+                        detected: true,
+                        version: version,
+                        hasMboxCookie: document.cookie.includes('mbox='),
+                        hasAdobeScript: Array.from(document.scripts || []).some(script => {
+                            const src = script.src || '';
+                            return src.includes('tt.omtrdc.net') || src.includes('target.js') || src.includes('adobetarget');
+                        })
+                    };
+                } catch (e) {
+                    console.error('Error checking Adobe Target:', e);
+                    return {
+                        detected: false,
+                        version: null,
+                        hasMboxCookie: document.cookie.includes('mbox='),
+                        hasAdobeScript: false,
+                        error: e.message
+                    };
+                }
+            });
+
+            // Detection is true if Adobe Target object found, or fallback to cookie/script detection
+            const detected = Boolean(
+                adobeTargetData?.detected ||
+                adobeTargetData?.hasMboxCookie ||
+                adobeTargetData?.hasAdobeScript
+            );
+
+            return {
+                detected,
+                httpStatusCode: documentStatusCode,
+                captchaDetected: false,
+                detectionSource: {
+                    adobeObject: adobeTargetData?.detected || false,
+                    version: adobeTargetData?.version || null,
+                    mboxCookie: adobeTargetData?.hasMboxCookie || false,
+                    adobeScript: adobeTargetData?.hasAdobeScript || false
+                }
+            };
+        } catch (error) {
+            console.error('Error detecting Adobe Target presence:', error);
+            throw error;
+        } finally {
+            if (page) {
+                try {
+                    await page.close();
+                } catch (closeError) {
+                    console.warn('Error closing page after detection:', closeError.message);
+                }
+            }
+            if (browser) {
+                await closeBrowser(browser);
+            }
+        }
+    }
+
+    async scrapeExperimentsFromPage(url, options = {}) {
+        const {
+            sharedPage = null,
+            browserInstance = null,
+            useBrowserPool = false
+        } = options;
+
+        let browser = browserInstance;
         let page = null;
         let navigationDetected = false; // Declare at function level
         const useSharedPage = !!sharedPage;
+        let acquiredFromPool = false;
+        let browserRestartTriggered = false;
 
         try {
             if (useSharedPage) {
@@ -72,9 +214,20 @@ class AdobeScraperService {
                 page = sharedPage;
                 console.log('♻️ Using shared browser tab for scraping...');
             } else {
-                // Create new browser and page
-                browser = await launchBrowser();
+                if (!browser) {
+                    if (useBrowserPool) {
+                        await this.browserPool.initialize();
+                        browser = await this.browserPool.acquireBrowser();
+                        acquiredFromPool = true;
+                    } else {
+                        browser = await launchBrowser();
+                    }
+                }
+                // Create new page within whichever browser we're using
                 page = await createPage(browser);
+                if (acquiredFromPool) {
+                    this.browserPool.incrementPageCount(browser);
+                }
             }
 
             // Navigate to URL
@@ -94,17 +247,35 @@ class AdobeScraperService {
             }
 
             // Handle cookie consent with detection
-            const cookieType = handleCookieConsent(page);
+            const cookieType = await handleCookieConsent(page);
             await new Promise(resolve => setTimeout(resolve, 4000));
             console.log('avinash - the scrapping reached here');
             // Extract adobeTarget data with intelligent waiting
             // TODO
             const experimentData = await this.extractAdobeTargetData(page);
-            // experimentData.cookieType = cookieType;
+            if (experimentData && typeof experimentData === 'object') {
+                experimentData.cookieType = experimentData.cookieType || cookieType;
+            }
             return experimentData;
 
         } catch (error) {
             console.error('Error scraping experiments from page:', error);
+            if (acquiredFromPool && browser && error?.message) {
+                const browserSessionErrors = [
+                    'Connection closed',
+                    'Target closed',
+                    'Protocol error',
+                    'Session closed',
+                    'Browser has been closed'
+                ];
+                const isBrowserSessionError = browserSessionErrors.some(msg => error.message.includes(msg));
+                if (isBrowserSessionError) {
+                    console.warn('Detected browser-level session error; restarting pooled browser instance.');
+                    await this.browserPool.forceRestartBrowser(browser);
+                    browserRestartTriggered = true;
+                    acquiredFromPool = false;
+                }
+            }
             throw error;
         } finally {
             // Only clean up if NOT using shared page
@@ -116,7 +287,9 @@ class AdobeScraperService {
                         console.warn('Error closing page:', e.message);
                     }
                 }
-                if (browser) {
+                if (acquiredFromPool && browser && !browserRestartTriggered) {
+                    this.browserPool.releaseBrowser(browser);
+                } else if (browser && !browserInstance && !acquiredFromPool) {
                     await closeBrowser(browser);
                 }
             }

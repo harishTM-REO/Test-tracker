@@ -4,6 +4,7 @@ const path = require('path');
 const AdobeTarget1_0Service = require(path.join(__dirname, '../services/adobeTarget1_0Service'));
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
 const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
+const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/AdobeTargetValidationResult'));
 
 /**
  * POST /at10/api/scrape
@@ -71,6 +72,50 @@ router.post('/scrape', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to initiate scraping job',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route POST /at10/api/validation
+ * @desc  Validate Adobe Target presence for a dataset's URLs
+ */
+router.post('/validation', async (req, res) => {
+  try {
+    const { datasetId, datasetName, urls } = req.body;
+
+    if (!datasetId || !datasetName || !Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: datasetId, datasetName, urls (non-empty array)'
+      });
+    }
+
+    const jobId = jobQueue.createJob('adobe-target-validation', {
+      datasetId,
+      datasetName,
+      urls
+    });
+
+    const job = jobQueue.getJob(jobId);
+
+    res.status(202).json({
+      success: true,
+      message: 'Adobe Target validation job initiated',
+      jobId,
+      status: job?.status || 'pending',
+      dataset: {
+        id: datasetId,
+        name: datasetName,
+        urlsCount: urls.length
+      }
+    });
+  } catch (error) {
+    console.error('Error initiating Adobe Target validation job:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initiate validation job',
       error: error.message
     });
   }
@@ -193,6 +238,40 @@ router.get('/results/dataset/:datasetId', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch dataset results',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route GET /at10/api/validation/results/:datasetId
+ * @desc  Get Adobe Target validation result for a dataset
+ */
+router.get('/validation/results/:datasetId', async (req, res) => {
+  try {
+    const { datasetId } = req.params;
+
+    const result = await AdobeTargetValidationResult.findOne({ datasetId })
+      .sort({ createdAt: -1 });
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: 'Validation result not found for dataset',
+        datasetId
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: result,
+      summary: result.summary
+    });
+  } catch (error) {
+    console.error('Error fetching Adobe Target validation results:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch validation results',
       error: error.message
     });
   }
