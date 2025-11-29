@@ -734,6 +734,7 @@ class OptimizelyScraperService {
                 if (!data || typeof data.experiments !== 'object') {
                   return null;
                 }
+                const projectId = data.projectId || data.project?.projectId || data.project?.id || null;
 
                 console.log('Optimizely data found:', Object.keys(data.experiments).length + ' experiments');
 
@@ -755,6 +756,7 @@ class OptimizelyScraperService {
                 return {
                   experiments: experimentArray,
                   hasOptimizely: true,
+                  projectId,
                   optimizelyData: data
                 };
               } catch (e) {
@@ -782,6 +784,7 @@ class OptimizelyScraperService {
                   console.log('Optimizely experiments found:', result.experiments.length);
                   safeResolve({
                     hasOptimizely: true,
+                    projectId: result.projectId || null,
                     experiments: result.experiments,
                     experimentCount: result.experiments.length,
                     activeCount: result.experiments.filter(e => e.isActive).length,
@@ -799,6 +802,7 @@ class OptimizelyScraperService {
                     console.log(`Optimizely found but no experiments after ${optimizelyFoundMaxAttempts} attempts`);
                     safeResolve({
                       hasOptimizely: true,
+                      projectId: result?.projectId || null,
                       experiments: [],
                       experimentCount: 0,
                       activeCount: 0,
@@ -814,6 +818,7 @@ class OptimizelyScraperService {
                   console.log('Max attempts reached, no Optimizely found');
                   safeResolve({
                     hasOptimizely: false,
+                    projectId: null,
                     experiments: [],
                     experimentCount: 0,
                     activeCount: 0,
@@ -885,6 +890,7 @@ class OptimizelyScraperService {
         console.error('Recovery attempt failed:', recoveryError);
         return {
           hasOptimizely: false,
+          projectId: null,
           experiments: [],
           experimentCount: 0,
           activeCount: 0,
@@ -895,6 +901,7 @@ class OptimizelyScraperService {
 
     return {
       hasOptimizely: false,
+      projectId: null,
       experiments: [],
       experimentCount: 0,
       activeCount: 0,
@@ -915,6 +922,7 @@ class OptimizelyScraperService {
         if (!window.optimizely || typeof window.optimizely.get !== 'function') {
           return {
             hasOptimizely: false,
+            projectId: null,
             experiments: [],
             experimentCount: 0,
             activeCount: 0,
@@ -927,6 +935,7 @@ class OptimizelyScraperService {
           if (!data || !data.experiments) {
             return {
               hasOptimizely: true,
+              projectId: data?.projectId || data?.project?.projectId || data?.project?.id || null,
               experiments: [],
               experimentCount: 0,
               activeCount: 0,
@@ -934,6 +943,7 @@ class OptimizelyScraperService {
             };
           }
 
+          const projectId = data.projectId || data.project?.projectId || data.project?.id || null;
           const experiments = Object.entries(data.experiments).map(([id, exp]) => ({
             id: id,
             name: exp.name || "Unnamed Experiment",
@@ -946,6 +956,7 @@ class OptimizelyScraperService {
 
           return {
             hasOptimizely: true,
+            projectId,
             experiments,
             experimentCount: experiments.length,
             activeCount: experiments.filter(e => e.isActive).length,
@@ -954,6 +965,7 @@ class OptimizelyScraperService {
         } catch (e) {
           return {
             hasOptimizely: true,
+            projectId: null,
             experiments: [],
             experimentCount: 0,
             activeCount: 0,
@@ -969,6 +981,7 @@ class OptimizelyScraperService {
       console.error('Sync extraction failed:', error);
       return {
         hasOptimizely: false,
+        projectId: null,
         experiments: [],
         experimentCount: 0,
         activeCount: 0,
@@ -1159,6 +1172,9 @@ class OptimizelyScraperService {
 
       // Extract Optimizely data with intelligent waiting
       const experimentData = await this.extractOptimizelyData(page);
+      if (typeof experimentData.projectId === 'undefined') {
+        experimentData.projectId = null;
+      }
 
       // Add cookie type to response
       experimentData.cookieType = cookieType;
@@ -1273,6 +1289,7 @@ class OptimizelyScraperService {
         captchaDetected: experimentData.captchaDetected,
         captchaStatus: experimentData.captchaStatus,
         detected: experimentData.hasOptimizely,
+        projectId: experimentData.projectId || null,
         experiments: experimentData.experiments,
         experimentCount: experimentData.experimentCount || 0,
         activeCount: experimentData.activeCount || 0,
@@ -2185,6 +2202,7 @@ class OptimizelyScraperService {
               domain: domain,
               success: true,
               optimizelyDetected: true,
+              projectId: result.data.optimizely.projectId || null,
               experiments: result.data.optimizely.experiments || [],
               experimentCount: result.data.optimizely.experimentCount || 0,
               activeCount: result.data.optimizely.activeCount || 0,
@@ -2377,6 +2395,7 @@ class OptimizelyScraperService {
               domain: domain,
               success: true,
               optimizelyDetected: true,
+            projectId: result.data.optimizely.projectId || null,
               experiments: result.data.optimizely.experiments || [],
               experimentCount: result.data.optimizely.experimentCount || 0,
               activeCount: result.data.optimizely.activeCount || 0,

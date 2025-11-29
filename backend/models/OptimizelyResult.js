@@ -45,6 +45,10 @@ const websiteResultSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  projectId: {
+    type: String,
+    default: null
+  },
   experiments: [experimentSchema],
   experimentCount: {
     type: Number,
