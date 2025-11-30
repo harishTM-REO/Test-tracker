@@ -59,8 +59,8 @@
               <span class="dataset-filename">📄 {{ dataset.originalFileName }}</span>
               <span class="dataset-version">{{ dataset.version }}</span>
               <div class="scraping-status">
-                <span :class="['status-badge', getScrapingStatusClass(dataset.scrapingStatus)]">
-                  {{ getScrapingStatusText(dataset.scrapingStatus) }}
+                <span :class="['status-badge', getDatasetStatusClass(dataset)]">
+                  {{ getDatasetStatusText(dataset) }}
                 </span>
               </div>
             </div>
@@ -77,9 +77,21 @@
               <span class="stat-value">{{ dataset.companies ? dataset.companies.length : 0 }}</span>
             </div>
             
-            <div v-if="dataset.scrapingStatus === 'completed' && dataset.scrapingStats" class="stat-row">
+            <div v-if="dataset.scrapingStatus === 'completed' && dataset.scrapingStats && !isValidationDataset(dataset)" class="stat-row">
               <span class="stat-label">Optimizely Sites:</span>
               <span class="stat-value optimizely">{{ dataset.scrapingStats.optimizelyDetected || 0 }}</span>
+            </div>
+            <div 
+              v-if="isValidationDataset(dataset) && getValidationSummary(dataset)" 
+              class="stat-row validation-summary"
+            >
+              <span class="stat-label">Positive URLs:</span>
+              <span class="stat-value">
+                {{ getValidationSummary(dataset).positiveCount }}
+                <span class="stat-subtext">
+                  Detection rate: {{ formatDetectionRate(getValidationSummary(dataset).detectionRate) }}
+                </span>
+              </span>
             </div>
             
             <div class="stat-row">
@@ -193,6 +205,60 @@ export default {
         'failed': 'status-failed'
       }
       return classMap[status] || 'status-unknown'
+    },
+
+    isValidationDataset(dataset) {
+      return dataset?.toolType === 'Adobe Target Validation'
+    },
+
+    getValidationStatusText(status) {
+      const statusMap = {
+        'not_started': 'Not Validated',
+        'pending': 'Validation Pending',
+        'in_progress': 'Validating...',
+        'completed': 'Validated',
+        'failed': 'Validation Failed'
+      }
+      return statusMap[status] || 'Unknown'
+    },
+
+    getValidationStatusClass(status) {
+      const classMap = {
+        'not_started': 'status-not-started',
+        'pending': 'status-pending',
+        'in_progress': 'status-in-progress',
+        'completed': 'status-completed',
+        'failed': 'status-failed'
+      }
+      return classMap[status] || 'status-unknown'
+    },
+
+    getDatasetStatusText(dataset) {
+      if (this.isValidationDataset(dataset)) {
+        const validationStatus = dataset?.adobeTargetValidation?.status || 'not_started'
+        return this.getValidationStatusText(validationStatus)
+      }
+      return this.getScrapingStatusText(dataset.scrapingStatus)
+    },
+
+    getDatasetStatusClass(dataset) {
+      if (this.isValidationDataset(dataset)) {
+        const validationStatus = dataset?.adobeTargetValidation?.status || 'not_started'
+        return this.getValidationStatusClass(validationStatus)
+      }
+      return this.getScrapingStatusClass(dataset.scrapingStatus)
+    },
+
+    getValidationSummary(dataset) {
+      return dataset?.adobeTargetValidation?.summary || null
+    },
+
+    formatDetectionRate(rate) {
+      if (rate === null || rate === undefined || isNaN(rate)) {
+        return '0%'
+      }
+      const value = Number(rate)
+      return `${value % 1 === 0 ? value : value.toFixed(2)}%`
     },
 
     startAutoRefresh() {
@@ -433,6 +499,19 @@ export default {
 .stat-row .stat-value.experiments {
   color: #27ae60;
   font-size: 1.1rem;
+}
+
+.stat-subtext {
+  display: block;
+  font-size: 0.8rem;
+  color: #7f8c8d;
+  margin-top: 4px;
+}
+
+.validation-summary .stat-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .success-rate, .optimizely-rate {
