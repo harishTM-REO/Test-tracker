@@ -282,11 +282,31 @@ export default {
       return `${value % 1 === 0 ? value : value.toFixed(2)}%`
     },
 
+    hasActiveDatasetJobs(datasets = this.datasets) {
+      if (!Array.isArray(datasets)) {
+        return false
+      }
+      return datasets.some(dataset => this.isDatasetActive(dataset))
+    },
+
+    isDatasetActive(dataset) {
+      if (!dataset) {
+        return false
+      }
+      const scrapingActive = ['pending', 'in_progress'].includes(dataset?.scrapingStatus)
+
+      if (this.isValidationDataset(dataset)) {
+        const validationStatus = dataset?.adobeTargetValidation?.status
+        const validationActive = ['pending', 'in_progress'].includes(validationStatus)
+        return scrapingActive || validationActive
+      }
+
+      return scrapingActive
+    },
+
     startAutoRefresh() {
       // Only start refresh if there are active scraping jobs
-      const hasActiveScrapingJobs = this.datasets.some(dataset => 
-        dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'
-      )
+      const hasActiveScrapingJobs = this.hasActiveDatasetJobs()
       
       if (hasActiveScrapingJobs && !this.refreshInterval) {
         console.log('🔄 Starting auto-refresh for active scraping jobs')
@@ -295,9 +315,7 @@ export default {
           
           // Check if we should stop refreshing after each fetch
           setTimeout(() => {
-            const stillHasActiveJobs = this.datasets.some(dataset => 
-              dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'
-            )
+            const stillHasActiveJobs = this.hasActiveDatasetJobs()
             
             if (!stillHasActiveJobs) {
               console.log('✅ No more active jobs, stopping auto-refresh')
