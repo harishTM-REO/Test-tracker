@@ -930,11 +930,12 @@ async function checkOptimizelyStatus(req, res) {
  *   - ?all=true - Get all batches
  *   - ?summary=true - Get summary view (metadata only)
  *   - ?urlsOnly=true - Get only URLs from websiteResults
+ *   - ?groupByProject=true - Group websiteResults URLs by projectId
  */
 async function getOptimizelyDocuments(req, res) {
   try {
     const { datasetId } = req.params;
-    const { summary, batch, batches, all, urlsOnly } = req.query;
+    const { summary, batch, batches, all, urlsOnly, groupByProject } = req.query;
 
     if (!datasetId) {
       return res.status(400).json({
@@ -981,6 +982,55 @@ async function getOptimizelyDocuments(req, res) {
       return res.status(404).json({
         success: false,
         message: 'No Optimizely documents found for this dataset'
+      });
+    }
+
+    // Group URLs by projectId when requested
+    if (groupByProject === 'true') {
+      const docsArray = Array.isArray(documents) ? documents : [documents];
+
+      const groupedMap = docsArray.reduce((acc, doc) => {
+        if (!Array.isArray(doc.websiteResults)) {
+          return acc;
+        }
+
+        doc.websiteResults.forEach(result => {
+          const projectId = result.projectId;
+          const url = result.url;
+
+          if (!projectId || !url) {
+            return;
+          }
+
+          if (!acc[projectId]) {
+            acc[projectId] = new Set();
+          }
+
+          acc[projectId].add(url);
+        });
+
+        return acc;
+      }, {});
+
+      const groups = Object.entries(groupedMap).map(([projectId, urlSet]) => ({
+        projectId,
+        urls: Array.from(urlSet)
+      }));
+
+      const projectUrlMap = groups.reduce((map, group) => {
+        map[group.projectId] = group.urls;
+        return map;
+      }, {});
+
+      return res.status(200).json({
+        success: true,
+        message: 'Website results grouped by projectId retrieved successfully',
+        data: {
+          totalProjects: groups.length,
+          totalUrls: groups.reduce((count, group) => count + group.urls.length, 0),
+          groups,
+          projectUrlMap
+        }
       });
     }
 
