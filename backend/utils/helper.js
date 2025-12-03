@@ -9,6 +9,8 @@ try {
     puppeteer = require('puppeteer-core');
 }
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Format file size
 const formatFileSize = (bytes) => {
     if (bytes === 0) return '0 Bytes';
