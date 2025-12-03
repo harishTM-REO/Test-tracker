@@ -70,63 +70,83 @@ class AdobeScraperService {
      * @param {string} url
      * @returns {Promise<{detected: boolean, httpStatusCode?: number, captchaDetected?: boolean, captchaStatus?: string, detectionSource?: object}>}
      */
-    async detectAdobeTargetPresence(url) {
-        let browser = null;
-        let page = null;
-        let documentStatusCode = null;
 
+
+async detectAdobeTargetPresence(url) {
+    let page = null;
+  
+    try {
+      // Use a browser from the shared pool (do NOT launch a new browser here)
+      return await browserPool.withBrowser(async (browser) => {
+        // createPage uses the pooled browser
+        page = await createPage(browser);
+  
+        // keep pool's page-count accurate so restarts are triggered appropriately
+        try { browserPool.incrementPageCount(browser); } catch (e) { /* ignore */ }
+  
+        // navigate (uses PAGE_NAVIGATION_TIMEOUT env)
+        await navigateToPage(page, url);
+  
+        // enable interception only AFTER navigation
         try {
-            browser = await launchBrowser();
-            page = await createPage(browser);
-
-            await navigateToPage(page, url);
-            await page.setRequestInterception(true);
-            page.on("request", req => {
-                const t = req.resourceType();
-                if (["image", "font", "stylesheet", "media"].includes(t)) req.abort();
-                else req.continue();
-            });
-
-            const captchaCheck = await detectCaptcha(page);
-            if (captchaCheck.detected) {
-                return {
-                    detected: false,
-                    captchaDetected: true,
-                    captchaStatus: captchaCheck.reason,
-                    httpStatusCode: documentStatusCode
-                };
-            }
-
-            await handleCookieConsent(page);
-            await new Promise(resolve => setTimeout(resolve, 6000));
-
-            const detectionResult = await this.detectAdobeTargetPresenceUsingPage(page);
-
-            return {
-                detected: detectionResult.detected,
-                version: detectionResult.version,
-                hasMboxCookie: detectionResult.hasMboxCookie,
-                hasAdobeScript: detectionResult.hasAdobeScript,
-                httpStatusCode: documentStatusCode,
-                captchaDetected: false,
-                detectionSource: detectionResult.detectionSource
-            };
-        } catch (error) {
-            console.error('Error detecting Adobe Target presence:', error);
-            throw error;
-        } finally {
-            if (page) {
-                try {
-                    await page.close();
-                } catch (closeError) {
-                    console.warn('Error closing page after detection:', closeError.message);
-                }
-            }
-            if (browser) {
-                await closeBrowser(browser);
-            }
+          await page.setRequestInterception(true);
+          page.on("request", req => {
+            const t = req.resourceType();
+            if (["image", "font", "stylesheet", "media"].includes(t)) req.abort();
+            else req.continue();
+          });
+        } catch (e) {
+          console.warn('Could not enable request interception (continuing):', e.message);
         }
+  
+        // run captcha/cookie checks and wait for client-side Adobe presence
+        const captchaCheck = await detectCaptcha(page);
+        if (captchaCheck.detected) {
+          return {
+            detected: false,
+            captchaDetected: true,
+            captchaStatus: captchaCheck.reason,
+            httpStatusCode: null
+          };
+        }
+  
+        await handleCookieConsent(page);
+        // short pause for client-side JS to run (adjust if needed)
+        await new Promise(resolve => setTimeout(resolve, 4000));
+  
+        const detectionResult = await this.detectAdobeTargetPresenceUsingPage(page);
+  
+        return {
+          detected: detectionResult.detected,
+          version: detectionResult.version,
+          hasMboxCookie: detectionResult.hasMboxCookie,
+          hasAdobeScript: detectionResult.hasAdobeScript,
+          httpStatusCode: null,
+          captchaDetected: false,
+          detectionSource: detectionResult.detectionSource
+        };
+      }); // end withBrowser
+    } catch (error) {
+      console.error('Error detecting Adobe Target presence:', error);
+      throw error;
+    } finally {
+      // ensure page is closed safely (don't close browser here)
+      if (page) {
+        try {
+          // safe close: don't let close hang forever
+          await Promise.race([
+            page.close(),
+            new Promise(resolve => setTimeout(resolve, 2000)) // 2s fallback
+          ]);
+        } catch (closeError) {
+          console.warn('Error closing page after detection (safe-close):', closeError.message);
+        } finally {
+          try { page.removeAllListeners && page.removeAllListeners('request'); } catch (e) {}
+        }
+      }
     }
+  }
+  
 
     async detectAdobeTargetPresenceUsingPage(page) {
         const adobeTargetData = await page.evaluate(() => {
