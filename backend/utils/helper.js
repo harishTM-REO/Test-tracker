@@ -170,8 +170,6 @@ const launchBrowser = async (fallbackOptions = {}) => {
 }
 
 // utils/helper.js
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
 const createPage = async (browser, opts = {}) => {
   const maxRetries = parseInt(process.env.PAGE_CREATION_RETRIES || opts.retries || 2);
   const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || opts.timeout || 30000;
@@ -190,6 +188,7 @@ const createPage = async (browser, opts = {}) => {
 
       const pagePromise = (async () => {
         page = await browser.newPage();
+        await new Promise(r => setTimeout(r, 200));
         return page;
       })();
 
@@ -199,7 +198,7 @@ const createPage = async (browser, opts = {}) => {
 
       const result = await Promise.race([pagePromise, timeoutPromise]);
       clearTimeout(timeoutId);
-
+      await new Promise(r => setTimeout(r, 200));
       // Configure page (sensible defaults)
       await result.setViewport({ width: 1080, height: 1024 });
       await result.setUserAgent(
@@ -213,12 +212,12 @@ const createPage = async (browser, opts = {}) => {
       result.setDefaultTimeout(120000);
 
       // Intercept requests to speed up page creation
-      await result.setRequestInterception(true);
-      result.on('request', req => {
-        const t = req.resourceType();
-        if (['image', 'font', 'stylesheet', 'media'].includes(t)) req.abort();
-        else req.continue();
-      });
+    //   await result.setRequestInterception(true);
+    //   result.on('request', req => {
+    //     const t = req.resourceType();
+    //     if (['image', 'font', 'stylesheet', 'media'].includes(t)) req.abort();
+    //     else req.continue();
+    //   });
 
       console.log('[createPage] Page successfully created & configured');
       return result;
@@ -264,7 +263,7 @@ const createPage = async (browser, opts = {}) => {
  */
 const navigateToPage = async (page, url) => {
     const maxRetries = parseInt(process.env.NAVIGATION_MAX_RETRIES) || 1;
-    const navigationTimeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000;
+    const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 120000);
     let lastError;
 
     const normalizedUrl = await validateAndNormalizeUrl(url);

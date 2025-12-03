@@ -80,6 +80,12 @@ class AdobeScraperService {
             page = await createPage(browser);
 
             await navigateToPage(page, url);
+            await page.setRequestInterception(true);
+            page.on("request", req => {
+                const t = req.resourceType();
+                if (["image", "font", "stylesheet", "media"].includes(t)) req.abort();
+                else req.continue();
+              });
 
             const captchaCheck = await detectCaptcha(page);
             if (captchaCheck.detected) {
