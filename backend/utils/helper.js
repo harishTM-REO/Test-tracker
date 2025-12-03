@@ -104,7 +104,7 @@ const launchBrowser = async (fallbackOptions = {}) => {
             let browserOptions = {
                 headless: true,
                 ignoreHTTPSErrors: true,
-                protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
+                protocolTimeout: process.env.NODE_ENV === "production" ? 300000 : 60000,
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -125,6 +125,16 @@ const launchBrowser = async (fallbackOptions = {}) => {
                     '--force-device-scale-factor=1',
                     '--disable-extensions',
                     '--disable-plugins',
+                    '--js-flags="--max-old-space-size=128"', 
+                    '--disable-features=site-per-process',
+                    '--renderer-process-limit=1',
+                    '--disable-software-rasterizer',
+                    '--disable-background-networking',
+                    '--disable-hang-monitor',
+                    '--disable-ipc-flooding-protection',
+                    '--disable-background-timer-throttling',
+                    '--disable-renderer-backgrounding',
+                    '--force-color-profile=srgb', 
                     ...(attempt > 1 ? [
                         '--disable-features=TranslateUI',
                         '--disable-ipc-flooding-protection',
@@ -199,8 +209,8 @@ const createPage = async (browser, opts = {}) => {
       await result.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
 
       // Navigation timeouts
-      result.setDefaultNavigationTimeout(opts.navTimeout || 60000);
-      result.setDefaultTimeout(opts.defaultTimeout || 60000);
+      result.setDefaultNavigationTimeout(120000);
+      result.setDefaultTimeout(120000);
 
       // Intercept requests to speed up page creation
       await result.setRequestInterception(true);
