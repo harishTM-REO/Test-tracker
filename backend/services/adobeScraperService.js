@@ -85,7 +85,7 @@ class AdobeScraperService {
                 const t = req.resourceType();
                 if (["image", "font", "stylesheet", "media"].includes(t)) req.abort();
                 else req.continue();
-              });
+            });
 
             const captchaCheck = await detectCaptcha(page);
             if (captchaCheck.detected) {
@@ -97,71 +97,19 @@ class AdobeScraperService {
                 };
             }
 
-            const cookieHandlingResult = await handleCookieConsent(page);
+            await handleCookieConsent(page);
             await new Promise(resolve => setTimeout(resolve, 6000));
 
-            // Use the more efficient page evaluation that checks window.adobe.target['VERSION']
-            const adobeTargetData = await page.evaluate(() => {
-                try {
-                    if (!window.adobe || !window.adobe.target) {
-                        return {
-                            detected: false,
-                            version: null,
-                            hasMboxCookie: document.cookie.includes('mbox='),
-                            hasAdobeScript: Array.from(document.scripts || []).some(script => {
-                                const src = script.src || '';
-                                return src.includes('tt.omtrdc.net') || src.includes('target.js') || src.includes('adobetarget');
-                            })
-                        };
-                    }
-
-                    const version = parseInt(window.adobe.target['VERSION']);
-                    console.log('Adobe Target VERSION:', version);
-
-                    if (version === 1) {
-                        console.log('Adobe Target version 1 detected');
-                    } else if (version === 2) {
-                        console.log('Adobe Target version 2 detected');
-                    }
-
-                    return {
-                        detected: true,
-                        version: version,
-                        hasMboxCookie: document.cookie.includes('mbox='),
-                        hasAdobeScript: Array.from(document.scripts || []).some(script => {
-                            const src = script.src || '';
-                            return src.includes('tt.omtrdc.net') || src.includes('target.js') || src.includes('adobetarget');
-                        })
-                    };
-                } catch (e) {
-                    console.error('Error checking Adobe Target:', e);
-                    return {
-                        detected: false,
-                        version: null,
-                        hasMboxCookie: document.cookie.includes('mbox='),
-                        hasAdobeScript: false,
-                        error: e.message
-                    };
-                }
-            });
-
-            // Detection is true if Adobe Target object found, or fallback to cookie/script detection
-            const detected = Boolean(
-                adobeTargetData?.detected ||
-                adobeTargetData?.hasMboxCookie ||
-                adobeTargetData?.hasAdobeScript
-            );
+            const detectionResult = await this.detectAdobeTargetPresenceUsingPage(page);
 
             return {
-                detected,
+                detected: detectionResult.detected,
+                version: detectionResult.version,
+                hasMboxCookie: detectionResult.hasMboxCookie,
+                hasAdobeScript: detectionResult.hasAdobeScript,
                 httpStatusCode: documentStatusCode,
                 captchaDetected: false,
-                detectionSource: {
-                    adobeObject: adobeTargetData?.detected || false,
-                    version: adobeTargetData?.version || null,
-                    mboxCookie: adobeTargetData?.hasMboxCookie || false,
-                    adobeScript: adobeTargetData?.hasAdobeScript || false
-                }
+                detectionSource: detectionResult.detectionSource
             };
         } catch (error) {
             console.error('Error detecting Adobe Target presence:', error);
@@ -180,11 +128,97 @@ class AdobeScraperService {
         }
     }
 
+    async detectAdobeTargetPresenceUsingPage(page) {
+        const adobeTargetData = await page.evaluate(() => {
+            try {
+                if (!window.adobe || !window.adobe.target) {
+                    return {
+                        detected: false,
+                        version: null,
+                        hasMboxCookie: document.cookie.includes('mbox='),
+                        hasAdobeScript: Array.from(document.scripts || []).some(script => {
+                            const src = script.src || '';
+                            return src.includes('tt.omtrdc.net') || src.includes('target.js') || src.includes('adobetarget');
+                        })
+                    };
+                }
+
+                const version = parseInt(window.adobe.target['VERSION']);
+                console.log('Adobe Target VERSION:', version);
+
+                if (version === 1) {
+                    console.log('Adobe Target version 1 detected');
+                } else if (version === 2) {
+                    console.log('Adobe Target version 2 detected');
+                }
+
+                return {
+                    detected: true,
+                    version: version,
+                    hasMboxCookie: document.cookie.includes('mbox='),
+                    hasAdobeScript: Array.from(document.scripts || []).some(script => {
+                        const src = script.src || '';
+                        return src.includes('tt.omtrdc.net') || src.includes('target.js') || src.includes('adobetarget');
+                    })
+                };
+            } catch (e) {
+                console.error('Error checking Adobe Target:', e);
+                return {
+                    detected: false,
+                    version: null,
+                    hasMboxCookie: document.cookie.includes('mbox='),
+                    hasAdobeScript: false,
+                    error: e.message
+                };
+            }
+        });
+
+        const detected = Boolean(
+            adobeTargetData?.detected ||
+            adobeTargetData?.hasMboxCookie ||
+            adobeTargetData?.hasAdobeScript
+        );
+
+        return {
+            detected,
+            version: adobeTargetData?.version || null,
+            hasMboxCookie: adobeTargetData?.hasMboxCookie || false,
+            hasAdobeScript: adobeTargetData?.hasAdobeScript || false,
+            detectionSource: {
+                adobeObject: adobeTargetData?.detected || false,
+                version: adobeTargetData?.version || null,
+                mboxCookie: adobeTargetData?.hasMboxCookie || false,
+                adobeScript: adobeTargetData?.hasAdobeScript || false
+            },
+            raw: adobeTargetData
+        };
+    }
+
+    buildPresenceOnlyExperimentData(detectionResult, cookieType) {
+        return {
+            hasAdobeTarget: detectionResult.detected,
+            adobeTargetVersion: detectionResult.version || null,
+            experiments: [],
+            experimentCount: 0,
+            activeCount: 0,
+            adobeTargetObject: detectionResult.raw || null,
+            mboxData: {
+                activityNames: [],
+                activityIds: []
+            },
+            cookieType: cookieType || 'unknown',
+            captchaDetected: detectionResult.captchaDetected || false,
+            captchaStatus: detectionResult.captchaStatus || null,
+            detectionSource: detectionResult.detectionSource
+        };
+    }
+
     async scrapeExperimentsFromPage(url, options = {}) {
         const {
             sharedPage = null,
             browserInstance = null,
-            useBrowserPool = false
+            useBrowserPool = false,
+            presenceOnly = false
         } = options;
 
         let browser = browserInstance;
@@ -236,10 +270,16 @@ class AdobeScraperService {
 
             // Handle cookie consent with detection
             const cookieType = await handleCookieConsent(page);
-            await new Promise(resolve => setTimeout(resolve, 4000));
-            // console.log('avinash - the scrapping reached here');
+            const postConsentDelay = presenceOnly ? 3000 : 6000;
+            await new Promise(resolve => setTimeout(resolve, postConsentDelay));
+
+            if (presenceOnly) {
+                const detectionResult = await this.detectAdobeTargetPresenceUsingPage(page);
+                const presenceExperiment = this.buildPresenceOnlyExperimentData(detectionResult, cookieType);
+                return presenceExperiment;
+            }
+
             // Extract adobeTarget data with intelligent waiting
-            // TODO
             const experimentData = await this.extractAdobeTargetData(page);
             if (experimentData && typeof experimentData === 'object') {
                 experimentData.cookieType = experimentData.cookieType || cookieType;

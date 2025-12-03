@@ -926,7 +926,7 @@ class AdobeTarget1_0Service {
           const scrapeResult = await AdobeScraperService.scrapeAdobeTargetExperiments(
             targetUrl,
             null,
-            { browserInstance: browser }
+            { browserInstance: browser, presenceOnly: true }
           );
           const adobeTargetData = scrapeResult.adobeTarget || scrapeResult.data?.adobeTarget || {};
 
