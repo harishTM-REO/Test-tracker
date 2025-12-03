@@ -53,6 +53,15 @@ class BrowserPoolService {
   }
 
   /**
+   * Determine if a browser instance is currently managed by this pool
+   * @param {Object} browser
+   * @returns {boolean}
+   */
+  isManagedBrowser(browser) {
+    return !!browser && this.browsers.includes(browser);
+  }
+
+  /**
    * Initialize the browser pool by launching initial browsers
    */
   async initialize() {
@@ -60,32 +69,52 @@ class BrowserPoolService {
       console.log('⚠️  Browser pool already initialized, skipping...');
       return;
     }
-
+  
     console.log(`\n🚀 Starting browser pool initialization with ${this.poolSize} browsers...`);
-
+  
     try {
+      // Ensure pageCountPerBrowser map exists
+      if (!this.pageCountPerBrowser) this.pageCountPerBrowser = new Map();
+      if (!this.browserAcquisitionTimes) this.browserAcquisitionTimes = new WeakMap();
+  
       for (let i = 0; i < this.poolSize; i++) {
         try {
-          const browser = await this.launchBrowser(i + 1);
+          // Protect launch with timeout to avoid hangs
+          const launchTimeoutMs = parseInt(process.env.LAUNCH_TIMEOUT) || 30000;
+          const browser = await Promise.race([
+            this.launchBrowser(i + 1),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`launchBrowser timeout after ${launchTimeoutMs}ms`)), launchTimeoutMs)
+            )
+          ]);
+  
+          // Track page count and add to pool
+          this.pageCountPerBrowser.set(browser, 0);
           this.browsers.push(browser);
           this.availableBrowsers.push(browser);
-          this.stats.totalBrowsersCreated++;
-          console.log(`   ✅ Browser ${i + 1}/${this.poolSize} launched successfully`);
+          this.stats.totalBrowsersCreated = (this.stats.totalBrowsersCreated || 0) + 1;
+  
+          // Helpful debug: PID if available
+          const pid = browser.process && typeof browser.process === 'function' ? (browser.process()?.pid || 'n/a') : 'n/a';
+          console.log(`   ✅ Browser ${i + 1}/${this.poolSize} launched successfully (pid: ${pid})`);
         } catch (error) {
           console.error(`   ❌ Failed to launch browser ${i + 1}: ${error.message}`);
+          // Cleanup any that succeeded so far
+          await this.closeAll();
           throw error;
         }
       }
-
+  
       this.isInitialized = true;
       console.log(`\n✅ Browser pool initialized successfully with ${this.poolSize} browsers\n`);
     } catch (error) {
       console.error('❌ Failed to initialize browser pool:', error.message);
-      // Cleanup any browsers that were successfully launched
-      await this.closeAll();
+      // closeAll already called in inner catch, but safe to call again
+      try { await this.closeAll(); } catch (e) { /* ignore */ }
       throw error;
     }
   }
+  
 
   /**
    * Launch a single browser instance with optimized settings and stealth mode
@@ -163,23 +192,40 @@ class BrowserPoolService {
       };
 
       if (this.availableBrowsers.length > 0) {
-        const browser = this.availableBrowsers.pop();
-        this.busyBrowsers.add(browser);
-        this.stats.totalAcquisitions++;
-
-        // Track when this browser was acquired
-        if (!this.browserAcquisitionTimes) {
-          this.browserAcquisitionTimes = new WeakMap();
+        // pop until we find a connected browser or pool empty
+        let browser;
+        while (this.availableBrowsers.length > 0) {
+          browser = this.availableBrowsers.pop();
+          try {
+            if (!browser || (browser.isConnected && !browser.isConnected())) {
+              console.warn('[acquireBrowser] Found disconnected browser, replacing...');
+              // schedule restart async (so next acquisition recovers)
+              this.forceRestartBrowser(browser).catch(e => console.error('forceRestartBrowser:', e.message));
+              browser = null;
+              continue;
+            }
+            break;
+          } catch (e) {
+            console.warn('[acquireBrowser] health check error, skipping browser:', e.message);
+            this.forceRestartBrowser(browser).catch(e2 => console.error('forceRestartBrowser:', e2.message));
+            browser = null;
+          }
         }
-        this.browserAcquisitionTimes.set(browser, Date.now());
-
-        const queueLength = this.waitingQueue.length;
-        if (queueLength > 0) {
-          console.log(`📊 Browser acquired (queue was ${queueLength})`);
+      
+        if (!browser) {
+          // no usable browser found -> fallback to queue path (will trigger recover)
+          console.error('[acquireBrowser] No usable browsers available after filtering; queuing request');
+        } else {
+          this.busyBrowsers.add(browser);
+          this.stats.totalAcquisitions++;
+          if (!this.browserAcquisitionTimes) this.browserAcquisitionTimes = new WeakMap();
+          this.browserAcquisitionTimes.set(browser, Date.now());
+          if (this.waitingQueue.length > 0) console.log(`📊 Browser acquired (queue was ${this.waitingQueue.length})`);
+          resolve(browser);
+          return;
         }
-
-        resolve(browser);
-      } else {
+      }
+      else {
         // All browsers busy, check if we should trigger a health check for stuck browsers
         if (this.waitingQueue.length === 0) {
           // First time all browsers are busy, might want to check health
@@ -334,12 +380,33 @@ class BrowserPoolService {
    */
   async withBrowser(fn) {
     const browser = await this.acquireBrowser();
+    let releasedNormally = false;
     try {
-      return await fn(browser);
+      // run user function (passes browser)
+      const result = await fn(browser);
+      releasedNormally = true;
+      return result;
+    } catch (err) {
+      // If page creation indicated the browser is stuck, force-restart it.
+      if (err && (err.message === 'BROWSER_STUCK_RESTART_REQUIRED' || err.message === 'BROWSER_NOT_CONNECTED')) {
+        console.error(`[withBrowser] Detected stuck browser -> forcing restart: ${err.message}`);
+        // Ensure browser is not returned to pool and restart it
+        try { await this.forceRestartBrowser(browser); } catch (e) { console.error('forceRestartBrowser failed:', e.message); }
+        // propagate original error
+        throw err;
+      }
+      throw err;
     } finally {
-      this.releaseBrowser(browser);
+      // Only release back to pool if it wasn't already scheduled for restart
+      if (releasedNormally) {
+        try { this.releaseBrowser(browser); } catch (e) { console.error('releaseBrowser error:', e.message); }
+      } else {
+        // prevent accidental reuse — ensure it's not in busy set
+        this.busyBrowsers.delete(browser);
+      }
     }
   }
+  
 
   /**
    * Get current pool statistics
@@ -555,57 +622,60 @@ class BrowserPoolService {
         console.warn(`⚠️  Browser not found in pool, cannot restart`);
         return;
       }
-
+  
       console.log(`🔄 Force restarting browser ${browserIndex + 1} due to timeout...`);
-
-      // Remove from busy set
+  
+      // immediate removal so other code won't reuse it
       this.busyBrowsers.delete(browser);
-      if (this.browserAcquisitionTimes) {
-        this.browserAcquisitionTimes.delete(browser);
-      }
-
-      // Close the old browser with timeout
+      this.availableBrowsers = this.availableBrowsers.filter(b => b !== browser);
+      if (this.browserAcquisitionTimes) this.browserAcquisitionTimes.delete(browser);
+  
+      // Close the old browser with timeout (guard for null/disconnected)
       try {
-        await Promise.race([
-          browser.close(),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Close timeout')), 5000)
-          )
-        ]);
-        console.log(`✅ Old browser ${browserIndex + 1} closed`);
+        if (browser && (typeof browser.isConnected !== 'function' || browser.isConnected())) {
+          await Promise.race([
+            browser.close(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 5000))
+          ]);
+          this.stats.totalBrowsersClosed = (this.stats.totalBrowsersClosed || 0) + 1;
+          console.log(`✅ Old browser ${browserIndex + 1} closed`);
+        } else {
+          console.warn(`⚠️ Old browser ${browserIndex + 1} not connected or already gone`);
+        }
       } catch (closeError) {
         console.warn(`⚠️  Could not gracefully close browser ${browserIndex + 1}: ${closeError.message}`);
-        // Continue anyway - don't block the restart
+        // continue to attempt restart
       }
-
-      // CRITICAL FIX: Launch new browser WITH TIMEOUT to prevent hanging
-      // On resource-starved systems, launch can hang indefinitely
+  
+      // Mark slot as null so acquire/healthCheck knows it's missing
+      this.browsers[browserIndex] = null;
+      this.pageCountPerBrowser.delete(browser);
+  
+      // Launch new browser WITH TIMEOUT to prevent hanging
       let newBrowser;
       try {
         newBrowser = await Promise.race([
           this.launchBrowser(browserIndex + 1),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Launch timeout after 15s')), 15000)
-          )
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Launch timeout after 15s')), 15000))
         ]);
-
+  
         this.browsers[browserIndex] = newBrowser;
-        this.pageCountPerBrowser.delete(browser);
         this.pageCountPerBrowser.set(newBrowser, 0);
         this.availableBrowsers.push(newBrowser);
         this.stats.totalBrowserRestarts++;
-
-        console.log(`✅ Browser ${browserIndex + 1} force-restarted successfully`);
+        this.stats.totalBrowsersCreated = (this.stats.totalBrowsersCreated || 0) + 1;
+  
+        console.log(`✅ Browser ${browserIndex + 1} force-restarted successfully (pid: ${newBrowser.process?.().pid || 'n/a'})`);
       } catch (launchError) {
         console.error(`❌ Failed to launch new browser ${browserIndex + 1}: ${launchError.message}`);
-        console.warn(`⚠️  Browser ${browserIndex + 1} will be retried on next acquisition`);
-        // Don't crash - just log and let the next acquisition handle it
-        // This prevents the restart from hanging the entire scraping process
+        console.warn(`⚠️  Browser ${browserIndex + 1} will be retried on next acquisition or by healthCheck`);
+        // leave this.browsers[browserIndex] as null so healthCheck/recoverUnhealthyBrowsers can restart it later
       }
     } catch (error) {
       console.error(`❌ Unexpected error in forceRestartBrowser: ${error.message}`);
     }
   }
+  
 }
 
 // Create and export singleton instance

@@ -92,7 +92,7 @@ class AdobeScraperService {
             }
 
             const cookieHandlingResult = await handleCookieConsent(page);
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            await new Promise(resolve => setTimeout(resolve, 6000));
 
             // Use the more efficient page evaluation that checks window.adobe.target['VERSION']
             const adobeTargetData = await page.evaluate(() => {
@@ -187,6 +187,7 @@ class AdobeScraperService {
         const useSharedPage = !!sharedPage;
         let acquiredFromPool = false;
         let browserRestartTriggered = false;
+        let browserManagedByPool = false;
 
         try {
             if (useSharedPage) {
@@ -203,9 +204,10 @@ class AdobeScraperService {
                         browser = await launchBrowser();
                     }
                 }
+                browserManagedByPool = Boolean(this.browserPool?.isManagedBrowser?.(browser));
                 // Create new page within whichever browser we're using
                 page = await createPage(browser);
-                if (acquiredFromPool) {
+                if (browserManagedByPool) {
                     this.browserPool.incrementPageCount(browser);
                 }
             }

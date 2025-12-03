@@ -159,36 +159,93 @@ const launchBrowser = async (fallbackOptions = {}) => {
     throw new Error(`Failed to launch browser after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`);
 }
 
-const createPage = async (browser) => {
+// utils/helper.js
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const createPage = async (browser, opts = {}) => {
+  const maxRetries = parseInt(process.env.PAGE_CREATION_RETRIES || opts.retries || 2);
+  const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || opts.timeout || 30000;
+  const backoffBase = parseInt(process.env.PAGE_CREATION_BACKOFF_MS) || opts.backoffMs || 500;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let timeoutId;
+    let page;
     try {
-        const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 15000;
-        const pagePromise = browser.newPage();
+      // Quick browser health check
+      if (!browser || (browser.isConnected && !browser.isConnected())) {
+        throw new Error('BROWSER_NOT_CONNECTED');
+      }
 
-        const page = await Promise.race([
-            pagePromise,
-            new Promise((_, reject) =>
-                setTimeout(() => reject(new Error(`Page creation timeout after ${pageCreationTimeout}ms`)), pageCreationTimeout)
-            )
-        ]);
+      console.log(`[createPage] attempt ${attempt + 1}/${maxRetries + 1} - creating page`);
 
-        await page.setViewport({width: 1080, height: 1024});
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            const resourceType = req.resourceType();
-            if (['image','font'].includes(resourceType)) {
-                req.abort();
-            } else {
-                req.continue();
-            }
-        });
-
-        console.log('Page configured successfully');
+      const pagePromise = (async () => {
+        page = await browser.newPage();
         return page;
+      })();
+
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('PAGE_CREATION_TIMEOUT')), pageCreationTimeout);
+      });
+
+      const result = await Promise.race([pagePromise, timeoutPromise]);
+      clearTimeout(timeoutId);
+
+      // Configure page (sensible defaults)
+      await result.setViewport({ width: 1080, height: 1024 });
+      await result.setUserAgent(
+        opts.userAgent ||
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36'
+      );
+      await result.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
+
+      // Navigation timeouts
+      result.setDefaultNavigationTimeout(opts.navTimeout || 60000);
+      result.setDefaultTimeout(opts.defaultTimeout || 60000);
+
+      // Intercept requests to speed up page creation
+      await result.setRequestInterception(true);
+      result.on('request', req => {
+        const t = req.resourceType();
+        if (['image', 'font', 'stylesheet', 'media'].includes(t)) req.abort();
+        else req.continue();
+      });
+
+      console.log('[createPage] Page successfully created & configured');
+      return result;
+
     } catch (error) {
-        console.error('Error creating page:', error);
-        throw new Error(`Failed to create page: ${error.message}`);
+      clearTimeout(timeoutId);
+      // Close any half-created page
+      if (page) {
+        try { await page.close(); } catch (_) {}
+      }
+
+      console.error(`[createPage] attempt ${attempt + 1} failed:`, error.message || error);
+
+      // If timeout, try retrying a few times before marking browser stuck
+      if (error.message === 'PAGE_CREATION_TIMEOUT') {
+        if (attempt < maxRetries) {
+          const wait = backoffBase * (attempt + 1);
+          console.log(`[createPage] timeout -> retrying after ${wait}ms`);
+          await sleep(wait);
+          continue;
+        } else {
+          // last attempt failed with timeout — signal higher layer to restart browser
+          throw new Error('BROWSER_STUCK_RESTART_REQUIRED');
+        }
+      }
+
+      // For other fatal errors (like BROWSER_NOT_CONNECTED), don't retry more than once
+      if (attempt < maxRetries) {
+        const wait = backoffBase * (attempt + 1);
+        await sleep(wait);
+        continue;
+      }
+      throw error;
     }
-}
+  }
+};
+
 
 /**
  * Navigate to URL and wait for page load with comprehensive error handling
