@@ -2,6 +2,7 @@ const axios = require('axios');
 const path = require('path');
 const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
 const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/AdobeTargetValidationResult'));
+const AdobeTargetValidationDocument = require(path.join(__dirname, '../../models/AdobeTargetValidationDocument'));
 const Dataset = require(path.join(__dirname, '../../models/Dataset'));
 const AdobeScraperService = require(path.join(__dirname, '../../services/adobeScraperService'));
 const browserPool = require(path.join(__dirname, '../../services/browserPoolService'));
@@ -617,6 +618,9 @@ class AdobeTarget1_0Service {
         await datasetDoc.save();
       }
 
+      // Reset previous validation documents for this dataset to avoid mixing runs
+      await AdobeTargetValidationDocument.deleteMany({ datasetId });
+
       validationResultDoc = await AdobeTargetValidationResult.create({
         datasetId,
         datasetName,
@@ -658,12 +662,18 @@ class AdobeTarget1_0Service {
       const validationConcurrent = parseInt(process.env.ADOBE_VALIDATION_CONCURRENT) ||
         parseInt(process.env.BROWSER_POOL_SIZE) || 3;
       const validationMaxTabs = parseInt(process.env.ADOBE_VALIDATION_MAX_TABS) || 1;
+      const totalBatches = Math.max(1, Math.ceil(urls.length / validationBatchSize));
 
       let processedUrlsCounter = 0;
 
       for (let i = 0; i < urls.length; i += validationBatchSize) {
         const chunk = urls.slice(i, i + validationBatchSize);
-        console.log(`\n🔁 Processing validation chunk ${Math.floor(i / validationBatchSize) + 1}/${Math.ceil(urls.length / validationBatchSize)} (${chunk.length} URLs)`);
+        const chunkNumber = Math.floor(i / validationBatchSize) + 1;
+        console.log(`\n🔁 Processing validation chunk ${chunkNumber}/${totalBatches} (${chunk.length} URLs)`);
+
+        const chunkPositives = [];
+        const chunkNegatives = [];
+        const chunkFailures = [];
 
         const chunkResults = await this.processValidationChunk(chunk, {
           concurrent: validationConcurrent,
@@ -672,6 +682,7 @@ class AdobeTarget1_0Service {
 
         chunkResults.forEach(result => {
           const targetUrl = result?.url;
+          const companyName = result?.companyName || null;
           if (!targetUrl) {
             return;
           }
@@ -681,6 +692,12 @@ class AdobeTarget1_0Service {
             scrapingStats.failedScans += 1;
             scrapingStats.processedUrls += 1;
             console.error(`❌ Adobe Target validation failed for ${targetUrl}: ${result.error || 'Unknown error'}`);
+            chunkFailures.push(this.buildValidationRecord({
+              url: targetUrl,
+              companyName,
+              status: 'failed',
+              error: result.error || 'Unknown error'
+            }));
             return;
           }
 
@@ -703,9 +720,21 @@ class AdobeTarget1_0Service {
             positiveUrls.push(targetUrl);
             scrapingStats.optimizelyDetected += 1;
             console.log(`✅ Adobe Target DETECTED: ${targetUrl}`);
+            chunkPositives.push(this.buildValidationRecord({
+              url: targetUrl,
+              companyName,
+              status: 'positive',
+              adobeTargetData
+            }));
           } else {
             negativeUrls.push(targetUrl);
             console.log(`❌ Adobe Target NOT detected: ${targetUrl}`);
+            chunkNegatives.push(this.buildValidationRecord({
+              url: targetUrl,
+              companyName,
+              status: 'negative',
+              adobeTargetData
+            }));
           }
 
           scrapingStats.successfulScans += 1;
@@ -729,6 +758,17 @@ class AdobeTarget1_0Service {
           datasetDoc.scrapingLastUpdate = new Date();
           await datasetDoc.save();
         }
+
+        await this.saveValidationBatchDocument({
+          datasetId,
+          datasetName,
+          batchNumber: chunkNumber,
+          totalBatches,
+          totalUrls: chunk.length,
+          positives: chunkPositives,
+          negatives: chunkNegatives,
+          failures: chunkFailures
+        });
       }
 
       const endTime = new Date();
@@ -871,8 +911,8 @@ class AdobeTarget1_0Service {
     const results = [];
 
     for (let i = 0; i < urlEntries.length; i++) {
-      const entry = urlEntries[i];
-      const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+        const entry = urlEntries[i];
+        const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
       const targetUrl = normalizedEntry.url;
 
       if (!targetUrl) {
@@ -882,26 +922,28 @@ class AdobeTarget1_0Service {
 
       console.log(`🔸 [${i + 1}/${urlEntries.length}] Validating ${targetUrl}`);
 
-      try {
-        const scrapeResult = await AdobeScraperService.scrapeAdobeTargetExperiments(
-          targetUrl,
-          null,
-          { browserInstance: browser }
-        );
-        const adobeTargetData = scrapeResult.adobeTarget || scrapeResult.data?.adobeTarget || {};
+        try {
+          const scrapeResult = await AdobeScraperService.scrapeAdobeTargetExperiments(
+            targetUrl,
+            null,
+            { browserInstance: browser }
+          );
+          const adobeTargetData = scrapeResult.adobeTarget || scrapeResult.data?.adobeTarget || {};
 
-        results.push({
-          success: true,
-          url: targetUrl,
-          adobeTargetData
-        });
-      } catch (error) {
-        results.push({
-          success: false,
-          url: targetUrl,
-          error: error.message || 'Unknown scraping error'
-        });
-      }
+          results.push({
+            success: true,
+            url: targetUrl,
+            companyName: normalizedEntry.companyName || null,
+            adobeTargetData
+          });
+        } catch (error) {
+          results.push({
+            success: false,
+            url: targetUrl,
+            companyName: normalizedEntry.companyName || null,
+            error: error.message || 'Unknown scraping error'
+          });
+        }
     }
 
     return results;
@@ -944,6 +986,71 @@ class AdobeTarget1_0Service {
         .replace(/^https?:\/\//i, '')
         .split('/')[0]
         .replace(/^www\./i, '');
+    }
+  }
+
+  buildValidationRecord({ url, companyName, status, adobeTargetData = {}, error = null }) {
+    const activityIds = adobeTargetData.activityIds || [];
+    const activityNames = adobeTargetData.activityNames || [];
+    const experiments = adobeTargetData.experiments || [];
+    const detectionDetails = Object.keys(adobeTargetData).length > 0 ? {
+      activityIds,
+      activityNames,
+      experiments,
+      experimentCount: adobeTargetData.experimentCount ||
+        experiments.length ||
+        activityIds.length ||
+        0,
+      mboxVersion: adobeTargetData.version || null,
+      detectedExplicitly: adobeTargetData.detected === true,
+      captchaDetected: adobeTargetData.captchaDetected === true,
+      error: adobeTargetData.error || null
+    } : undefined;
+
+    return {
+      url,
+      companyName: companyName || null,
+      status,
+      detectionDetails,
+      scrapedAt: new Date(),
+      error: error || null
+    };
+  }
+
+  async saveValidationBatchDocument({
+    datasetId,
+    datasetName,
+    batchNumber,
+    totalBatches,
+    totalUrls,
+    positives,
+    negatives,
+    failures
+  }) {
+    try {
+      await AdobeTargetValidationDocument.findOneAndUpdate(
+        { datasetId, batchNumber },
+        {
+          datasetId,
+          datasetName,
+          batchNumber,
+          totalBatches,
+          totalUrls,
+          positiveCount: positives.length,
+          negativeCount: negatives.length,
+          failedCount: failures.length,
+          detectionRate: totalUrls > 0
+            ? Number(((positives.length / totalUrls) * 100).toFixed(2))
+            : 0,
+          processedAt: new Date(),
+          positiveUrls: positives,
+          negativeUrls: negatives,
+          failedUrls: failures
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } catch (error) {
+      console.error('❌ Error saving Adobe Target validation batch document:', error.message);
     }
   }
 }

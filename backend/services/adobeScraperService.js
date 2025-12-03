@@ -79,17 +79,6 @@ class AdobeScraperService {
             browser = await launchBrowser();
             page = await createPage(browser);
 
-            // Track HTTP status code only
-            // page.on('response', (response) => {
-            //     try {
-            //         if (!documentStatusCode && response.request().resourceType() === 'document') {
-            //             documentStatusCode = response.status();
-            //         }
-            //     } catch (responseError) {
-            //         console.warn('Error processing response for status code:', responseError.message);
-            //     }
-            // });
-
             await navigateToPage(page, url);
 
             const captchaCheck = await detectCaptcha(page);
@@ -102,17 +91,8 @@ class AdobeScraperService {
                 };
             }
 
-            // const cookieHandlingResult = await handleCookieConsent(page);
-
-            // if (cookieHandlingResult === 'context_destroyed') {
-            //     try {
-            //         await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 });
-            //     } catch (navError) {
-            //         console.warn('Navigation wait after cookie consent failed:', navError.message);
-            //     }
-            // }
-
-            await new Promise(resolve => setTimeout(resolve, 3500));
+            const cookieHandlingResult = await handleCookieConsent(page);
+            await new Promise(resolve => setTimeout(resolve, 5000));
 
             // Use the more efficient page evaluation that checks window.adobe.target['VERSION']
             const adobeTargetData = await page.evaluate(() => {
@@ -249,7 +229,7 @@ class AdobeScraperService {
             // Handle cookie consent with detection
             const cookieType = await handleCookieConsent(page);
             await new Promise(resolve => setTimeout(resolve, 4000));
-            console.log('avinash - the scrapping reached here');
+            // console.log('avinash - the scrapping reached here');
             // Extract adobeTarget data with intelligent waiting
             // TODO
             const experimentData = await this.extractAdobeTargetData(page);
@@ -473,7 +453,7 @@ class AdobeScraperService {
                 });
 
                 // Reload the page to trigger Adobe Target requests AFTER listener is set up
-                await page.reload({waitUntil: 'domcontentloaded'});
+                // await page.reload({waitUntil: 'domcontentloaded'});
 
                 // Wait for mbox data (with timeout)
                 mboxResponseData = await mboxDataPromise;

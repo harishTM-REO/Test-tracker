@@ -102,7 +102,7 @@ const launchBrowser = async (fallbackOptions = {}) => {
 
             const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
             let browserOptions = {
-                headless: false,
+                headless: true,
                 ignoreHTTPSErrors: true,
                 protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
                 args: [
@@ -175,7 +175,7 @@ const createPage = async (browser) => {
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             const resourceType = req.resourceType();
-            if (['image', 'stylesheet', 'font'].includes(resourceType)) {
+            if (['image','font'].includes(resourceType)) {
                 req.abort();
             } else {
                 req.continue();
