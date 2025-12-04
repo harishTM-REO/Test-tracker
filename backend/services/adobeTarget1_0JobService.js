@@ -122,6 +122,87 @@ class AdobeTarget1_0JobService {
   }
 
   /**
+   * Start re-scraping experiments from existing top 25 URLs
+   * @param {string} datasetId - MongoDB dataset ID
+   * @param {Array} urlsToRescrape - Array of { originalUrl, top25Urls }
+   * @param {string} userId - Optional user ID who triggered this
+   * @returns {Promise<{success: boolean, jobId?: string, message: string}>}
+   */
+  static async startRescraping(datasetId, urlsToRescrape, userId = null) {
+    try {
+      console.log(`\n🔄 Starting Adobe Target 1.0 re-scraping for dataset: ${datasetId}`);
+
+      // Fetch dataset details
+      const dataset = await Dataset.findById(datasetId);
+
+      if (!dataset) {
+        throw new Error(`Dataset not found: ${datasetId}`);
+      }
+
+      console.log(`📊 Dataset: ${dataset.name}`);
+      console.log(`📋 Companies: ${urlsToRescrape.length}`);
+      console.log(`🔧 Total URLs to re-scrape: ${urlsToRescrape.reduce((sum, c) => sum + c.top25Urls.length, 0)}`);
+
+      // Mark dataset as pending
+      dataset.scrapingStatus = 'pending';
+      dataset.scrapingError = null;
+      dataset.scrapingStartedAt = null;
+      dataset.scrapingCompletedAt = null;
+      dataset.scrapingLastUpdate = new Date();
+      await dataset.save();
+      console.log('⏱️ Dataset marked as pending while AT 1.0 re-scraping initializes');
+
+      // Call AT 1.0 worker service to initiate re-scraping
+      const workerServiceUrl = `${this.getWorkerUrl()}/at10/api/rescrape-experiments`;
+
+      console.log(`🔗 Calling AT 1.0 re-scrape endpoint: ${workerServiceUrl}`);
+
+      const response = await axios.post(workerServiceUrl, {
+        datasetId: datasetId,
+        datasetName: dataset.name,
+        urlsToRescrape: urlsToRescrape,
+        userId: userId,
+        options: {
+          concurrency: parseInt(process.env.AT10_CONCURRENCY) || 4
+        }
+      }, {
+        timeout: 30000
+      });
+
+      if (!response.data.success) {
+        throw new Error(response.data.message || 'Failed to initiate AT 1.0 re-scraping');
+      }
+
+      console.log(`✅ AT 1.0 re-scraping job initiated successfully`);
+      console.log(`   Job ID: ${response.data.jobId}`);
+      console.log(`   Status: ${response.data.status}`);
+
+      return {
+        success: true,
+        jobId: response.data.jobId,
+        message: response.data.message
+      };
+
+    } catch (error) {
+      console.error(`❌ Failed to start AT 1.0 re-scraping:`, error.message);
+
+      if (error.response) {
+        console.error(`   HTTP Status: ${error.response.status}`);
+        console.error(`   Response: ${JSON.stringify(error.response.data)}`);
+      } else if (error.request) {
+        console.error(`   No response received from AT 1.0 worker`);
+        console.error(`   Make sure the AT 1.0 worker service is running at ${this.getWorkerUrl()}`);
+      }
+
+      return {
+        success: false,
+        jobId: null,
+        message: error.message
+      };
+    }
+  }
+
+  /**
    * Get status of an AT 1.0 scraping job
    * @param {string} jobId - Job ID from AT 1.0 worker
    * @returns {Promise<Object>}

@@ -78,6 +78,87 @@ router.post('/scrape', async (req, res) => {
 });
 
 /**
+ * POST /at10/api/rescrape-experiments
+ * Re-scrape experiments from existing top 25 URLs
+ *
+ * Request body:
+ * {
+ *   "datasetId": "ObjectId",
+ *   "datasetName": "string",
+ *   "urlsToRescrape": [
+ *     {
+ *       "originalUrl": "https://acme.com",
+ *       "top25Urls": [
+ *         { "url": "https://acme.com", "category": "Homepage", "priority": 100 },
+ *         { "url": "https://acme.com/products", "category": "Product Listing", "priority": 90 },
+ *         ...
+ *       ]
+ *     },
+ *     ...
+ *   ],
+ *   "userId": "user123",
+ *   "options": {
+ *     "concurrency": 4
+ *   }
+ * }
+ */
+router.post('/rescrape-experiments', async (req, res) => {
+  try {
+    const { datasetId, datasetName, urlsToRescrape, userId, options = {} } = req.body;
+
+    console.log(`\n🔄 Received AT 1.0 re-scraping request`);
+    console.log(`   Dataset: ${datasetName} (${datasetId})`);
+    console.log(`   Companies to re-scrape: ${urlsToRescrape?.length || 0}`);
+    console.log(`   Total URLs: ${urlsToRescrape?.reduce((sum, c) => sum + c.top25Urls.length, 0) || 0}`);
+
+    // Validate input
+    if (!datasetId || !datasetName || !urlsToRescrape || urlsToRescrape.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: datasetId, datasetName, urlsToRescrape (non-empty array)'
+      });
+    }
+
+    // Create job
+    const jobId = jobQueue.createJob('adobe-target-1.0-rescraping', {
+      datasetId,
+      datasetName,
+      urlsToRescrape,
+      userId,
+      options: {
+        concurrency: options.concurrency || 4
+      }
+    });
+
+    const job = jobQueue.getJob(jobId);
+
+    console.log(`   Job created: ${jobId}`);
+    console.log(`   Status: ${job?.status || 'pending'}`);
+
+    res.status(202).json({
+      success: true,
+      message: 'Adobe Target 1.0 re-scraping job initiated',
+      jobId: jobId,
+      status: job?.status || 'pending',
+      dataset: {
+        id: datasetId,
+        name: datasetName,
+        companiesCount: urlsToRescrape.length,
+        totalUrlsCount: urlsToRescrape.reduce((sum, c) => sum + c.top25Urls.length, 0)
+      }
+    });
+
+  } catch (error) {
+    console.error('Error initiating AT 1.0 re-scraping job:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initiate re-scraping job',
+      error: error.message
+    });
+  }
+});
+
+/**
  * @route POST /at10/api/validation
  * @desc  Validate Adobe Target presence for a dataset's URLs
  */

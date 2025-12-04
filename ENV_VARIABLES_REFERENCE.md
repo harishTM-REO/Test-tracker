@@ -142,6 +142,65 @@ AT10_CONCURRENCY=4
 # BATCH_DELAY=2000  # Optional, has built-in defaults
 ```
 
+### **Browser Pool Configuration**
+```env
+# ========== BROWSER POOL SETTINGS ==========
+# Size of the browser pool (number of reusable browser instances)
+# Recommended: 2-3 for Railway, 4-5 for high-resource servers
+BROWSER_POOL_SIZE=2
+
+# Maximum pages before individual browser restart
+# Lower values = more frequent restarts = more stable but slower
+# Higher values = less frequent restarts = faster but may accumulate issues
+# Recommended: 40-50 for Adobe Target validation
+MAX_PAGES_BEFORE_RESTART=40
+
+# ========== PERIODIC POOL REFRESH ==========
+# SIMPLEST STARTING POINT: Clear and recreate entire pool periodically
+# Prevents accumulated degradation and ensures consistent performance
+
+# Refresh pool after N minutes (0 = disabled)
+# Recommended: 10-15 minutes for long-running validation jobs
+# Set to 0 to disable time-based refresh
+POOL_REFRESH_AFTER_MINUTES=10
+
+# Refresh pool after N URLs processed (0 = disabled)
+# Recommended: 200-300 URLs for validation workloads
+# Set to 0 to disable URL count-based refresh
+POOL_REFRESH_AFTER_URLS=200
+
+# Note: If both are set, pool refreshes when EITHER threshold is reached
+# If both are 0, periodic refresh is completely disabled (uses individual browser restarts only)
+```
+
+### **Adobe Target Validation Configuration**
+```env
+# ========== VALIDATION BATCH SETTINGS ==========
+# These override defaults specifically for Adobe Target validation
+
+# Batch size for validation (URLs per chunk)
+# Recommended: 10-25 for Railway, 25-50 for high-resource servers
+ADOBE_VALIDATION_BATCH_SIZE=25
+
+# Concurrent browsers during validation
+# Recommended: 2-3 (matches BROWSER_POOL_SIZE)
+ADOBE_VALIDATION_CONCURRENT=2
+
+# Max pages before restart DURING VALIDATION
+# Can be different from MAX_PAGES_BEFORE_RESTART
+# Recommended: Lower than general setting for validation (30-40)
+ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART=40
+
+# Proactive browser health check interval (every N chunks)
+# Recommended: 5 chunks
+RESTART_BROWSER_EVERY_N_CHUNKS=5
+
+# Chunk processing timeout (milliseconds)
+# Set to 0 to disable (relies on health checks instead)
+# Recommended: 0 (disabled) or 300000 (5 minutes)
+CHUNK_PROCESSING_TIMEOUT=0
+```
+
 ### **Logging**
 ```env
 # Log level
@@ -160,6 +219,126 @@ SENTRY_DSN=https://your-key@sentry.io/project-id
 # Alternatively, APM service configuration
 # APP_INSIGHTS_KEY=your-app-insights-key
 ```
+
+---
+
+## 🔄 Periodic Pool Refresh Configuration Guide
+
+### **What is Periodic Pool Refresh?**
+
+When processing 1000s of URLs for Adobe Target validation, individual browser instances can become degraded over time, leading to:
+- Increased timeouts
+- Browser stuck states
+- Memory leaks
+- Inconsistent results between runs
+
+**Periodic Pool Refresh** solves this by completely clearing and recreating the entire browser pool at regular intervals, giving you a fresh start.
+
+### **How It Works**
+
+1. **Track pool metrics**: Age (minutes) and URLs processed
+2. **Check thresholds**: After each validation chunk
+3. **Refresh when needed**: If either threshold is reached:
+   - Close all browsers gracefully
+   - Reset tracking counters
+   - Launch fresh browser instances
+   - Continue processing with clean slate
+
+### **Configuration Strategies**
+
+#### **Strategy 1: Time-Based Refresh (Recommended)**
+Best for long-running jobs with unpredictable URL counts.
+
+```env
+POOL_REFRESH_AFTER_MINUTES=10
+POOL_REFRESH_AFTER_URLS=0
+```
+
+- Pool refreshes every 10 minutes regardless of URLs processed
+- **Use when**: Running 24/7 validation services or processing unknown dataset sizes
+- **Pros**: Predictable refresh schedule
+- **Cons**: May refresh too early or too late depending on workload
+
+#### **Strategy 2: URL Count-Based Refresh**
+Best for batch jobs with known URL counts.
+
+```env
+POOL_REFRESH_AFTER_MINUTES=0
+POOL_REFRESH_AFTER_URLS=200
+```
+
+- Pool refreshes after every 200 URLs processed
+- **Use when**: Processing fixed-size datasets (e.g., 1000 URLs)
+- **Pros**: Scales with workload intensity
+- **Cons**: Unpredictable timing if URL processing speed varies
+
+#### **Strategy 3: Hybrid (Most Robust)**
+Combines both approaches for maximum reliability.
+
+```env
+POOL_REFRESH_AFTER_MINUTES=15
+POOL_REFRESH_AFTER_URLS=300
+```
+
+- Pool refreshes when **either** threshold is reached (whichever comes first)
+- **Use when**: Production environments with variable workloads
+- **Pros**: Handles both long-running and intensive workloads
+- **Cons**: More configuration to tune
+
+#### **Strategy 4: Disabled (Default)**
+Relies only on individual browser restarts.
+
+```env
+POOL_REFRESH_AFTER_MINUTES=0
+POOL_REFRESH_AFTER_URLS=0
+```
+
+- No periodic refresh (original behavior)
+- Individual browsers restart at `MAX_PAGES_BEFORE_RESTART`
+- **Use when**: Testing or low-volume operations
+- **Pros**: No downtime from pool refresh
+- **Cons**: Gradual pool degradation over time
+
+### **Recommended Settings by Use Case**
+
+| Use Case | Pool Size | Max Pages | Refresh Minutes | Refresh URLs | Rationale |
+|----------|-----------|-----------|-----------------|--------------|-----------|
+| **Railway (32GB)** | 2 | 40 | 10 | 200 | Conservative for limited resources |
+| **High-Resource Server** | 4 | 50 | 15 | 300 | Balanced performance |
+| **Development/Testing** | 2 | 30 | 0 | 0 | Fast restarts, no refresh |
+| **Ultra-Conservative** | 2 | 20 | 5 | 100 | Maximum stability, frequent refresh |
+| **Maximum Performance** | 5 | 60 | 20 | 500 | Minimize refresh overhead |
+
+### **Tuning Guidelines**
+
+1. **Start Conservative**: Use recommended Railway settings
+2. **Monitor Logs**: Look for refresh frequency and timeout patterns
+3. **Adjust Based on Timeouts**:
+   - Many timeouts → Decrease refresh thresholds
+   - No timeouts → Increase refresh thresholds (better performance)
+4. **Balance Downtime vs. Stability**:
+   - Each refresh takes ~5-10 seconds
+   - Refreshing every 50 URLs = high overhead
+   - Refreshing every 500 URLs = better throughput but more risk
+
+### **Monitoring Pool Health**
+
+Check your logs for these indicators:
+
+```
+Good Signs:
+✅ Pool refresh completed - continuing with fresh browsers
+✅ Pool Age: 9.5 minutes
+✅ URLs Processed: 195
+✅ Browser health check completed
+
+Warning Signs:
+⚠️ Browser 3: Unhealthy - Health check timeout
+⚠️ Multiple consecutive [createPage] failures
+⚠️ BROWSER_STUCK_RESTART_REQUIRED errors
+```
+
+If you see many warning signs, **decrease** your refresh thresholds.
 
 ---
 
@@ -207,6 +386,17 @@ CORS_ORIGIN=http://localhost:5173
 # Performance
 AT10_CONCURRENCY=4
 
+# Browser Pool (Development - Disabled Refresh)
+BROWSER_POOL_SIZE=2
+MAX_PAGES_BEFORE_RESTART=40
+POOL_REFRESH_AFTER_MINUTES=0
+POOL_REFRESH_AFTER_URLS=0
+
+# Adobe Target Validation
+ADOBE_VALIDATION_BATCH_SIZE=25
+ADOBE_VALIDATION_CONCURRENT=2
+ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART=40
+
 # Logging
 LOG_LEVEL=debug
 ```
@@ -234,6 +424,19 @@ BACKEND_URL=https://your-main-backend.railway.app
 CORS_ORIGIN=https://your-frontend.railway.app
 AT10_CONCURRENCY=4
 LOG_LEVEL=info
+
+# Browser Pool (Production - Periodic Refresh Enabled)
+BROWSER_POOL_SIZE=2
+MAX_PAGES_BEFORE_RESTART=40
+POOL_REFRESH_AFTER_MINUTES=10
+POOL_REFRESH_AFTER_URLS=200
+
+# Adobe Target Validation
+ADOBE_VALIDATION_BATCH_SIZE=25
+ADOBE_VALIDATION_CONCURRENT=2
+ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART=40
+RESTART_BROWSER_EVERY_N_CHUNKS=5
+CHUNK_PROCESSING_TIMEOUT=0
 ```
 
 ---
@@ -286,6 +489,28 @@ LOG_LEVEL=info
 - **2-4**: Conservative (lower CPU/memory usage)
 - **4-6**: Balanced (recommended for 32GB RAM)
 - **6-8**: Aggressive (requires higher resources)
+
+### **BROWSER_POOL_SIZE**
+- **2**: Conservative (Railway 32GB recommended)
+- **3-4**: Balanced (high-resource servers)
+- **5+**: Aggressive (requires 64GB+ RAM)
+
+### **MAX_PAGES_BEFORE_RESTART**
+- **20-30**: Ultra-conservative (frequent restarts, maximum stability)
+- **40-50**: Balanced (recommended for most use cases)
+- **60+**: Performance-focused (less overhead, more risk of degradation)
+
+### **POOL_REFRESH_AFTER_MINUTES**
+- **0**: Disabled (no time-based refresh)
+- **5-8**: Aggressive (for high-failure-rate scenarios)
+- **10-15**: Balanced (recommended for production)
+- **20+**: Conservative (for stable environments)
+
+### **POOL_REFRESH_AFTER_URLS**
+- **0**: Disabled (no URL count-based refresh)
+- **100-150**: Aggressive (for problematic sites)
+- **200-300**: Balanced (recommended for production)
+- **500+**: Conservative (for high-quality URL lists)
 
 ### **MAX_FILE_SIZE**
 - 50MB = 52428800 bytes (default)

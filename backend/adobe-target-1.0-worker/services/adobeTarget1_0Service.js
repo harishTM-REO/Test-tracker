@@ -38,12 +38,17 @@ class AdobeTarget1_0Service {
         return await AdobeTarget1_0Service.prototype.performScraping.call(new AdobeTarget1_0Service(), jobData, progressCallback);
       });
 
+      // Register the AT 1.0 re-scraping worker
+      jobQueue.registerWorker('adobe-target-1.0-rescraping', async (jobData, progressCallback) => {
+        return await AdobeTarget1_0Service.prototype.performReScraping.call(new AdobeTarget1_0Service(), jobData, progressCallback);
+      });
+
       // Register Adobe Target validation worker
       jobQueue.registerWorker('adobe-target-validation', async (jobData, progressCallback) => {
         return await AdobeTarget1_0Service.prototype.performValidation.call(new AdobeTarget1_0Service(), jobData, progressCallback);
       });
 
-      console.log('✅ Adobe Target 1.0 Service initialized with job queue worker');
+      console.log('✅ Adobe Target 1.0 Service initialized with job queue workers');
     } catch (error) {
       console.error('❌ Failed to initialize AT 1.0 Service:', error);
       throw error;
@@ -127,6 +132,41 @@ class AdobeTarget1_0Service {
         });
 
         try {
+          // Step 0: Quick Adobe Target Detection (NEW!)
+          console.log(`  ➤ Step 0: Quick Adobe Target detection on seed URL...`);
+          const quickDetection = await this.quickDetectAdobeTarget(originalUrl);
+          
+          if (!quickDetection.detected) {
+            console.log(`  ⚠️  No Adobe Target detected on ${originalUrl}. Skipping prioritization and scraping.`);
+            
+            // Create skip workflow result
+            const skipResult = sanitizeWorkflowResult({
+              originalUrl: originalUrl,
+              status: 'skipped',
+              skipReason: 'no_adobe_target_detected',
+              detectionResult: quickDetection,
+              completedAt: new Date(),
+              topUrlsScrapingResults: [],
+              summary: {
+                totalTop25Urls: 0,
+                successfulScrapedUrls: 0,
+                failedScrapedUrls: 0,
+                adobeTargetDetectedInTop25: 0,
+                totalExperimentsInTop25: 0,
+                uniqueExperimentIds: [],
+                uniqueExperimentCount: 0
+              }
+            });
+            
+            result.urlWorkflowResults.push(skipResult);
+            result.overallStats.failedPrioritizations += 1;
+            
+            console.log(`  ⏩ Skipped URL ${i + 1} (no Adobe Target detected)`);
+            continue; // Skip to next URL
+          }
+          
+          console.log(`  ✅ Adobe Target detected! Proceeding with full workflow...`);
+          
           // Step 1: Prioritize URL
           console.log(`  ➤ Step 1: Prioritizing URL...`);
           const prioritizationResult = await this.prioritizeUrl(originalUrl);
@@ -134,7 +174,7 @@ class AdobeTarget1_0Service {
           // Step 2: Categorize URL
           console.log(`  ➤ Step 2: Categorizing prioritized URLs...`);
           const categorizationResult = await this.categorizeUrls(prioritizationResult);
-
+          // "Avinash check here"
           // Step 3: Scrape Adobe Target from top 25
           console.log(`  ➤ Step 3: Scraping Adobe Target from top 25 URLs...`);
           const scrapingResults = await this.scrapeTop25Urls(categorizationResult, options, originalUrl);
@@ -259,6 +299,422 @@ class AdobeTarget1_0Service {
   }
 
   /**
+   * Re-scrape experiments from existing top 25 URLs
+   * Skips prioritization and categorization steps
+   * @param {Object} jobData
+   * @param {Function} progressCallback
+   */
+  async performReScraping(jobData, progressCallback) {
+    const { datasetId, datasetName, urlsToRescrape, userId, options = {} } = jobData;
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🔄 Adobe Target 1.0 Re-scraping Started`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`📊 Dataset: ${datasetName} (${datasetId})`);
+    console.log(`📋 Companies: ${urlsToRescrape.length}`);
+    console.log(`🔧 Total URLs to re-scrape: ${urlsToRescrape.reduce((sum, c) => sum + c.top25Urls.length, 0)}`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    try {
+      // Update dataset status
+      const datasetDoc = await Dataset.findById(datasetId);
+      if (datasetDoc) {
+        datasetDoc.scrapingStatus = 'in_progress';
+        datasetDoc.scrapingLastUpdate = new Date();
+        await datasetDoc.save();
+        console.log('📡 Dataset status marked as in_progress for AT 1.0 re-scraping');
+      }
+
+      // Fetch existing result
+      const existingResult = await AdobeTarget1_0Result.findOne({ datasetId: datasetId });
+      if (!existingResult) {
+        throw new Error('No existing result found. Cannot re-scrape without initial scraping.');
+      }
+
+      // Start new run
+      const newRunNumber = existingResult.startNewRun('rescrape', userId ? 'user' : 'system', userId);
+      await existingResult.save();
+      console.log(`🆕 Started new run: #${newRunNumber}`);
+
+      progressCallback(5, { message: 'Starting re-scraping workflow' });
+
+      const startTime = new Date();
+      const newRunResults = [];
+      const newRunStats = {
+        totalTop25UrlsProcessed: 0,
+        totalTop25UrlsSuccessful: 0,
+        totalTop25UrlsFailed: 0,
+        adobeTargetDetectedCount: 0,
+        totalExperimentsFound: 0,
+        uniqueExperimentIds: []
+      };
+
+      // Process each company sequentially
+      for (let i = 0; i < urlsToRescrape.length; i++) {
+        const companyData = urlsToRescrape[i];
+        const { originalUrl, top25Urls } = companyData;
+        const progress = 5 + Math.floor((i / urlsToRescrape.length) * 85);
+
+        console.log(`\n📍 Re-scraping Company ${i + 1}/${urlsToRescrape.length}: ${originalUrl}`);
+        progressCallback(progress, {
+          message: `Re-scraping company ${i + 1}/${urlsToRescrape.length}`,
+          currentUrl: originalUrl
+        });
+
+        try {
+          // ONLY Step 3: Scrape experiments from existing top 25 URLs
+          console.log(`  ➤ Scraping experiments from ${top25Urls.length} existing URLs...`);
+          
+          const scrapingResults = await this.scrapeUrlsForRescraping(top25Urls, options, originalUrl);
+
+          // Create workflow result entry
+          const workflowResult = sanitizeWorkflowResult({
+            originalUrl: originalUrl,
+            topUrlsScrapingResults: scrapingResults.results,
+            summary: scrapingResults.summary,
+            status: 'completed',
+            completedAt: new Date()
+          });
+
+          // Update stats
+          newRunStats.totalTop25UrlsProcessed += scrapingResults.summary.totalTop25Urls;
+          newRunStats.totalTop25UrlsSuccessful += scrapingResults.summary.successfulScrapedUrls;
+          newRunStats.totalTop25UrlsFailed += scrapingResults.summary.failedScrapedUrls;
+          newRunStats.adobeTargetDetectedCount += scrapingResults.summary.adobeTargetDetectedInTop25;
+          newRunStats.totalExperimentsFound += scrapingResults.summary.totalExperimentsInTop25;
+
+          const aggregatedUniqueIds = new Set(newRunStats.uniqueExperimentIds || []);
+          (scrapingResults.summary.uniqueExperimentIds || []).forEach(id => aggregatedUniqueIds.add(id));
+          newRunStats.uniqueExperimentIds = Array.from(aggregatedUniqueIds);
+
+          newRunResults.push(workflowResult);
+
+          console.log(`  ✅ Company ${i + 1} completed: ${scrapingResults.summary.successfulScrapedUrls}/${scrapingResults.summary.totalTop25Urls} URLs scraped successfully`);
+
+        } catch (error) {
+          console.error(`  ❌ Error re-scraping company ${i + 1}: ${error.message}`);
+
+          const failureResult = sanitizeWorkflowResult({
+            originalUrl: originalUrl,
+            status: 'failed',
+            error: error.message,
+            completedAt: new Date(),
+            topUrlsScrapingResults: []
+          });
+
+          newRunResults.push(failureResult);
+          continue;
+        }
+      }
+
+      // Calculate stats
+      newRunStats.uniqueExperimentsFound = newRunStats.uniqueExperimentIds.length;
+
+      // Compare with previous run
+      const previousRun = existingResult.getRun(newRunNumber - 1);
+      let changes = null;
+
+      if (previousRun && previousRun.stats) {
+        changes = this.detectExperimentChanges(previousRun, newRunStats, newRunResults);
+        console.log(`\n📊 Changes detected:`);
+        console.log(`   New experiments: ${changes.newExperiments.length}`);
+        console.log(`   Removed experiments: ${changes.removedExperiments.length}`);
+      }
+
+      // Complete the run
+      await existingResult.completeRun(newRunNumber, newRunStats, changes);
+      
+      // Update the run's urlWorkflowResults
+      const currentRun = existingResult.getRun(newRunNumber);
+      currentRun.urlWorkflowResults = newRunResults;
+      await existingResult.save();
+
+      const endTime = new Date();
+      const durationMs = endTime - startTime;
+      const durationMinutes = Math.floor(durationMs / 60000);
+      const durationSeconds = Math.floor((durationMs % 60000) / 1000);
+
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`📊 Adobe Target 1.0 Re-scraping Completed`);
+      console.log(`${'='.repeat(60)}`);
+      console.log(`✅ Duration: ${durationMinutes}m ${durationSeconds}s`);
+      console.log(`✅ Run Number: ${newRunNumber}`);
+      console.log(`✅ Total URLs Processed: ${newRunStats.totalTop25UrlsProcessed}`);
+      console.log(`✅ Adobe Target Detected: ${newRunStats.adobeTargetDetectedCount}`);
+      console.log(`✅ Total Experiments Found: ${newRunStats.totalExperimentsFound}`);
+      console.log(`✅ Unique Experiments Found: ${newRunStats.uniqueExperimentsFound}`);
+      if (changes) {
+        console.log(`✅ New Experiments: ${changes.newExperiments.length}`);
+        console.log(`✅ Removed Experiments: ${changes.removedExperiments.length}`);
+      }
+      console.log(`${'='.repeat(60)}\n`);
+
+      progressCallback(100, { message: 'Re-scraping completed successfully' });
+
+      // Mark dataset as completed
+      const completionStats = {
+        totalUrls: newRunStats.totalTop25UrlsProcessed,
+        processedUrls: newRunStats.totalTop25UrlsProcessed,
+        successfulScans: newRunStats.totalTop25UrlsSuccessful,
+        failedScans: newRunStats.totalTop25UrlsFailed,
+        adobeTargetDetected: newRunStats.adobeTargetDetectedCount,
+        totalExperiments: newRunStats.totalExperimentsFound,
+        uniqueExperiments: newRunStats.uniqueExperimentsFound
+      };
+
+      const completedDataset = await Dataset.findById(datasetId);
+      if (completedDataset) {
+        await completedDataset.completeScraping(completionStats);
+        console.log(`✅ Dataset ${datasetId} marked as completed in MongoDB`);
+      }
+
+      return {
+        success: true,
+        message: 'Adobe Target 1.0 re-scraping completed',
+        resultId: existingResult._id,
+        runNumber: newRunNumber,
+        stats: newRunStats,
+        changes: changes
+      };
+
+    } catch (error) {
+      console.error(`❌ Error in AT 1.0 re-scraping:`, error);
+
+      // Mark dataset as failed
+      try {
+        const dataset = await Dataset.findById(datasetId);
+        if (dataset) {
+          await dataset.failScraping(error.message);
+        }
+      } catch (updateError) {
+        console.error('Error updating dataset status:', updateError.message);
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Scrape URLs for re-scraping (no prioritization/categorization needed)
+   */
+  async scrapeUrlsForRescraping(urlsToScrape, options = {}, seedUrl) {
+    const concurrency = options.concurrency || 4;
+    const results = [];
+    const uniqueExperimentIds = new Set();
+    
+    let summary = {
+      totalTop25Urls: urlsToScrape.length,
+      successfulScrapedUrls: 0,
+      failedScrapedUrls: 0,
+      adobeTargetDetectedInTop25: 0,
+      totalExperimentsInTop25: 0,
+      uniqueExperimentCount: 0,
+      uniqueExperimentIds: [],
+      seedUrl: seedUrl || null,
+      seedUrlScraped: false,
+      seedUrlSuccessful: false,
+      seedUrlAdobeTargetDetected: false,
+      seedUrlExperimentCount: 0
+    };
+
+    try {
+      // Process in batches with concurrency control
+      const batches = [];
+      for (let i = 0; i < urlsToScrape.length; i += concurrency) {
+        batches.push(urlsToScrape.slice(i, i + concurrency));
+      }
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        console.log(`    Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} URLs)`);
+
+        const batchPromises = batch.map(urlObj => 
+          this.scrapeUrlForAdobeTarget(urlObj.url, urlObj.category, urlObj.priority, urlObj.isSeedUrl)
+        );
+
+        const batchResults = await Promise.allSettled(batchPromises);
+
+        // Process batch results
+        for (let i = 0; i < batchResults.length; i++) {
+          const result = batchResults[i];
+          const urlObj = batch[i];
+
+          if (result.status === 'fulfilled') {
+            const urlResult = result.value;
+            results.push(urlResult);
+
+            if (urlResult.success) {
+              summary.successfulScrapedUrls++;
+
+              if (urlResult.adobeTargetDetected) {
+                summary.adobeTargetDetectedInTop25++;
+                summary.totalExperimentsInTop25 += urlResult.experimentCount || 0;
+
+                // Track unique experiments
+                if (urlResult.experiments && urlResult.experiments.length > 0) {
+                  urlResult.experiments.forEach(exp => {
+                    if (exp.experimentId) {
+                      uniqueExperimentIds.add(exp.experimentId);
+                    }
+                  });
+                }
+              }
+
+              // Track seed URL stats
+              if (urlObj.isSeedUrl) {
+                summary.seedUrlScraped = true;
+                summary.seedUrlSuccessful = true;
+                summary.seedUrlAdobeTargetDetected = urlResult.adobeTargetDetected;
+                summary.seedUrlExperimentCount = urlResult.experimentCount || 0;
+              }
+            } else {
+              summary.failedScrapedUrls++;
+              if (urlObj.isSeedUrl) {
+                summary.seedUrlScraped = true;
+                summary.seedUrlError = urlResult.error;
+              }
+            }
+          } else {
+            // Rejected promise
+            summary.failedScrapedUrls++;
+            results.push({
+              url: urlObj.url,
+              category: urlObj.category,
+              priority: urlObj.priority,
+              success: false,
+              error: result.reason?.message || 'Unknown error',
+              scrapedAt: new Date()
+            });
+          }
+        }
+      }
+
+      summary.uniqueExperimentIds = Array.from(uniqueExperimentIds);
+      summary.uniqueExperimentCount = uniqueExperimentIds.size;
+
+      return { results, summary };
+
+    } catch (error) {
+      console.error(`    ❌ Error in scrapeUrlsForRescraping:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Detect changes between runs
+   */
+  detectExperimentChanges(previousRun, newRunStats, newRunResults) {
+    const previousExperiments = new Set(previousRun.stats?.uniqueExperimentIds || []);
+    const newExperiments = new Set(newRunStats.uniqueExperimentIds || []);
+
+    const added = [...newExperiments].filter(id => !previousExperiments.has(id));
+    const removed = [...previousExperiments].filter(id => !newExperiments.has(id));
+
+    // Build detailed change info
+    const newExperimentsDetails = [];
+    const removedExperimentsDetails = [];
+
+    // Find details for new experiments
+    for (const expId of added) {
+      for (const urlWorkflow of newRunResults) {
+        for (const urlResult of urlWorkflow.topUrlsScrapingResults || []) {
+          const experiment = (urlResult.experiments || []).find(e => e.experimentId === expId);
+          if (experiment) {
+            newExperimentsDetails.push({
+              experimentId: expId,
+              activityId: experiment.activityId,
+              activityName: experiment.activityName,
+              detectedOn: [urlResult.url]
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    // For removed experiments, we'd need to reference previous run data
+    // For simplicity, just track IDs
+    for (const expId of removed) {
+      removedExperimentsDetails.push({
+        experimentId: expId,
+        activityId: null,
+        activityName: null,
+        lastSeenOn: []
+      });
+    }
+
+    return {
+      newExperiments: newExperimentsDetails,
+      removedExperiments: removedExperimentsDetails,
+      modifiedExperiments: []
+    };
+  }
+
+  /**
+   * Quick Adobe Target detection on seed URL
+   * Uses shared page for speed and efficiency
+   * @param {string} url - URL to check
+   * @returns {Promise<{detected: boolean, version?: string, captchaDetected?: boolean, detectionSource?: object}>}
+   */
+  async quickDetectAdobeTarget(url) {
+    let browser = null;
+    let page = null;
+    
+    try {
+      console.log(`    🔍 Quick detection on: ${url}`);
+      
+      // Get browser from pool
+      browser = await browserPool.getBrowser();
+      page = await createPage(browser);
+      
+      // Use existing detection method from AdobeScraperService
+      const detectionResult = await AdobeScraperService.prototype.detectAdobeTargetPresenceWithSharedPage.call(
+        new AdobeScraperService(),
+        page,
+        url
+      );
+      
+      console.log(`    ${detectionResult.detected ? '✅' : '❌'} Adobe Target ${detectionResult.detected ? 'detected' : 'not detected'}`);
+      
+      // If captcha detected, also return not detected
+      if (detectionResult.captchaDetected) {
+        console.log(`    🚫 Captcha detected, marking as not detected`);
+        return {
+          detected: false,
+          version: null,
+          captchaDetected: true,
+          detectionSource: detectionResult.detectionSource
+        };
+      }
+      
+      return {
+        detected: detectionResult.detected,
+        version: detectionResult.version,
+        captchaDetected: detectionResult.captchaDetected || false,
+        detectionSource: detectionResult.detectionSource
+      };
+      
+    } catch (error) {
+      console.error(`    ❌ Quick detection failed for ${url}:`, error.message);
+      
+      // On error, assume Adobe Target might be present (fail-safe)
+      // Better to waste time than miss experiments
+      console.warn(`    ⚠️  Assuming Adobe Target present due to detection error (fail-safe)`);
+      return {
+        detected: true, // Continue with full workflow if detection fails
+        version: null,
+        captchaDetected: false,
+        detectionSource: { error: error.message, assumedPresent: true }
+      };
+      
+    } finally {
+      if (page) {
+        await closePage(page);
+      }
+    }
+  }
+
+  /**
    * Step 1: Prioritize a single URL
    */
   async prioritizeUrl(url) {
@@ -350,6 +806,7 @@ class AdobeTarget1_0Service {
   /**
    * Step 3: Scrape Adobe Target from top 25 URLs with concurrency control
    */
+  // Avinash scrapping the whole 25 urls at once ->
   async scrapeTop25Urls(categorizationResult, options = {}, seedUrl) {
     const concurrency = options.concurrency || 4; // 4 concurrent URLs
     const results = [];
@@ -746,6 +1203,18 @@ class AdobeTarget1_0Service {
           }
         }
 
+        // Check if periodic pool refresh is needed
+        const refreshCheck = browserPool.shouldRefreshPool();
+        if (refreshCheck.shouldRefresh) {
+          console.log(`\n🔄 Periodic pool refresh needed: ${refreshCheck.reason}`);
+          try {
+            await browserPool.refreshPool();
+            console.log('✅ Pool refresh completed - continuing with fresh browsers\n');
+          } catch (refreshError) {
+            console.error(`⚠️  Pool refresh failed: ${refreshError.message} - continuing with existing pool`);
+          }
+        }
+
         const chunkPositives = [];
         const chunkNegatives = [];
         const chunkFailures = [];
@@ -893,6 +1362,11 @@ class AdobeTarget1_0Service {
 
           scrapingStats.successfulScans += 1;
           scrapingStats.processedUrls += 1;
+        });
+
+        // Track URLs processed in browser pool for refresh logic
+        chunkResults.forEach(() => {
+          browserPool.incrementUrlsProcessed();
         });
 
         processedUrlsCounter = Math.min(scrapingStats.processedUrls, urls.length);

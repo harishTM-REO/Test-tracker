@@ -39,6 +39,15 @@ router.get('/search', datasetController.searchDatasets);
 router.post('/', datasetController.createDataset);
 
 /**
+ * @route   POST /api/datasets/:id/rescrape-experiments
+ * @desc    Re-scrape experiments from existing top 25 URLs
+ * @access  Public
+ * @param   id - Dataset ID
+ * @body    { userId?: string }
+ */
+router.post('/:id/rescrape-experiments', datasetController.rescrapeExperiments);
+
+/**
  * @route   GET /api/datasets/:id
  * @desc    Get dataset by ID
  * @access  Public

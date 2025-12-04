@@ -261,7 +261,83 @@ const adobeTarget1_0ResultSchema = new mongoose.Schema({
       default: Date.now
     },
     processedAt: Date
-  }
+  },
+
+  // Re-scrape runs (for tracking changes over time)
+  runs: [{
+    runNumber: {
+      type: Number,
+      required: true,
+      default: 1
+    },
+    runType: {
+      type: String,
+      enum: ['initial', 'rescrape'],
+      default: 'initial'
+    },
+    startedAt: {
+      type: Date,
+      required: true
+    },
+    completedAt: Date,
+    duration: String,
+    status: {
+      type: String,
+      enum: ['pending', 'in_progress', 'completed', 'failed'],
+      default: 'pending'
+    },
+    
+    // Results for this run
+    urlWorkflowResults: [urlWorkflowResultSchema],
+    
+    // Stats for this run
+    stats: {
+      totalTop25UrlsProcessed: Number,
+      totalTop25UrlsSuccessful: Number,
+      totalTop25UrlsFailed: Number,
+      adobeTargetDetectedCount: Number,
+      totalExperimentsFound: Number,
+      uniqueExperimentsFound: Number,
+      uniqueExperimentIds: [String]
+    },
+    
+    // Changes detected (if comparing with previous run)
+    changes: {
+      newExperiments: [{
+        experimentId: String,
+        activityId: String,
+        activityName: String,
+        detectedOn: [String] // URLs where found
+      }],
+      removedExperiments: [{
+        experimentId: String,
+        activityId: String,
+        activityName: String,
+        lastSeenOn: [String]
+      }],
+      modifiedExperiments: [{
+        experimentId: String,
+        changes: String
+      }]
+    },
+    
+    // Metadata
+    triggeredBy: {
+      type: String,
+      enum: ['user', 'cron', 'system'],
+      default: 'user'
+    },
+    triggeredByUserId: String
+  }],
+
+  // Current/latest run number
+  currentRunNumber: {
+    type: Number,
+    default: 1
+  },
+
+  // Last rescrape timestamp
+  lastRescrapedAt: Date
 }, {
   timestamps: true,
   collection: 'adobetarget1_0results'
@@ -303,6 +379,114 @@ adobeTarget1_0ResultSchema.methods.getSummary = function() {
     adobeTargetDetectionRate: this.getAdobeTargetDetectionRate(),
     duration: this.duration,
     status: this.status
+  };
+};
+
+// Re-scrape run management methods
+adobeTarget1_0ResultSchema.methods.startNewRun = function(runType = 'rescrape', triggeredBy = 'user', userId = null) {
+  const newRunNumber = this.currentRunNumber + 1;
+  
+  const newRun = {
+    runNumber: newRunNumber,
+    runType: runType,
+    startedAt: new Date(),
+    status: 'in_progress',
+    triggeredBy: triggeredBy,
+    triggeredByUserId: userId,
+    urlWorkflowResults: [],
+    stats: {
+      totalTop25UrlsProcessed: 0,
+      totalTop25UrlsSuccessful: 0,
+      totalTop25UrlsFailed: 0,
+      adobeTargetDetectedCount: 0,
+      totalExperimentsFound: 0,
+      uniqueExperimentsFound: 0,
+      uniqueExperimentIds: []
+    },
+    changes: {
+      newExperiments: [],
+      removedExperiments: [],
+      modifiedExperiments: []
+    }
+  };
+  
+  this.runs.push(newRun);
+  this.currentRunNumber = newRunNumber;
+  this.lastRescrapedAt = new Date();
+  
+  return newRunNumber;
+};
+
+adobeTarget1_0ResultSchema.methods.completeRun = function(runNumber, stats, changes = null) {
+  const run = this.runs.find(r => r.runNumber === runNumber);
+  
+  if (!run) {
+    throw new Error(`Run ${runNumber} not found`);
+  }
+  
+  run.status = 'completed';
+  run.completedAt = new Date();
+  run.stats = stats;
+  
+  if (changes) {
+    run.changes = changes;
+  }
+  
+  // Calculate duration
+  const durationMs = run.completedAt - run.startedAt;
+  const durationMinutes = Math.floor(durationMs / 60000);
+  const durationSeconds = Math.floor((durationMs % 60000) / 1000);
+  run.duration = `${durationMinutes}m ${durationSeconds}s`;
+  
+  return this.save();
+};
+
+adobeTarget1_0ResultSchema.methods.getLatestRun = function() {
+  if (!this.runs || this.runs.length === 0) {
+    return null;
+  }
+  return this.runs[this.runs.length - 1];
+};
+
+adobeTarget1_0ResultSchema.methods.getRun = function(runNumber) {
+  return this.runs.find(r => r.runNumber === runNumber);
+};
+
+adobeTarget1_0ResultSchema.methods.compareRuns = function(runNumber1, runNumber2) {
+  const run1 = this.getRun(runNumber1);
+  const run2 = this.getRun(runNumber2);
+  
+  if (!run1 || !run2) {
+    throw new Error('One or both runs not found');
+  }
+  
+  const experiments1 = new Set(run1.stats.uniqueExperimentIds || []);
+  const experiments2 = new Set(run2.stats.uniqueExperimentIds || []);
+  
+  const newExperiments = [...experiments2].filter(id => !experiments1.has(id));
+  const removedExperiments = [...experiments1].filter(id => !experiments2.has(id));
+  const unchangedExperiments = [...experiments1].filter(id => experiments2.has(id));
+  
+  return {
+    run1: {
+      runNumber: run1.runNumber,
+      completedAt: run1.completedAt,
+      totalExperiments: experiments1.size
+    },
+    run2: {
+      runNumber: run2.runNumber,
+      completedAt: run2.completedAt,
+      totalExperiments: experiments2.size
+    },
+    comparison: {
+      newExperiments: newExperiments,
+      newCount: newExperiments.length,
+      removedExperiments: removedExperiments,
+      removedCount: removedExperiments.length,
+      unchangedExperiments: unchangedExperiments,
+      unchangedCount: unchangedExperiments.length,
+      totalChange: newExperiments.length + removedExperiments.length
+    }
   };
 };
 

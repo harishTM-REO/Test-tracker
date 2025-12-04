@@ -523,6 +523,101 @@ const datasetController = {
     });
   },
 
+  // POST /api/datasets/:id/rescrape-experiments
+  rescrapeExperiments: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { userId } = req.body; // Optional: for tracking who triggered it
+
+      console.log(`\n🔄 Received re-scrape request for dataset: ${id}`);
+
+      // 1. Fetch dataset
+      const dataset = await Dataset.findById(id);
+      if (!dataset) {
+        return res.status(404).json({
+          success: false,
+          message: 'Dataset not found'
+        });
+      }
+
+      // 2. Validate dataset has AT 1.0 results
+      const AdobeTarget1_0Result = require('../models/AdobeTarget1_0Result');
+      const existingResult = await AdobeTarget1_0Result.findOne({ datasetId: id });
+
+      if (!existingResult) {
+        return res.status(404).json({
+          success: false,
+          message: 'No existing Adobe Target 1.0 results found for this dataset. Please run initial scraping first.'
+        });
+      }
+
+      // 3. Extract top 25 URLs from existing results
+      const urlsToRescrape = [];
+      
+      for (const urlWorkflow of existingResult.urlWorkflowResults) {
+        const companyData = {
+          originalUrl: urlWorkflow.originalUrl,
+          top25Urls: []
+        };
+
+        // Get the top 25 URLs that were scraped
+        if (urlWorkflow.topUrlsScrapingResults && urlWorkflow.topUrlsScrapingResults.length > 0) {
+          companyData.top25Urls = urlWorkflow.topUrlsScrapingResults.map(result => ({
+            url: result.url,
+            category: result.category,
+            priority: result.priority,
+            isSeedUrl: result.isSeedUrl || false
+          }));
+        }
+
+        urlsToRescrape.push(companyData);
+      }
+
+      console.log(`📊 Found ${urlsToRescrape.length} companies with ${urlsToRescrape.reduce((sum, c) => sum + c.top25Urls.length, 0)} URLs to re-scrape`);
+
+      // 4. Update dataset status
+      dataset.scrapingStatus = 'pending';
+      dataset.scrapingError = null;
+      dataset.scrapingLastUpdate = new Date();
+      await dataset.save();
+
+      // 5. Call AT 1.0 Worker re-scrape endpoint
+      const AdobeTarget1_0JobService = require('../services/adobeTarget1_0JobService');
+      const result = await AdobeTarget1_0JobService.startRescraping(id, urlsToRescrape, userId);
+
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to initiate re-scraping',
+          error: result.message
+        });
+      }
+
+      console.log(`✅ Re-scraping initiated successfully. Job ID: ${result.jobId}`);
+
+      res.status(202).json({
+        success: true,
+        message: 'Re-scraping initiated successfully',
+        data: {
+          datasetId: id,
+          datasetName: dataset.name,
+          jobId: result.jobId,
+          companiesCount: urlsToRescrape.length,
+          totalUrlsToRescrape: urlsToRescrape.reduce((sum, c) => sum + c.top25Urls.length, 0),
+          runNumber: existingResult.currentRunNumber + 1
+        }
+      });
+
+    } catch (error) {
+      console.error('Error in rescrapeExperiments:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to initiate re-scraping',
+        error: error.message
+      });
+    }
+  },
+
   // DELETE /api/datasets/:id
   deleteDataset: async (req, res) => {
     try {

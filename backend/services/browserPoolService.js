@@ -41,12 +41,18 @@ class BrowserPoolService {
     this.pageCountPerBrowser = new Map();
     this.maxPagesBeforeRestart = parseInt(process.env.MAX_PAGES_BEFORE_RESTART) || 30;
 
+    // Pool lifecycle tracking for periodic refresh
+    this.poolCreatedAt = null;
+    this.totalUrlsProcessed = 0;
+    this.lastRefreshAt = null;
+
     this.stats = {
       totalBrowsersCreated: 0,
       totalBrowsersClosed: 0,
       totalAcquisitions: 0,
       totalReleases: 0,
-      totalBrowserRestarts: 0
+      totalBrowserRestarts: 0,
+      totalPoolRefreshes: 0
     };
 
     console.log(`🌐 BrowserPoolService initialized with pool size: ${poolSize}, max pages before restart: ${this.maxPagesBeforeRestart}`);
@@ -106,6 +112,8 @@ class BrowserPoolService {
       }
   
       this.isInitialized = true;
+      this.poolCreatedAt = Date.now();
+      this.lastRefreshAt = Date.now();
       console.log(`\n✅ Browser pool initialized successfully with ${this.poolSize} browsers\n`);
     } catch (error) {
       console.error('❌ Failed to initialize browser pool:', error.message);
@@ -437,11 +445,14 @@ class BrowserPoolService {
       inUse: this.busyBrowsers.size,
       waiting: this.waitingQueue.length,
       isInitialized: this.isInitialized,
+      poolAgeMinutes: this.getPoolAgeMinutes(),
+      totalUrlsProcessed: this.totalUrlsProcessed,
       totalAcquisitions: this.stats.totalAcquisitions,
       totalReleases: this.stats.totalReleases,
       totalBrowsersCreated: this.stats.totalBrowsersCreated,
       totalBrowsersClosed: this.stats.totalBrowsersClosed,
       totalBrowserRestarts: this.stats.totalBrowserRestarts,
+      totalPoolRefreshes: this.stats.totalPoolRefreshes,
       maxPagesBeforeRestart: this.maxPagesBeforeRestart,
       browserPageCounts: browserPageCounts
     };
@@ -452,15 +463,19 @@ class BrowserPoolService {
    */
   printStats() {
     const stats = this.getStats();
+    const poolAgeMinutes = stats.poolAgeMinutes || 0;
     console.log('\n📊 Browser Pool Statistics:');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log(`   Pool Size:              ${stats.poolSize}`);
     console.log(`   Available:              ${stats.available}/${stats.poolSize}`);
     console.log(`   In Use:                 ${stats.inUse}`);
     console.log(`   Waiting in Queue:       ${stats.waiting}`);
+    console.log(`   Pool Age:               ${poolAgeMinutes.toFixed(1)} minutes`);
+    console.log(`   URLs Processed:         ${stats.totalUrlsProcessed}`);
     console.log(`   Total Acquisitions:     ${stats.totalAcquisitions}`);
     console.log(`   Total Releases:         ${stats.totalReleases}`);
     console.log(`   Total Restarts:         ${stats.totalBrowserRestarts}`);
+    console.log(`   Total Pool Refreshes:   ${stats.totalPoolRefreshes}`);
     console.log(`   Max Pages per Browser:  ${stats.maxPagesBeforeRestart}`);
     console.log('   Browser Page Counts:');
     for (const [browser, pageCount] of Object.entries(stats.browserPageCounts)) {
@@ -468,6 +483,107 @@ class BrowserPoolService {
       console.log(`      ${indicator} ${browser}: ${pageCount}/${stats.maxPagesBeforeRestart}`);
     }
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+  }
+
+  /**
+   * Increment URLs processed counter (called after successful URL processing)
+   */
+  incrementUrlsProcessed() {
+    this.totalUrlsProcessed++;
+  }
+
+  /**
+   * Get pool age in minutes
+   */
+  getPoolAgeMinutes() {
+    if (!this.poolCreatedAt) return 0;
+    return (Date.now() - this.poolCreatedAt) / 60000;
+  }
+
+  /**
+   * Check if pool should be refreshed based on age or URLs processed
+   * @returns {Object} { shouldRefresh: boolean, reason: string }
+   */
+  shouldRefreshPool() {
+    // Get configuration from environment variables
+    const refreshAfterMinutes = parseInt(process.env.POOL_REFRESH_AFTER_MINUTES) || 0; // 0 = disabled
+    const refreshAfterUrls = parseInt(process.env.POOL_REFRESH_AFTER_URLS) || 0; // 0 = disabled
+
+    // If both are 0, feature is disabled
+    if (refreshAfterMinutes === 0 && refreshAfterUrls === 0) {
+      return { shouldRefresh: false, reason: 'Periodic refresh disabled' };
+    }
+
+    const poolAgeMinutes = this.getPoolAgeMinutes();
+
+    // Check age-based refresh
+    if (refreshAfterMinutes > 0 && poolAgeMinutes >= refreshAfterMinutes) {
+      return {
+        shouldRefresh: true,
+        reason: `Pool age (${poolAgeMinutes.toFixed(1)} min) >= threshold (${refreshAfterMinutes} min)`
+      };
+    }
+
+    // Check URL count-based refresh
+    if (refreshAfterUrls > 0 && this.totalUrlsProcessed >= refreshAfterUrls) {
+      return {
+        shouldRefresh: true,
+        reason: `URLs processed (${this.totalUrlsProcessed}) >= threshold (${refreshAfterUrls})`
+      };
+    }
+
+    return { shouldRefresh: false, reason: 'Thresholds not reached' };
+  }
+
+  /**
+   * Perform full pool refresh: close all browsers and recreate fresh pool
+   * This provides a clean slate and prevents accumulated degradation
+   */
+  async refreshPool() {
+    console.log('\n🔄 PERIODIC POOL REFRESH TRIGGERED');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`   Pool Age: ${this.getPoolAgeMinutes().toFixed(1)} minutes`);
+    console.log(`   URLs Processed: ${this.totalUrlsProcessed}`);
+    console.log(`   Status: Closing all browsers and recreating pool...`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+    const refreshStartTime = Date.now();
+
+    try {
+      // Step 1: Close all browsers
+      await this.closeAll();
+      console.log('✅ All browsers closed');
+
+      // Step 2: Reset URL counter (new pool, new count)
+      this.totalUrlsProcessed = 0;
+
+      // Step 3: Reinitialize pool with fresh browsers
+      await this.initialize();
+      console.log('✅ Pool reinitialized with fresh browsers');
+
+      // Step 4: Update stats
+      this.stats.totalPoolRefreshes++;
+      this.lastRefreshAt = Date.now();
+
+      const refreshDuration = Date.now() - refreshStartTime;
+      console.log('\n🎉 POOL REFRESH COMPLETED');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log(`   Duration: ${(refreshDuration / 1000).toFixed(1)}s`);
+      console.log(`   Total Refreshes: ${this.stats.totalPoolRefreshes}`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      return { success: true, duration: refreshDuration };
+    } catch (error) {
+      console.error('❌ Pool refresh failed:', error.message);
+      // Try to recover by at least initializing the pool
+      try {
+        await this.initialize();
+        console.log('⚠️  Recovered by reinitializing pool');
+      } catch (recoverError) {
+        console.error('❌ Failed to recover pool:', recoverError.message);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -495,6 +611,7 @@ class BrowserPoolService {
       this.busyBrowsers.clear();
       this.waitingQueue = [];
       this.isInitialized = false;
+      this.poolCreatedAt = null;
 
       console.log('✅ All browsers closed successfully\n');
     } catch (error) {
