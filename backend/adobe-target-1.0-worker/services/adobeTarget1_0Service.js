@@ -1050,6 +1050,19 @@ class AdobeTarget1_0Service {
     try {
       progressCallback(5, { message: 'Starting Adobe Target validation run' });
 
+      // ========== JOB-LEVEL POOL REFRESH ==========
+      // CRITICAL: Refresh pool at the start of EACH validation job
+      // This ensures complete isolation between datasets uploaded back-to-back
+      // Prevents Run 2 from inheriting degraded state from Run 1
+      console.log('\n🔄 NEW VALIDATION JOB - Refreshing browser pool for isolation');
+      try {
+        await browserPool.refreshPool();
+        console.log('✅ Pool refreshed successfully - starting with fresh browsers\n');
+      } catch (refreshError) {
+        console.warn(`⚠️  Pool refresh failed: ${refreshError.message} - continuing with existing pool`);
+        // Non-fatal: continue with existing pool rather than failing the job
+      }
+
       datasetDoc = await Dataset.findById(datasetId);
       if (datasetDoc) {
         const initialStats = {
