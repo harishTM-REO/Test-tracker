@@ -507,7 +507,7 @@ class OptimizelyScraperService {
   }
 
   /**
-   * Enhanced cookie consent handling using your working approach
+   * Enhanced consent handling using your working approach
    * @param {Object} page - Puppeteer page instance
    * @returns {string} Cookie type detected
    */

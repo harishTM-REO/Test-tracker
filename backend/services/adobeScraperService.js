@@ -11,6 +11,19 @@ const {
     navigateToPage
 } = require('../utils/helper');
 const browserPool = require('./browserPoolService');
+
+// Import batch processing helpers for advanced batch operations
+const {
+  performMemoryCleanup,
+  ensureDBConnection,
+  monitorDBHealth,
+  generateBatchCompletionReport,
+  finalizeStreamingSave,
+  getOptimalBatchSettings,
+  distributeUrlsAcrossBrowsers
+} = require('./utils/batchProcessingHelpers');
+
+const { saveResultsStreamingBatch } = require('./utils/streamingSaveHelper');
 let puppeteer;
 try {
     puppeteer = require('puppeteer');
@@ -3114,6 +3127,274 @@ class AdobeScraperService {
         } catch (error) {
             return url;
         }
+    }
+
+    /**
+     * ADVANCED: Batch scrape URLs with browser pooling, memory management, and streaming saves
+     * This method applies all the optimizations from Optimizely for large-scale processing
+     * Use this for processing 1000+ URLs efficiently
+     * 
+     * @param {Array} urls - Array of URLs to scrape
+     * @param {Object} options - Scraping options
+     * @returns {Object} Scraping summary
+     */
+    async batchScrapeUrlsAdvanced(urls, options = {}) {
+      const AdobeResult = require('../models/AdobeResult');
+      
+      // Get optimal settings or use provided options
+      const optimalSettings = getOptimalBatchSettings(urls.length);
+      const {
+        concurrent = optimalSettings.concurrent,
+        batchSize = optimalSettings.batchSize,
+        delay = optimalSettings.delay,
+        datasetId = null,
+        datasetName = 'Adobe Target Dataset'
+      } = options;
+
+      if (!datasetId) {
+        throw new Error('datasetId is required for batch scraping');
+      }
+
+      const startTime = new Date();
+      
+      // ========== PRE-FLIGHT CHECKS ==========
+      console.log(`\n${'='.repeat(60)}`);
+      console.log('🔍 PRE-FLIGHT CHECKS');
+      console.log(`${'='.repeat(60)}`);
+
+      try {
+        await ensureDBConnection(batchSize, AdobeResult);
+        const dbHealth = await monitorDBHealth(AdobeResult);
+        if (!dbHealth.healthy) {
+          throw new Error('Database is not healthy. Cannot proceed with scraping.');
+        }
+      } catch (error) {
+        console.error('❌ PRE-FLIGHT CHECK FAILED:', error.message);
+        throw error;
+      }
+
+      console.log(`${'='.repeat(60)}\n`);
+
+      console.log(`\n🚀 STREAMING SAVE MODE: Saving every chunk immediately (prevents 16MB limit)`);
+      console.log(`Starting Adobe Target batch scrape of ${urls.length} URLs`);
+      console.log(`Config: ${concurrent} concurrent, ${batchSize} batch size\n`);
+
+      const results = [];
+      const saveTasks = [];
+      let totalChunksSaved = 0;
+
+      // Process URLs in chunks
+      for (let i = 0; i < urls.length; i += batchSize) {
+        const chunk = urls.slice(i, i + batchSize);
+        const chunkNumber = Math.floor(i / batchSize) + 1;
+        const totalChunks = Math.ceil(urls.length / batchSize);
+        
+        console.log(`\n📥 Processing chunk ${chunkNumber}/${totalChunks}: URLs ${i + 1}-${Math.min(i + batchSize, urls.length)}`);
+
+        // SCRAPE THIS CHUNK using sequential browser processing
+        const chunkResults = await this.processUrlChunkSequential(chunk, { concurrent });
+        results.push(...chunkResults);
+
+        // ========== BATCH PROGRESS TRACKING ==========
+        const successful = chunkResults.filter(r => r.success).length;
+        const failed = chunkResults.filter(r => !r.success).length;
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`📦 BATCH PROGRESS: ${chunkNumber}/${totalChunks}`);
+        console.log(`   Batch URL range: ${i + 1}-${Math.min(i + batchSize, urls.length)}`);
+        console.log(`   URLs processed: ${chunkResults.length}`);
+        console.log(`   Results: ${successful} ✅ | ${failed} ❌`);
+        console.log(`   Success rate this batch: ${((successful / chunkResults.length) * 100).toFixed(1)}%`);
+        console.log(`${'='.repeat(60)}\n`);
+
+        // ========== CRITICAL: SAVE THIS CHUNK IMMEDIATELY ==========
+        const saveTask = (async () => {
+          try {
+            const saveBatchStart = Date.now();
+            console.log(`💾 Batch ${chunkNumber} MongoDB Save: Starting write for ${chunkResults.length} results...`);
+
+            const saveResult = await saveResultsStreamingBatch(
+              datasetId,
+              datasetName,
+              chunkResults,
+              startTime,
+              urls.length,
+              AdobeResult,
+              this.extractDomain.bind(this),
+              'adobeTargetDetected'
+            );
+
+            const saveDuration = Date.now() - saveBatchStart;
+            totalChunksSaved++;
+
+            console.log(`\n✅ Batch ${chunkNumber} MongoDB Write Complete`);
+            console.log(`   Batch number in DB: ${saveResult.batchNumber}`);
+            console.log(`   Write duration: ${saveDuration}ms`);
+            console.log(`   Results saved: ${chunkResults.length}`);
+            console.log(`   Total batches saved so far: ${totalChunksSaved}/${totalChunks}`);
+            
+            if (saveDuration > 5000) {
+              console.warn(`   ⚠️  Slow write (${saveDuration}ms > 5000ms) - MongoDB may be under load`);
+            }
+
+            return { success: true, chunkNumber, batchNumber: saveResult.batchNumber, duration: saveDuration };
+          } catch (saveError) {
+            console.error(`❌ Chunk ${chunkNumber}: Save failed - ${saveError.message}`);
+            return { success: false, chunkNumber, error: saveError.message };
+          }
+        })();
+
+        saveTasks.push(saveTask);
+
+        // ========== MEMORY CLEANUP BETWEEN CHUNKS ==========
+        if (i + batchSize < urls.length) {
+          await performMemoryCleanup(delay);
+        }
+      }
+
+      // ========== WAIT FOR ALL SAVES TO COMPLETE ==========
+      console.log(`\n⏳ Waiting for all ${saveTasks.length} chunks to save...`);
+      const saveResults = await Promise.allSettled(saveTasks);
+
+      let successfulSaves = 0;
+      const failedChunks = [];
+
+      saveResults.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value.success) {
+          successfulSaves++;
+        } else {
+          failedChunks.push(index + 1);
+        }
+      });
+
+      // ========== FINALIZE: Update totalBatches in all documents ==========
+      try {
+        console.log(`\n🔄 Finalizing batch numbering...`);
+        const totalBatches = await finalizeStreamingSave(datasetId, AdobeResult);
+        console.log(`✅ Finalized: Updated all ${totalBatches} batches with final count`);
+      } catch (finalizeError) {
+        console.error('⚠️  Error finalizing batch count:', finalizeError.message);
+      }
+
+      const endTime = new Date();
+      const successful = results.filter(r => r.success).length;
+      const failed = results.length - successful;
+
+      // ========== GENERATE COMPLETION REPORT ==========
+      generateBatchCompletionReport(
+        'Adobe Target',
+        Math.ceil(urls.length / batchSize),
+        urls.length,
+        successful,
+        failed,
+        startTime,
+        endTime,
+        datasetId
+      );
+
+      return {
+        success: failedChunks.length === 0,
+        totalUrls: urls.length,
+        successfulScrapes: successful,
+        totalChunks: saveTasks.length,
+        successfulChunks: successfulSaves,
+        failedChunks: failedChunks,
+        duration: `${Math.round((endTime - startTime) / 1000)}s`,
+        datasetId: datasetId
+      };
+    }
+
+    /**
+     * Process URL chunk using sequential browser processing (like Optimizely)
+     * Each browser processes its URLs one at a time to prevent memory spikes
+     */
+    async processUrlChunkSequential(urls, options = {}) {
+      const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+      const { concurrent = Math.min(poolSize, 5) } = options;
+      const results = [];
+
+      try {
+        const actualBrowserCount = Math.max(1, Math.min(concurrent, poolSize));
+        console.log(`🌐 Using browser pool (${actualBrowserCount}/${poolSize} browsers) for ${urls.length} URLs`);
+
+        // Distribute URLs across browsers
+        const urlBatches = distributeUrlsAcrossBrowsers(urls, actualBrowserCount, 1);
+
+        // Process each browser's batch using the pool
+        const batchPromises = urlBatches.map(async (urlBatch) => {
+          return browserPool.withBrowser(async (browser) => {
+            return await this.processBrowserBatchSequential(browser, urlBatch);
+          });
+        });
+
+        const batchResults = await Promise.allSettled(batchPromises);
+
+        // Flatten results
+        batchResults.forEach(result => {
+          if (result.status === 'fulfilled' && result.value) {
+            results.push(...result.value);
+          } else if (result.status === 'rejected') {
+            console.error('❌ Batch processing failed:', result.reason?.message || result.reason);
+          }
+        });
+
+      } catch (error) {
+        console.error('Error in processUrlChunkSequential:', error);
+      }
+
+      return results;
+    }
+
+    /**
+     * Process URLs SEQUENTIALLY per browser to prevent memory spikes
+     * Similar to Optimizely's proven approach
+     */
+    async processBrowserBatchSequential(browser, urls) {
+      const results = [];
+
+      try {
+        console.log(`Processing ${urls.length} URLs SEQUENTIALLY in browser batch`);
+
+        for (let i = 0; i < urls.length; i++) {
+          const url = urls[i];
+          let page = null;
+
+          try {
+            console.log(`[${i + 1}/${urls.length}] Processing: ${url}`);
+
+            // Create page
+            page = await createPage(browser);
+            browserPool.incrementPageCount(browser);
+
+            // Scrape using existing method
+            const experimentData = await this.scrapeExperimentsFromPage(url, {
+              sharedPage: page,
+              presenceOnly: false
+            });
+
+            results.push({ url, success: true, data: { adobeTarget: experimentData } });
+            console.log(`✅ ${url}`);
+
+          } catch (error) {
+            console.error(`❌ Error processing ${url}:`, error.message);
+            results.push({ url, success: false, error: error.message });
+          } finally {
+            if (page) {
+              try {
+                await closePage(page);
+                // Memory cleanup delay (like Optimizely)
+                await new Promise(resolve => setTimeout(resolve, 200));
+              } catch (e) {
+                console.warn('⚠️ Error closing page:', e.message);
+              }
+            }
+          }
+        }
+
+      } catch (error) {
+        console.error('Error in processBrowserBatchSequential:', error);
+      }
+
+      return results;
     }
 
 }

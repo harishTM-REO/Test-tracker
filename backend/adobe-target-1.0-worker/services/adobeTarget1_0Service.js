@@ -12,6 +12,14 @@ const {
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
 const { createPage, closePage } = require(path.join(__dirname, '../../utils/helper'));
 
+// Import batch processing helpers for memory management and performance
+const { 
+  performMemoryCleanup,
+  shouldRestartBrowser,
+  ensureDBConnection,
+  monitorDBHealth
+} = require(path.join(__dirname, '../../services/utils/batchProcessingHelpers'));
+
 class AdobeTarget1_0Service {
   constructor() {
     this.backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
@@ -654,6 +662,27 @@ class AdobeTarget1_0Service {
         duration: null
       };
 
+      // ========== PRE-FLIGHT CHECKS ==========
+      console.log(`\n${'='.repeat(60)}`);
+      console.log('🔍 PRE-FLIGHT CHECKS FOR VALIDATION');
+      console.log(`${'='.repeat(60)}`);
+
+      try {
+        // Ensure database is healthy before starting
+        await ensureDBConnection(urls.length, AdobeTargetValidationResult);
+
+        // Check database performance
+        const dbHealth = await monitorDBHealth(AdobeTargetValidationResult);
+        if (!dbHealth.healthy) {
+          throw new Error('Database is not healthy. Cannot proceed with validation.');
+        }
+      } catch (error) {
+        console.error('❌ PRE-FLIGHT CHECK FAILED:', error.message);
+        throw error;
+      }
+
+      console.log(`${'='.repeat(60)}\n`);
+
       try {
         await browserPool.initialize();
       } catch (poolError) {
@@ -894,6 +923,14 @@ class AdobeTarget1_0Service {
           negatives: chunkNegatives,
           failures: chunkFailures
         });
+
+        // ========== MEMORY CLEANUP BETWEEN CHUNKS ==========
+        // CRITICAL: Prevent memory accumulation during long validation runs
+        // This is especially important for Adobe Target validation which can process 1000+ URLs
+        if (chunkNumber < totalBatches) {
+          const batchDelay = parseInt(process.env.BATCH_DELAY) || 2000;
+          await performMemoryCleanup(batchDelay);
+        }
       }
 
       const endTime = new Date();
