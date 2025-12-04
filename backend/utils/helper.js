@@ -219,7 +219,7 @@ const createPage = async (browser, opts = {}) => {
       await result.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
 
       // Navigation timeouts - use environment variable or default to 60 seconds
-      const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 60000);
+      const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 40000);
       result.setDefaultNavigationTimeout(navigationTimeout);
       result.setDefaultTimeout(navigationTimeout);
 
@@ -275,7 +275,7 @@ const createPage = async (browser, opts = {}) => {
  */
 const navigateToPage = async (page, url) => {
     const maxRetries = parseInt(process.env.NAVIGATION_MAX_RETRIES) || 1;
-    const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 120000);
+    const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 40000);
     let lastError;
 
     const normalizedUrl = await validateAndNormalizeUrl(url);

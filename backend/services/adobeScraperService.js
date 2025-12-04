@@ -106,16 +106,6 @@ class AdobeScraperService {
         // Navigate with helper (has timeout protection)
         await navigateToPage(sharedPage, url);
         
-        // Cookie consent with timeout protection (7s for batch efficiency)
-        try {
-          await runWithTimeout(
-            () => handleCookieConsent(sharedPage), 
-            7000,
-            'handleCookieConsent'
-          );
-        } catch (e) {
-          console.warn(`⚠️ Cookie consent timeout for ${url} (continuing): ${e.message}`);
-        }
         
         await new Promise(r => setTimeout(r, 500)); // Small settle delay
         
@@ -140,6 +130,18 @@ class AdobeScraperService {
             httpStatusCode: null,
             detectionSource: { captchaBlocked: true }
           };
+        }
+        else{
+            // Cookie consent with timeout protection (7s for batch efficiency)
+            try {
+                await runWithTimeout(
+                () => handleCookieConsent(sharedPage), 
+                6000,
+                'handleCookieConsent'
+                );
+            } catch (e) {
+                console.warn(`⚠️ Cookie consent timeout for ${url} (continuing): ${e.message}`);
+            }
         }
         
         // OPTIONAL: Enable lightweight request interception (only images/fonts for speed)
@@ -174,11 +176,8 @@ class AdobeScraperService {
           } catch (e) {
             console.warn(`⚠️ Request interception setup failed for ${url} (continuing):`, e.message);
           }
-        } else {
-          // Small delay to let page settle without interception
-          await new Promise(r => setTimeout(r, 500));
-        }
-        await new Promise(r => setTimeout(r, 5000)); 
+        } 
+        await new Promise(r => setTimeout(r, 4000)); 
         // Run detection with timeout (15s for batch efficiency, down from 20s)
         let detectionResult = {
           detected: false,
@@ -395,11 +394,8 @@ class AdobeScraperService {
                     return {
                         detected: false,
                         version: null,
-                        hasMboxCookie: document.cookie.includes('mbox='),
-                        hasAdobeScript: Array.from(document.scripts || []).some(script => {
-                            const src = script.src || '';
-                            return src.includes('tt.omtrdc.net') || src.includes('target.js') || src.includes('adobetarget');
-                        })
+                        hasMboxCookie: [],
+                        hasAdobeScript: []
                     };
                 }
 
@@ -415,11 +411,8 @@ class AdobeScraperService {
                 return {
                     detected: true,
                     version: version,
-                    hasMboxCookie: document.cookie.includes('mbox='),
-                    hasAdobeScript: Array.from(document.scripts || []).some(script => {
-                        const src = script.src || '';
-                        return src.includes('tt.omtrdc.net') || src.includes('target.js') || src.includes('adobetarget');
-                    })
+                    hasMboxCookie: 'N/A',
+                    hasAdobeScript: []
                 };
             } catch (e) {
                 console.error('Error checking Adobe Target:', e);
