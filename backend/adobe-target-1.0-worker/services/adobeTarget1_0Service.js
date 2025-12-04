@@ -10,6 +10,7 @@ const {
   sanitizeWorkflowResult
 } = require(path.join(__dirname, '../../utils/adobeTargetResultSanitizer'));
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
+const { createPage, closePage } = require(path.join(__dirname, '../../utils/helper'));
 
 class AdobeTarget1_0Service {
   constructor() {
@@ -906,29 +907,49 @@ class AdobeTarget1_0Service {
 
   /**
    * Sequentially process a set of URLs inside a single browser instance
+   * Uses a shared page for maximum efficiency with timeout protection
    */
   async processBrowserValidationBatch(browser, urlEntries = []) {
     const results = [];
+    let sharedPage = null;
+    
+    try {
+      // Create a shared page for the entire batch (memory efficient)
+      sharedPage = await createPage(browser);
+      console.log(`📄 Created shared page for batch of ${urlEntries.length} URLs`);
 
-    for (let i = 0; i < urlEntries.length; i++) {
+      for (let i = 0; i < urlEntries.length; i++) {
         const entry = urlEntries[i];
         const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
-      const targetUrl = normalizedEntry.url;
+        const targetUrl = normalizedEntry.url;
 
-      if (!targetUrl) {
-        results.push({ success: false, url: null, error: 'Invalid URL in dataset' });
-        continue;
-      }
+        if (!targetUrl) {
+          results.push({ success: false, url: null, error: 'Invalid URL in dataset' });
+          continue;
+        }
 
-      console.log(`🔸 [${i + 1}/${urlEntries.length}] Validating ${targetUrl}`);
-
+        console.log(`🔸 [${i + 1}/${urlEntries.length}] Validating ${targetUrl}`);
+        
         try {
-          const scrapeResult = await AdobeScraperService.scrapeAdobeTargetExperiments(
-            targetUrl,
-            null,
-            { browserInstance: browser, presenceOnly: true }
+          // Use the optimized shared page method with timeout protection ⚡
+          const detectionResult = await AdobeScraperService.detectAdobeTargetPresenceWithSharedPage(
+            sharedPage,
+            targetUrl
           );
-          const adobeTargetData = scrapeResult.adobeTarget || scrapeResult.data?.adobeTarget || {};
+
+          // Format result to match expected structure
+          const adobeTargetData = {
+            detected: detectionResult.detected,
+            version: detectionResult.version,
+            hasMboxCookie: detectionResult.hasMboxCookie,
+            hasAdobeScript: detectionResult.hasAdobeScript,
+            captchaDetected: detectionResult.captchaDetected,
+            captchaStatus: detectionResult.captchaStatus,
+            detectionSource: detectionResult.detectionSource,
+            experiments: [],
+            experimentCount: 0,
+            activeCount: 0
+          };
 
           results.push({
             success: true,
@@ -937,16 +958,64 @@ class AdobeTarget1_0Service {
             adobeTargetData
           });
         } catch (error) {
+          console.error(`❌ Validation failed for ${targetUrl}:`, error.message);
+          
+          // Check if it's a browser-level error that should trigger restart
+          const isBrowserError = error.message.includes('BROWSER_PROTOCOL_ERROR') ||
+                                 error.message.includes('Protocol error') ||
+                                 error.message.includes('Target closed') ||
+                                 error.message.includes('Session closed');
+          
           results.push({
             success: false,
             url: targetUrl,
             companyName: normalizedEntry.companyName || null,
-            error: error.message || 'Unknown scraping error'
+            error: error.message || 'Unknown scraping error',
+            browserError: isBrowserError
+          });
+          
+          // If it's a browser error, throw to trigger restart
+          if (isBrowserError) {
+            console.error('🔄 Browser error detected, will trigger restart');
+            throw error;
+          }
+        }
+      }
+
+      return results;
+      
+    } catch (error) {
+      console.error('❌ Batch processing error:', error.message);
+      
+      // Return results collected so far plus errors for remaining URLs
+      const processedUrls = new Set(results.map(r => r.url));
+      urlEntries.forEach(entry => {
+        const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+        const targetUrl = normalizedEntry.url;
+        
+        if (targetUrl && !processedUrls.has(targetUrl)) {
+          results.push({
+            success: false,
+            url: targetUrl,
+            companyName: normalizedEntry.companyName || null,
+            error: `Batch failed: ${error.message}`
           });
         }
+      });
+      
+      throw error; // Re-throw to trigger browser restart at higher level
+      
+    } finally {
+      // Clean up shared page
+      if (sharedPage) {
+        try {
+          await closePage(sharedPage);
+          console.log('✅ Shared page closed');
+        } catch (e) {
+          console.warn('⚠️ Error closing shared page:', e.message);
+        }
+      }
     }
-
-    return results;
   }
 
   /**

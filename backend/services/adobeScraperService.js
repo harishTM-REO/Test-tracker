@@ -78,11 +78,147 @@ class AdobeScraperService {
     }
 
     /**
+     * Lightweight detection using a shared page (optimized for batch processing)
+     * Uses a pre-created page to avoid page creation overhead
+     * @param {Object} sharedPage - Pre-created page to reuse
+     * @param {string} url - URL to validate
+     * @returns {Promise<{detected: boolean, version?: string, hasMboxCookie?: boolean, hasAdobeScript?: boolean, captchaDetected?: boolean, detectionSource?: object}>}
+     */
+    async detectAdobeTargetPresenceWithSharedPage(sharedPage, url) {
+      let requestHandler = null;
+      
+      try {
+        console.log(`🔍 Validating Adobe Target presence: ${url}`);
+        
+        // Navigate with helper (has timeout protection)
+        await navigateToPage(sharedPage, url);
+        
+        // Cookie consent with timeout protection (7s for batch efficiency)
+        try {
+          await runWithTimeout(
+            () => handleCookieConsent(sharedPage), 
+            7000,
+            'handleCookieConsent'
+          );
+        } catch (e) {
+          console.warn(`⚠️ Cookie consent timeout for ${url} (continuing): ${e.message}`);
+        }
+        
+        await new Promise(r => setTimeout(r, 500)); // Small settle delay
+        
+        // Captcha detection with timeout protection
+        let captchaCheck = { detected: false };
+        try {
+          captchaCheck = await runWithTimeout(
+            () => detectCaptcha(sharedPage), 
+            5000,
+            'detectCaptcha'
+          );
+        } catch (e) {
+          console.warn(`⚠️ Captcha detection timeout for ${url} (continuing): ${e.message}`);
+        }
+        
+        if (captchaCheck?.detected) {
+          console.log(`🚫 Captcha detected on ${url}`);
+          return {
+            detected: false,
+            captchaDetected: true,
+            captchaStatus: captchaCheck.reason,
+            httpStatusCode: null,
+            detectionSource: { captchaBlocked: true }
+          };
+        }
+        
+        // Enable lightweight request interception (only images/fonts for speed)
+        try {
+          await sharedPage.setRequestInterception(true);
+          requestHandler = req => {
+            const t = req.resourceType();
+            if (t === 'image' || t === 'font') {
+              try { req.abort(); } catch (e) { try { req.continue(); } catch (_) {} }
+            } else {
+              try { req.continue(); } catch (_) {}
+            }
+          };
+          sharedPage.on('request', requestHandler);
+        } catch (e) {
+          console.warn(`⚠️ Request interception setup failed for ${url} (continuing):`, e.message);
+        }
+        
+        await new Promise(r => setTimeout(r, 300)); // Brief delay after interception
+        
+        // Run detection with timeout (15s for batch efficiency, down from 20s)
+        let detectionResult = {
+          detected: false,
+          version: null,
+          hasMboxCookie: false,
+          hasAdobeScript: false,
+          detectionSource: {}
+        };
+        
+        try {
+          detectionResult = await runWithTimeout(
+            () => this.detectAdobeTargetPresenceUsingPage(sharedPage),
+            15000,
+            'detectAdobeTargetPresenceUsingPage'
+          );
+        } catch (e) {
+          console.warn(`⚠️ Detection timeout for ${url}: ${e.message}`);
+          return {
+            detected: false,
+            version: null,
+            hasMboxCookie: false,
+            hasAdobeScript: false,
+            httpStatusCode: null,
+            captchaDetected: false,
+            detectionSource: { error: e.message, timeout: true }
+          };
+        }
+        
+        console.log(`${detectionResult.detected ? '✅' : '❌'} Adobe Target ${detectionResult.detected ? 'detected' : 'not detected'} on ${url}`);
+        
+        return {
+          detected: detectionResult.detected,
+          version: detectionResult.version,
+          hasMboxCookie: detectionResult.hasMboxCookie,
+          hasAdobeScript: detectionResult.hasAdobeScript,
+          httpStatusCode: null,
+          captchaDetected: false,
+          detectionSource: detectionResult.detectionSource
+        };
+        
+      } catch (error) {
+        console.error(`❌ Error detecting Adobe Target on ${url}:`, error.message);
+        
+        // Check if it's a protocol/timeout error that should trigger browser restart
+        if (error.message.includes('Protocol') || 
+            error.message.includes('timeout') || 
+            error.message.includes('callFunctionOn')) {
+          throw new Error('BROWSER_PROTOCOL_ERROR: ' + error.message);
+        }
+        
+        throw error;
+      } finally {
+        // Cleanup request handler
+        if (requestHandler) {
+          try { 
+            sharedPage.removeListener('request', requestHandler);
+            // Disable interception for next URL
+            await sharedPage.setRequestInterception(false);
+          } catch (e) {
+            console.warn('⚠️ Cleanup error:', e.message);
+          }
+        }
+      }
+    }
+
+    /**
      * Lightweight detector to quickly determine if Adobe Target is present on a page
+     * Creates its own page and browser context (use detectAdobeTargetPresenceWithSharedPage for batch operations)
      * @param {string} url
      * @returns {Promise<{detected: boolean, httpStatusCode?: number, captchaDetected?: boolean, captchaStatus?: string, detectionSource?: object}>}
      */
-    async detectAdobeTargetPresence(url) {
+  async detectAdobeTargetPresence(url) {
     let page = null;
     let requestHandler = null;
   
@@ -384,9 +520,9 @@ class AdobeScraperService {
                 if (isBrowserSessionError) {
                     console.warn('Detected browser-level session error; restarting pooled browser instance.');
                     try {
-                        await this.browserPool.forceRestartBrowser(browser);
-                        browserRestartTriggered = true;
-                        acquiredFromPool = false;
+                    await this.browserPool.forceRestartBrowser(browser);
+                    browserRestartTriggered = true;
+                    acquiredFromPool = false;
                         console.log('Browser restarted successfully after error');
                     } catch (restartError) {
                         console.error('Failed to restart browser:', restartError.message);
