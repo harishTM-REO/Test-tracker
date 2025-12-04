@@ -1142,13 +1142,12 @@ class AdobeTarget1_0Service {
    */
   async processBrowserValidationBatch(browser, urlEntries = []) {
     const results = [];
-    let sharedPage = null;
     
     try {
-      // Create a shared page for the entire batch (memory efficient)
-      sharedPage = await createPage(browser);
-      console.log(`📄 Created shared page for batch of ${urlEntries.length} URLs`);
+      console.log(`🔁 Processing ${urlEntries.length} URLs SEQUENTIALLY (FRESH page per URL)`);
 
+      // CRITICAL: Process URLs ONE AT A TIME with FRESH page each (like Optimizely)
+      // This prevents memory accumulation that causes crashes after 8 URLs
       for (let i = 0; i < urlEntries.length; i++) {
         const entry = urlEntries[i];
         const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
@@ -1161,10 +1160,15 @@ class AdobeTarget1_0Service {
 
         console.log(`🔸 [${i + 1}/${urlEntries.length}] Validating ${targetUrl}`);
         
+        let freshPage = null;
+        
         try {
+          // Create FRESH page for this URL only
+          freshPage = await createPage(browser);
+          
           // Use the optimized shared page method with timeout protection ⚡
           const detectionResult = await AdobeScraperService.detectAdobeTargetPresenceWithSharedPage(
-            sharedPage,
+            freshPage,
             targetUrl
           );
 
@@ -1211,11 +1215,40 @@ class AdobeTarget1_0Service {
           // Remaining URLs will be retried in a new browser
           if (isBrowserError) {
             console.error(`🔄 Browser-level error detected - stopping batch to retry remaining URLs`);
+            
+            // Close current page before throwing
+            if (freshPage) {
+              try {
+                await closePage(freshPage);
+                console.log('📄 Page closed after browser error');
+                // CRITICAL: Memory cleanup delay (like Optimizely)
+                await new Promise(resolve => setTimeout(resolve, 200));
+              } catch (e) {
+                console.warn('⚠️ Error closing page after browser error:', e.message);
+              }
+            }
+            
             throw error;
           }
           
           // Otherwise, continue with the next URL in this batch
           console.log(`⚠️  URL-level error - continuing with remaining URLs in batch`);
+          
+        } finally {
+          // CRITICAL: Close page immediately after each URL (like Optimizely)
+          // This prevents memory accumulation across URLs
+          if (freshPage) {
+            try {
+              await closePage(freshPage);
+              console.log(`📄 Page closed for ${targetUrl}`);
+              
+              // CRITICAL: 200ms cleanup delay to allow browser garbage collection
+              // This prevents memory accumulation that causes crashes after 8 URLs
+              await new Promise(resolve => setTimeout(resolve, 200));
+            } catch (e) {
+              console.warn(`⚠️ Error closing page for ${targetUrl}:`, e.message);
+            }
+          }
         }
       }
 
@@ -1236,17 +1269,6 @@ class AdobeTarget1_0Service {
       
       // Return the results we have - the higher level will handle retries
       return results;
-      
-    } finally {
-      // Clean up shared page
-      if (sharedPage) {
-        try {
-          await closePage(sharedPage);
-          console.log('✅ Shared page closed');
-        } catch (e) {
-          console.warn('⚠️ Error closing shared page:', e.message);
-        }
-      }
     }
   }
 
