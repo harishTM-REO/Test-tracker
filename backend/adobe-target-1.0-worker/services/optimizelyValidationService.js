@@ -28,6 +28,21 @@ class OptimizelyValidationService {
     console.log(`Total URLs: ${urls.length}`);
     console.log(`${'='.repeat(80)}\n`);
 
+    // Set up unhandled rejection handler for this process
+    let originalUnhandledRejection = [];
+    try {
+      originalUnhandledRejection = process.listeners('unhandledRejection');
+      process.removeAllListeners('unhandledRejection');
+      process.on('unhandledRejection', (reason, promise) => {
+        console.error(`\n❌ UNHANDLED PROMISE REJECTION DETECTED:`);
+        console.error(`Reason:`, reason);
+        console.error(`This may cause the scraping to stop. Continuing with error handling...`);
+        // Don't exit - let the error handling continue
+      });
+    } catch (handlerSetupError) {
+      console.warn(`⚠️  Could not set up unhandled rejection handler:`, handlerSetupError.message);
+    }
+
     const startTime = Date.now();
     let validationResult = null;
 
@@ -78,20 +93,74 @@ class OptimizelyValidationService {
         const urlEntry = urls[i];
         const urlIndex = i + 1;
         
-        console.log(`\n${'─'.repeat(80)}`);
-        console.log(`📍 Processing URL ${urlIndex}/${urls.length}`);
-        console.log(`URL: ${urlEntry.url}`);
-        console.log(`Company: ${urlEntry.companyName || 'N/A'}`);
-        console.log(`${'─'.repeat(80)}`);
-
-        let browser = null;
         try {
-          // Check URL reachability BEFORE launching browser (saves resources)
-          console.log(`⏱️  Checking if URL is reachable...`);
-          const isReachable = await isUrlReachable(urlEntry.url);
-          
-          if (!isReachable) {
-            console.log(`❌ URL is not reachable - skipping browser launch`);
+          console.log(`\n${'─'.repeat(80)}`);
+          console.log(`📍 Processing URL ${urlIndex}/${urls.length}`);
+          console.log(`URL: ${urlEntry.url}`);
+          console.log(`Company: ${urlEntry.companyName || 'N/A'}`);
+          console.log(`${'─'.repeat(80)}`);
+
+          let browser = null;
+          try {
+            // Check URL reachability BEFORE launching browser (saves resources)
+            console.log(`⏱️  Checking if URL is reachable...`);
+            const isReachable = await isUrlReachable(urlEntry.url);
+            
+            if (!isReachable) {
+              console.log(`❌ URL is not reachable - skipping browser launch`);
+              results.failed.push({
+                url: urlEntry.url,
+                companyName: urlEntry.companyName,
+                status: 'failed',
+                detectionDetails: {
+                  projectId: null,
+                  experiments: [],
+                  experimentCount: 0,
+                  activeCount: 0,
+                  detectedExplicitly: false,
+                  captchaDetected: false,
+                  cookieType: 'unknown',
+                  error: 'URL is not reachable or timed out'
+                },
+                scrapedAt: new Date(),
+                error: 'URL is not reachable or timed out'
+              });
+              console.log(`⚠️  FAILED - URL not reachable`);
+              continue; // Skip to next URL
+            }
+            
+            console.log(`✅ URL is reachable - launching browser...`);
+            
+            // Launch fresh browser for this URL
+            console.log(`🌐 Launching fresh browser...`);
+            browser = await this.launchBrowser();
+            const page = await browser.newPage();
+
+            // Configure page
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            await page.setViewport({ width: 1920, height: 1080 });
+
+            // Validate URL
+            const result = await this.validateUrl(page, urlEntry);
+            
+            // Categorize result
+            if (result.status === 'positive') {
+              results.positive.push(result);
+              if (result.detectionDetails.projectId) {
+                projectIds.add(result.detectionDetails.projectId);
+              }
+              console.log(`✅ POSITIVE - Optimizely detected (ProjectID: ${result.detectionDetails.projectId || 'N/A'})`);
+            } else if (result.status === 'negative') {
+              results.negative.push(result);
+              console.log(`❌ NEGATIVE - No Optimizely detected`);
+            } else {
+              results.failed.push(result);
+              console.log(`⚠️  FAILED - ${result.error}`);
+            }
+
+          } catch (error) {
+            console.error(`❌ Error processing ${urlEntry.url}:`, error.message);
+            console.error(`Stack trace:`, error.stack);
             results.failed.push({
               url: urlEntry.url,
               companyName: urlEntry.companyName,
@@ -103,50 +172,59 @@ class OptimizelyValidationService {
                 activeCount: 0,
                 detectedExplicitly: false,
                 captchaDetected: false,
-                cookieType: 'unknown',
-                error: 'URL is not reachable or timed out'
+                error: error.message
               },
               scrapedAt: new Date(),
-              error: 'URL is not reachable or timed out'
+              error: error.message
             });
-            console.log(`⚠️  FAILED - URL not reachable`);
-            continue; // Skip to next URL
-          }
-          
-          console.log(`✅ URL is reachable - launching browser...`);
-          
-          // Launch fresh browser for this URL
-          console.log(`🌐 Launching fresh browser...`);
-          browser = await this.launchBrowser();
-          const page = await browser.newPage();
-
-          // Configure page
-          await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-          await page.setViewport({ width: 1920, height: 1080 });
-
-          // Validate URL
-          const result = await this.validateUrl(page, urlEntry);
-          
-          // Categorize result
-          if (result.status === 'positive') {
-            results.positive.push(result);
-            if (result.detectionDetails.projectId) {
-              projectIds.add(result.detectionDetails.projectId);
+          } finally {
+            // Always close browser
+            if (browser) {
+              try {
+                await browser.close();
+                console.log(`🔒 Browser closed`);
+              } catch (e) {
+                console.error(`Error closing browser:`, e.message);
+              }
             }
-            console.log(`✅ POSITIVE - Optimizely detected (ProjectID: ${result.detectionDetails.projectId || 'N/A'})`);
-          } else if (result.status === 'negative') {
-            results.negative.push(result);
-            console.log(`❌ NEGATIVE - No Optimizely detected`);
-          } else {
-            results.failed.push(result);
-            console.log(`⚠️  FAILED - ${result.error}`);
           }
 
-        } catch (error) {
-          console.error(`❌ Error processing ${urlEntry.url}:`, error.message);
+          // Progress update with error handling
+          try {
+            const progress = {
+              processedUrls: urlIndex,
+              totalUrls: urls.length,
+              percentage: Math.round((urlIndex / urls.length) * 100),
+              positiveCount: results.positive.length,
+              negativeCount: results.negative.length,
+              failedCount: results.failed.length
+            };
+
+            if (progressCallback) {
+              try {
+                progressCallback(progress);
+              } catch (callbackError) {
+                console.error(`⚠️  Progress callback error (non-fatal):`, callbackError.message);
+                // Continue processing even if callback fails
+              }
+            }
+
+            console.log(`📊 Progress: ${progress.percentage}% (${urlIndex}/${urls.length}) - Positive: ${results.positive.length}, Negative: ${results.negative.length}, Failed: ${results.failed.length}`);
+          } catch (progressError) {
+            console.error(`⚠️  Error updating progress (non-fatal):`, progressError.message);
+            // Continue processing even if progress update fails
+          }
+
+        } catch (loopError) {
+          // Catch any unexpected errors in the loop itself
+          console.error(`❌ CRITICAL: Unexpected error in processing loop at URL ${urlIndex}/${urls.length}:`, loopError.message);
+          console.error(`Stack trace:`, loopError.stack);
+          console.log(`⏭️  Continuing with next URL despite error...`);
+          
+          // Add to failed results
           results.failed.push({
-            url: urlEntry.url,
-            companyName: urlEntry.companyName,
+            url: urlEntry?.url || 'unknown',
+            companyName: urlEntry?.companyName || 'N/A',
             status: 'failed',
             detectionDetails: {
               projectId: null,
@@ -155,102 +233,111 @@ class OptimizelyValidationService {
               activeCount: 0,
               detectedExplicitly: false,
               captchaDetected: false,
-              error: error.message
+              error: `Unexpected loop error: ${loopError.message}`
             },
             scrapedAt: new Date(),
-            error: error.message
+            error: `Unexpected loop error: ${loopError.message}`
           });
-        } finally {
-          // Always close browser
-          if (browser) {
-            try {
-              await browser.close();
-              console.log(`🔒 Browser closed`);
-            } catch (e) {
-              console.error(`Error closing browser:`, e.message);
-            }
-          }
+          
+          // Continue to next URL
+          continue;
         }
-
-        // Progress update
-        const progress = {
-          processedUrls: urlIndex,
-          totalUrls: urls.length,
-          percentage: Math.round((urlIndex / urls.length) * 100),
-          positiveCount: results.positive.length,
-          negativeCount: results.negative.length,
-          failedCount: results.failed.length
-        };
-
-        if (progressCallback) {
-          progressCallback(progress);
-        }
-
-        console.log(`📊 Progress: ${progress.percentage}% (${urlIndex}/${urls.length})`);
       }
 
-      // Save results in batch
-      const batchNumber = 1;
-      await OptimizelyValidationDocument.create({
-        datasetId,
-        datasetName,
-        batchNumber,
-        totalBatches: 1,
-        totalUrls: urls.length,
-        positiveCount: results.positive.length,
-        negativeCount: results.negative.length,
-        failedCount: results.failed.length,
-        detectionRate: urls.length > 0 ? (results.positive.length / urls.length) * 100 : 0,
-        positiveUrls: results.positive,
-        negativeUrls: results.negative,
-        failedUrls: results.failed
-      });
+      console.log(`\n${'─'.repeat(80)}`);
+      console.log(`💾 Saving results to database...`);
+      console.log(`${'─'.repeat(80)}`);
 
-      // Update final result
-      const uniqueProjectIdArray = Array.from(projectIds);
-      const detectionRate = urls.length > 0 ? (results.positive.length / urls.length) * 100 : 0;
+      // Save results in batch with error handling
+      try {
+        const batchNumber = 1;
+        await OptimizelyValidationDocument.create({
+          datasetId,
+          datasetName,
+          batchNumber,
+          totalBatches: 1,
+          totalUrls: urls.length,
+          positiveCount: results.positive.length,
+          negativeCount: results.negative.length,
+          failedCount: results.failed.length,
+          detectionRate: urls.length > 0 ? (results.positive.length / urls.length) * 100 : 0,
+          positiveUrls: results.positive,
+          negativeUrls: results.negative,
+          failedUrls: results.failed
+        });
+        console.log(`✅ Validation documents saved successfully`);
+      } catch (dbError) {
+        console.error(`❌ Error saving validation documents:`, dbError.message);
+        console.error(`Stack trace:`, dbError.stack);
+        // Continue - don't fail entire process if document save fails
+      }
 
-      validationResult.status = 'completed';
-      validationResult.completedAt = new Date();
-      validationResult.durationMs = Date.now() - startTime;
-      validationResult.positiveUrls = results.positive.map(r => r.url);
-      validationResult.negativeUrls = results.negative.map(r => r.url);
-      validationResult.failedUrls = results.failed.map(r => r.url);
-      validationResult.summary = {
-        totalUrls: urls.length,
-        positiveCount: results.positive.length,
-        negativeCount: results.negative.length,
-        failedCount: results.failed.length,
-        detectionRate: detectionRate,
-        uniqueProjectIds: uniqueProjectIdArray,
-        projectIdCount: uniqueProjectIdArray.length,
-        startedAt: new Date(startTime),
-        completedAt: new Date(),
-        durationMs: Date.now() - startTime
-      };
+      // Update final result with error handling
+      try {
+        const uniqueProjectIdArray = Array.from(projectIds);
+        const detectionRate = urls.length > 0 ? (results.positive.length / urls.length) * 100 : 0;
 
-      await validationResult.save();
-
-      // Update dataset
-      await Dataset.findByIdAndUpdate(datasetId, {
-        'optimizelyValidation.status': 'completed',
-        'optimizelyValidation.summary': {
+        validationResult.status = 'completed';
+        validationResult.completedAt = new Date();
+        validationResult.durationMs = Date.now() - startTime;
+        validationResult.positiveUrls = results.positive.map(r => r.url);
+        validationResult.negativeUrls = results.negative.map(r => r.url);
+        validationResult.failedUrls = results.failed.map(r => r.url);
+        validationResult.summary = {
           totalUrls: urls.length,
           positiveCount: results.positive.length,
           negativeCount: results.negative.length,
           failedCount: results.failed.length,
           detectionRate: detectionRate,
           uniqueProjectIds: uniqueProjectIdArray,
-          projectIdCount: uniqueProjectIdArray.length
-        },
-        scrapingStatus: 'completed',
-        scrapingCompletedAt: new Date(),
-        'scrapingStats.processedUrls': urls.length,
-        'scrapingStats.successfulScans': results.positive.length + results.negative.length,
-        'scrapingStats.failedScans': results.failed.length,
-        'scrapingStats.optimizelyDetected': results.positive.length,
-        'scrapingStats.duration': Math.round((Date.now() - startTime) / 1000)
-      });
+          projectIdCount: uniqueProjectIdArray.length,
+          startedAt: new Date(startTime),
+          completedAt: new Date(),
+          durationMs: Date.now() - startTime
+        };
+
+        await validationResult.save();
+        console.log(`✅ Validation result saved successfully`);
+      } catch (resultError) {
+        console.error(`❌ Error saving validation result:`, resultError.message);
+        console.error(`Stack trace:`, resultError.stack);
+        // Continue - don't fail entire process if result save fails
+      }
+
+      // Update dataset with error handling
+      try {
+        const uniqueProjectIdArray = Array.from(projectIds);
+        const detectionRate = urls.length > 0 ? (results.positive.length / urls.length) * 100 : 0;
+        
+        await Dataset.findByIdAndUpdate(datasetId, {
+          'optimizelyValidation.status': 'completed',
+          'optimizelyValidation.summary': {
+            totalUrls: urls.length,
+            positiveCount: results.positive.length,
+            negativeCount: results.negative.length,
+            failedCount: results.failed.length,
+            detectionRate: detectionRate,
+            uniqueProjectIds: uniqueProjectIdArray,
+            projectIdCount: uniqueProjectIdArray.length
+          },
+          scrapingStatus: 'completed',
+          scrapingCompletedAt: new Date(),
+          'scrapingStats.processedUrls': urls.length,
+          'scrapingStats.successfulScans': results.positive.length + results.negative.length,
+          'scrapingStats.failedScans': results.failed.length,
+          'scrapingStats.optimizelyDetected': results.positive.length,
+          'scrapingStats.duration': Math.round((Date.now() - startTime) / 1000)
+        });
+        console.log(`✅ Dataset updated successfully`);
+      } catch (datasetError) {
+        console.error(`❌ Error updating dataset:`, datasetError.message);
+        console.error(`Stack trace:`, datasetError.stack);
+        // Continue - don't fail entire process if dataset update fails
+      }
+
+      // Calculate final stats for logging
+      const uniqueProjectIdArray = Array.from(projectIds);
+      const detectionRate = urls.length > 0 ? (results.positive.length / urls.length) * 100 : 0;
 
       console.log(`\n${'='.repeat(80)}`);
       console.log(`✅ VALIDATION COMPLETED`);
@@ -270,22 +357,43 @@ class OptimizelyValidationService {
 
     } catch (error) {
       console.error(`\n❌ Validation failed:`, error);
+      console.error(`Stack trace:`, error.stack);
 
       if (validationResult) {
-        validationResult.status = 'failed';
-        validationResult.error = error.message;
-        validationResult.completedAt = new Date();
-        validationResult.durationMs = Date.now() - startTime;
-        await validationResult.save();
+        try {
+          validationResult.status = 'failed';
+          validationResult.error = error.message;
+          validationResult.completedAt = new Date();
+          validationResult.durationMs = Date.now() - startTime;
+          await validationResult.save();
+        } catch (saveError) {
+          console.error(`❌ Error saving failed validation result:`, saveError.message);
+        }
       }
 
-      await Dataset.findByIdAndUpdate(datasetId, {
-        'optimizelyValidation.status': 'failed',
-        scrapingStatus: 'failed',
-        scrapingError: error.message
-      });
+      try {
+        await Dataset.findByIdAndUpdate(datasetId, {
+          'optimizelyValidation.status': 'failed',
+          scrapingStatus: 'failed',
+          scrapingError: error.message
+        });
+      } catch (updateError) {
+        console.error(`❌ Error updating dataset status:`, updateError.message);
+      }
 
       throw error;
+    } finally {
+      // Restore original unhandled rejection handlers
+      try {
+        process.removeAllListeners('unhandledRejection');
+        if (originalUnhandledRejection && originalUnhandledRejection.length > 0) {
+          originalUnhandledRejection.forEach(handler => {
+            process.on('unhandledRejection', handler);
+          });
+        }
+      } catch (handlerError) {
+        console.error(`⚠️  Error restoring unhandled rejection handlers:`, handlerError.message);
+      }
     }
   }
 
@@ -374,7 +482,8 @@ class OptimizelyValidationService {
       }
 
     } catch (error) {
-      console.error(`Error validating ${url}:`, error.message);
+      console.error(`❌ Error validating ${url}:`, error.message);
+      console.error(`Stack trace:`, error.stack);
       result.status = 'failed';
       result.error = error.message;
       result.detectionDetails.error = error.message;
