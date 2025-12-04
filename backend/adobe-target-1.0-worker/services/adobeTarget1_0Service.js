@@ -685,6 +685,18 @@ class AdobeTarget1_0Service {
           const targetUrl = result?.url;
           const companyName = result?.companyName || null;
           if (!targetUrl) {
+            // Count URLs without a valid URL as failed
+            const errorMsg = 'Invalid or missing URL in dataset';
+            failedUrls.push('INVALID_URL');
+            scrapingStats.failedScans += 1;
+            scrapingStats.processedUrls += 1;
+            console.error(`❌ ${errorMsg}`);
+            chunkFailures.push(this.buildValidationRecord({
+              url: 'INVALID_URL',
+              companyName,
+              status: 'failed',
+              error: errorMsg
+            }));
             return;
           }
 
@@ -869,6 +881,7 @@ class AdobeTarget1_0Service {
 
   /**
    * Process a chunk of validation URLs using the shared browser pool
+   * Includes smart retry logic for unprocessed URLs from failed batches
    */
   async processValidationChunk(urls, options = {}) {
     if (!urls || urls.length === 0) {
@@ -878,7 +891,9 @@ class AdobeTarget1_0Service {
     const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
     const {
       concurrent = poolSize,
-      maxTabs = 1
+      maxTabs = 1,
+      retryAttempt = 0,
+      maxRetries = 1
     } = options;
 
     const actualConcurrent = Math.max(1, Math.min(concurrent, poolSize));
@@ -886,21 +901,113 @@ class AdobeTarget1_0Service {
 
     const batchPromises = urlBatches.map((urlBatch, index) =>
       browserPool.withBrowser(async (browser) => {
-        console.log(`🧪 Validation browser batch ${index + 1}/${urlBatches.length} (${urlBatch.length} URLs)`);
+        const retryLabel = retryAttempt > 0 ? ` [Retry ${retryAttempt}/${maxRetries}]` : '';
+        console.log(`🧪 Validation browser batch ${index + 1}/${urlBatches.length} (${urlBatch.length} URLs)${retryLabel}`);
         return this.processBrowserValidationBatch(browser, urlBatch);
+      }).catch(error => {
+        // Return the error along with the batch info for proper handling
+        return { error, urlBatch };
       })
     );
 
     const settled = await Promise.allSettled(batchPromises);
     const results = [];
+    const urlsToRetry = [];
 
-    settled.forEach(result => {
-      if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-        results.push(...result.value);
+    settled.forEach((result, batchIndex) => {
+      if (result.status === 'fulfilled') {
+        const value = result.value;
+        
+        // Check if this is an error result from our catch handler
+        if (value && value.error && value.urlBatch) {
+          console.error(`❌ Validation batch ${batchIndex + 1} failed:`, value.error?.message || value.error);
+          
+          // This shouldn't happen with our new error handling, but keep as fallback
+          value.urlBatch.forEach(entry => {
+            const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+            const targetUrl = normalizedEntry.url || 'UNKNOWN_URL';
+            
+            results.push({
+              success: false,
+              url: targetUrl,
+              companyName: normalizedEntry.companyName || null,
+              error: `Batch processing failed: ${value.error?.message || 'Unknown error'}`
+            });
+          });
+        } else if (Array.isArray(value)) {
+          // Process the batch results
+          const processedUrls = new Set();
+          const batchUrlsList = urlBatches[batchIndex] || [];
+          
+          value.forEach(resultItem => {
+            results.push(resultItem);
+            if (resultItem.url) {
+              processedUrls.add(resultItem.url);
+            }
+          });
+          
+          // Check if any URLs from this batch were not processed
+          batchUrlsList.forEach(entry => {
+            const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+            const targetUrl = normalizedEntry.url;
+            
+            if (targetUrl && !processedUrls.has(targetUrl)) {
+              // This URL was not processed - add it to retry list
+              if (retryAttempt < maxRetries) {
+                console.log(`🔄 Queueing ${targetUrl} for retry (not processed in batch)`);
+                urlsToRetry.push(entry);
+              } else {
+                // Max retries reached - mark as failed
+                console.error(`❌ Max retries reached for ${targetUrl}`);
+                results.push({
+                  success: false,
+                  url: targetUrl,
+                  companyName: normalizedEntry.companyName || null,
+                  error: 'Max retries reached - URL not processed due to batch failure'
+                });
+              }
+            }
+          });
+        }
       } else if (result.status === 'rejected') {
-        console.error('❌ Validation batch failed:', result.reason?.message || result.reason);
+        // This shouldn't happen now with our catch, but handle it just in case
+        console.error(`❌ Validation batch ${batchIndex + 1} rejected:`, result.reason?.message || result.reason);
+        
+        // Try to get URLs from the original batch for retry
+        if (urlBatches[batchIndex]) {
+          urlBatches[batchIndex].forEach(entry => {
+            const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+            const targetUrl = normalizedEntry.url || 'UNKNOWN_URL';
+            
+            if (retryAttempt < maxRetries) {
+              console.log(`🔄 Queueing ${targetUrl} for retry (batch rejected)`);
+              urlsToRetry.push(entry);
+            } else {
+              results.push({
+                success: false,
+                url: targetUrl,
+                companyName: normalizedEntry.companyName || null,
+                error: `Batch rejected: ${result.reason?.message || 'Unknown error'}`
+              });
+            }
+          });
+        }
       }
     });
+
+    // Retry unprocessed URLs if any
+    if (urlsToRetry.length > 0) {
+      console.log(`\n🔄 Retrying ${urlsToRetry.length} unprocessed URLs from failed batches...`);
+      
+      const retryResults = await this.processValidationChunk(urlsToRetry, {
+        concurrent,
+        maxTabs,
+        retryAttempt: retryAttempt + 1,
+        maxRetries
+      });
+      
+      results.push(...retryResults);
+    }
 
     return results;
   }
@@ -960,11 +1067,13 @@ class AdobeTarget1_0Service {
         } catch (error) {
           console.error(`❌ Validation failed for ${targetUrl}:`, error.message);
           
-          // Check if it's a browser-level error that should trigger restart
+          // Check if it's a browser-level error that should stop the batch
           const isBrowserError = error.message.includes('BROWSER_PROTOCOL_ERROR') ||
                                  error.message.includes('Protocol error') ||
                                  error.message.includes('Target closed') ||
-                                 error.message.includes('Session closed');
+                                 error.message.includes('Session closed') ||
+                                 error.message.includes('Connection closed') ||
+                                 error.message.includes('Browser closed');
           
           results.push({
             success: false,
@@ -974,11 +1083,15 @@ class AdobeTarget1_0Service {
             browserError: isBrowserError
           });
           
-          // If it's a browser error, throw to trigger restart
+          // If it's a browser error, stop processing this batch
+          // Remaining URLs will be retried in a new browser
           if (isBrowserError) {
-            console.error('🔄 Browser error detected, will trigger restart');
+            console.error(`🔄 Browser-level error detected - stopping batch to retry remaining URLs`);
             throw error;
           }
+          
+          // Otherwise, continue with the next URL in this batch
+          console.log(`⚠️  URL-level error - continuing with remaining URLs in batch`);
         }
       }
 
@@ -987,23 +1100,18 @@ class AdobeTarget1_0Service {
     } catch (error) {
       console.error('❌ Batch processing error:', error.message);
       
-      // Return results collected so far plus errors for remaining URLs
-      const processedUrls = new Set(results.map(r => r.url));
-      urlEntries.forEach(entry => {
-        const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
-        const targetUrl = normalizedEntry.url;
-        
-        if (targetUrl && !processedUrls.has(targetUrl)) {
-          results.push({
-            success: false,
-            url: targetUrl,
-            companyName: normalizedEntry.companyName || null,
-            error: `Batch failed: ${error.message}`
-          });
-        }
-      });
+      // Return only the results collected so far
+      // Don't mark unprocessed URLs as failed here - the higher level will retry them
+      const processedCount = results.length;
+      const totalCount = urlEntries.length;
+      const unprocessedCount = totalCount - processedCount;
       
-      throw error; // Re-throw to trigger browser restart at higher level
+      if (unprocessedCount > 0) {
+        console.log(`⚠️  Batch stopped early: ${processedCount}/${totalCount} URLs processed, ${unprocessedCount} will be retried`);
+      }
+      
+      // Return the results we have - the higher level will handle retries
+      return results;
       
     } finally {
       // Clean up shared page

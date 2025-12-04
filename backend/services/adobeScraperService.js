@@ -86,7 +86,7 @@ class AdobeScraperService {
      */
     async detectAdobeTargetPresenceWithSharedPage(sharedPage, url) {
       let requestHandler = null;
-      
+      console.log('detectAdobeTargetPresenceWithSharedPage is called Avinash');
       try {
         console.log(`🔍 Validating Adobe Target presence: ${url}`);
         
@@ -129,24 +129,43 @@ class AdobeScraperService {
           };
         }
         
-        // Enable lightweight request interception (only images/fonts for speed)
-        try {
-          await sharedPage.setRequestInterception(true);
-          requestHandler = req => {
-            const t = req.resourceType();
-            if (t === 'image' || t === 'font') {
-              try { req.abort(); } catch (e) { try { req.continue(); } catch (_) {} }
-            } else {
-              try { req.continue(); } catch (_) {}
-            }
-          };
-          sharedPage.on('request', requestHandler);
-        } catch (e) {
-          console.warn(`⚠️ Request interception setup failed for ${url} (continuing):`, e.message);
+        // OPTIONAL: Enable lightweight request interception (only images/fonts for speed)
+        // Disabled by default to avoid protocol conflicts - can be enabled via env variable
+        const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
+        
+        if (enableInterception) {
+          try {
+            await sharedPage.setRequestInterception(true);
+            
+            requestHandler = req => {
+              // Defensive checks to prevent "already handled" errors
+              try {
+                if (!req || req._interceptionHandled === true) {
+                  return;
+                }
+                
+                const t = req.resourceType();
+                if (t === 'image' || t === 'font') {
+                  req.abort('blockedbyclient').catch(() => {});
+                } else {
+                  req.continue().catch(() => {});
+                }
+              } catch (e) {
+                // Silently ignore - request might be already handled
+              }
+            };
+            
+            sharedPage.on('request', requestHandler);
+            await new Promise(r => setTimeout(r, 300)); // Brief delay after interception
+            console.log(`🚫 Request interception enabled for ${url}`);
+          } catch (e) {
+            console.warn(`⚠️ Request interception setup failed for ${url} (continuing):`, e.message);
+          }
+        } else {
+          // Small delay to let page settle without interception
+          await new Promise(r => setTimeout(r, 500));
         }
-        
-        await new Promise(r => setTimeout(r, 300)); // Brief delay after interception
-        
+        await new Promise(r => setTimeout(r, 5000)); 
         // Run detection with timeout (15s for batch efficiency, down from 20s)
         let detectionResult = {
           detected: false,
@@ -199,14 +218,23 @@ class AdobeScraperService {
         
         throw error;
       } finally {
-        // Cleanup request handler
-        if (requestHandler) {
-          try { 
-            sharedPage.removeListener('request', requestHandler);
-            // Disable interception for next URL
-            await sharedPage.setRequestInterception(false);
+        // Cleanup request handler (only if we enabled it)
+        if (requestHandler && sharedPage) {
+          try {
+            // Remove event listener using Puppeteer's .off() method
+            sharedPage.off('request', requestHandler);
           } catch (e) {
-            console.warn('⚠️ Cleanup error:', e.message);
+            // Ignore cleanup errors - page might be closing
+          }
+          
+          // Disable interception for next URL
+          try {
+            const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
+            if (enableInterception) {
+              await sharedPage.setRequestInterception(false);
+            }
+          } catch (e) {
+            // Ignore errors when disabling interception
           }
         }
       }
@@ -329,7 +357,12 @@ class AdobeScraperService {
       // cleanup: remove request listener and safely close the page (don't close pooled browser)
       try {
         if (page && requestHandler) {
-          try { page.removeListener('request', requestHandler); } catch (e) {}
+          try { 
+            // Use .off() method for Puppeteer
+            page.off('request', requestHandler); 
+          } catch (e) {
+            // Ignore cleanup errors
+          }
         }
         if (page) {
           await closePage(page, 2000);
