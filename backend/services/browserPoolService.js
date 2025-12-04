@@ -387,11 +387,24 @@ class BrowserPoolService {
       releasedNormally = true;
       return result;
     } catch (err) {
-      // If page creation indicated the browser is stuck, force-restart it.
-      if (err && (err.message === 'BROWSER_STUCK_RESTART_REQUIRED' || err.message === 'BROWSER_NOT_CONNECTED')) {
+      // If page creation or navigation indicated the browser is stuck, force-restart it.
+      const stuckBrowserErrors = [
+        'BROWSER_STUCK_RESTART_REQUIRED',
+        'BROWSER_NOT_CONNECTED',
+        'Navigation timeout',
+        'PAGE_CREATION_TIMEOUT'
+      ];
+      const isStuckBrowser = err && err.message && stuckBrowserErrors.some(msg => err.message.includes(msg));
+      
+      if (isStuckBrowser) {
         console.error(`[withBrowser] Detected stuck browser -> forcing restart: ${err.message}`);
         // Ensure browser is not returned to pool and restart it
-        try { await this.forceRestartBrowser(browser); } catch (e) { console.error('forceRestartBrowser failed:', e.message); }
+        try { 
+          await this.forceRestartBrowser(browser); 
+          console.log('[withBrowser] Browser restart completed');
+        } catch (e) { 
+          console.error('forceRestartBrowser failed:', e.message); 
+        }
         // propagate original error
         throw err;
       }

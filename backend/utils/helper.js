@@ -209,9 +209,10 @@ const createPage = async (browser, opts = {}) => {
       );
       await result.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
 
-      // Navigation timeouts
-      result.setDefaultNavigationTimeout(120000);
-      result.setDefaultTimeout(120000);
+      // Navigation timeouts - use environment variable or default to 60 seconds
+      const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 60000);
+      result.setDefaultNavigationTimeout(navigationTimeout);
+      result.setDefaultTimeout(navigationTimeout);
 
       // Intercept requests to speed up page creation
     //   await result.setRequestInterception(true);
@@ -716,6 +717,49 @@ const handleCookieConsent = async (page) => {
 
 
 /**
+ * Safely close a page with timeout protection
+ * @param {Object} page - Puppeteer page instance
+ * @param {number} timeout - Timeout in milliseconds (default 5000)
+ * @returns {Promise<boolean>} True if closed successfully
+ */
+const closePage = async (page, timeout = 5000) => {
+    if (!page) {
+        return true;
+    }
+
+    try {
+        // Check if page is already closed
+        if (page.isClosed && page.isClosed()) {
+            console.log('Page already closed');
+            return true;
+        }
+
+        // Try to close with timeout
+        await Promise.race([
+            page.close(),
+            new Promise((resolve) => setTimeout(resolve, timeout))
+        ]);
+        console.log('Page closed successfully');
+        return true;
+    } catch (error) {
+        console.warn('Error closing page (first attempt):', error.message);
+        
+        // Try force close
+        try {
+            await Promise.race([
+                page.close({ runBeforeUnload: false }),
+                new Promise((resolve) => setTimeout(resolve, 2000))
+            ]);
+            console.log('Page force closed successfully');
+            return true;
+        } catch (forceError) {
+            console.error('Failed to force close page:', forceError.message);
+            return false;
+        }
+    }
+};
+
+/**
  * Safely close browser instance
  * @param {Object} browser - Puppeteer browser instance
  */
@@ -927,6 +971,7 @@ module.exports = {
     navigateToPage,
     detectCaptcha,
     handleCookieConsent,
+    closePage,
     closeBrowser,
     // New sanitization utilities
     normalizeUrl,

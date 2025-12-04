@@ -5,7 +5,10 @@ const {
     launchBrowser,
     detectCaptcha,
     handleCookieConsent,
-    closeBrowser, createPage, navigateToPage
+    closePage,
+    closeBrowser,
+    createPage,
+    navigateToPage
 } = require('../utils/helper');
 const browserPool = require('./browserPoolService');
 let puppeteer;
@@ -72,11 +75,22 @@ class AdobeScraperService {
      */
 
 
-async detectAdobeTargetPresence(url) {
+// Recommended helper used below
+const runWithTimeout = async (promiseOrFn, ms, label = 'operation') => {
+    const fn = (typeof promiseOrFn === 'function') ? promiseOrFn : () => promiseOrFn;
+    return await Promise.race([
+      (async () => fn())(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms))
+    ]);
+  };
+  
+  // Paste this replacement for detectAdobeTargetPresence()
+  async detectAdobeTargetPresence(url) {
     let page = null;
+    let requestHandler = null;
   
     try {
-      // Use a browser from the shared pool (do NOT launch a new browser here)
+      // borrow a browser from the shared pool
       return await browserPool.withBrowser(async (browser) => {
         // createPage uses the pooled browser
         page = await createPage(browser);
@@ -87,21 +101,26 @@ async detectAdobeTargetPresence(url) {
         // navigate (uses PAGE_NAVIGATION_TIMEOUT env)
         await navigateToPage(page, url);
   
-        // enable interception only AFTER navigation
+        // --- Run cookie consent handling and captcha checks BEFORE enabling interception ---
+        // run cookie consent with a bounded timeout (10s)
         try {
-          await page.setRequestInterception(true);
-          page.on("request", req => {
-            const t = req.resourceType();
-            if (["image", "font", "stylesheet", "media"].includes(t)) req.abort();
-            else req.continue();
-          });
+          await runWithTimeout(() => handleCookieConsent(page), 10000, 'handleCookieConsent');
         } catch (e) {
-          console.warn('Could not enable request interception (continuing):', e.message);
+          console.warn(`handleCookieConsent warning: ${e.message} (continuing)`);
         }
   
-        // run captcha/cookie checks and wait for client-side Adobe presence
-        const captchaCheck = await detectCaptcha(page);
-        if (captchaCheck.detected) {
+        // small idle so client-side scripts settle
+        await new Promise(r => setTimeout(r, 500));
+  
+        // run captcha detection with a bounded timeout (5s)
+        let captchaCheck = { detected: false };
+        try {
+          captchaCheck = await runWithTimeout(() => detectCaptcha(page), 5000, 'detectCaptcha');
+        } catch (e) {
+          console.warn(`detectCaptcha warning: ${e.message} (assuming no captcha)`);
+        }
+  
+        if (captchaCheck && captchaCheck.detected) {
           return {
             detected: false,
             captchaDetected: true,
@@ -110,11 +129,55 @@ async detectAdobeTargetPresence(url) {
           };
         }
   
-        await handleCookieConsent(page);
-        // short pause for client-side JS to run (adjust if needed)
-        await new Promise(resolve => setTimeout(resolve, 4000));
+        // --- Now enable lightweight request interception (only images/fonts) ---
+        try {
+          await page.setRequestInterception(true);
+          requestHandler = req => {
+            const t = req.resourceType();
+            // ONLY block heavy, non-essential assets. Do NOT block 'script' or 'xhr' or 'fetch'.
+            if (t === 'image' || t === 'font') {
+              try { req.abort(); } catch (e) { try { req.continue(); } catch (_) {} }
+            } else {
+              try { req.continue(); } catch (_) {}
+            }
+          };
+          page.on('request', requestHandler);
+        } catch (e) {
+          console.warn('Could not enable request interception (continuing without it):', e.message);
+        }
   
-        const detectionResult = await this.detectAdobeTargetPresenceUsingPage(page);
+        // give page a short moment after enabling interception
+        await new Promise(r => setTimeout(r, 300));
+  
+        // run the Adobe Target detection logic but bound it by timeout (20s)
+        // this prevents a long-running evaluate or blocked runtime from hanging the worker
+        let detectionResult = {
+          detected: false,
+          version: null,
+          hasMboxCookie: false,
+          hasAdobeScript: false,
+          detectionSource: {}
+        };
+  
+        try {
+          detectionResult = await runWithTimeout(
+            () => this.detectAdobeTargetPresenceUsingPage(page),
+            parseInt(process.env.ADOBE_DETECTION_TIMEOUT || 20000),
+            'detectAdobeTargetPresenceUsingPage'
+          );
+        } catch (e) {
+          console.warn(`detectAdobeTargetPresenceUsingPage failed or timed out: ${e.message}`);
+          // return a safe failure result (caller can interpret)
+          return {
+            detected: false,
+            version: null,
+            hasMboxCookie: false,
+            hasAdobeScript: false,
+            httpStatusCode: null,
+            captchaDetected: false,
+            detectionSource: { error: e.message }
+          };
+        }
   
         return {
           detected: detectionResult.detected,
@@ -130,22 +193,20 @@ async detectAdobeTargetPresence(url) {
       console.error('Error detecting Adobe Target presence:', error);
       throw error;
     } finally {
-      // ensure page is closed safely (don't close browser here)
-      if (page) {
-        try {
-          // safe close: don't let close hang forever
-          await Promise.race([
-            page.close(),
-            new Promise(resolve => setTimeout(resolve, 2000)) // 2s fallback
-          ]);
-        } catch (closeError) {
-          console.warn('Error closing page after detection (safe-close):', closeError.message);
-        } finally {
-          try { page.removeAllListeners && page.removeAllListeners('request'); } catch (e) {}
+      // cleanup: remove request listener and safely close the page (don't close pooled browser)
+      try {
+        if (page && requestHandler) {
+          try { page.removeListener('request', requestHandler); } catch (e) {}
         }
+        if (page) {
+          await closePage(page, 2000);
+        }
+      } catch (finalErr) {
+        console.warn('Final cleanup error in detectAdobeTargetPresence:', finalErr.message);
       }
     }
   }
+  
   
 
     async detectAdobeTargetPresenceUsingPage(page) {
@@ -308,33 +369,63 @@ async detectAdobeTargetPresence(url) {
 
         } catch (error) {
             console.error('Error scraping experiments from page:', error);
+            
+            // Handle browser-level errors
             if (acquiredFromPool && browser && error?.message) {
                 const browserSessionErrors = [
                     'Connection closed',
                     'Target closed',
                     'Protocol error',
                     'Session closed',
-                    'Browser has been closed'
+                    'Browser has been closed',
+                    'BROWSER_STUCK_RESTART_REQUIRED',
+                    'PAGE_CREATION_TIMEOUT',
+                    'Navigation timeout'
                 ];
                 const isBrowserSessionError = browserSessionErrors.some(msg => error.message.includes(msg));
+                
                 if (isBrowserSessionError) {
                     console.warn('Detected browser-level session error; restarting pooled browser instance.');
-                    await this.browserPool.forceRestartBrowser(browser);
-                    browserRestartTriggered = true;
-                    acquiredFromPool = false;
+                    try {
+                        await this.browserPool.forceRestartBrowser(browser);
+                        browserRestartTriggered = true;
+                        acquiredFromPool = false;
+                        console.log('Browser restarted successfully after error');
+                    } catch (restartError) {
+                        console.error('Failed to restart browser:', restartError.message);
+                    }
                 }
             }
+            
+            // If it's a timeout error, try to clean up the page immediately
+            if (error?.message && error.message.includes('timeout')) {
+                console.warn('Timeout detected - attempting emergency cleanup');
+                if (page && !useSharedPage) {
+                    // Try to close page without waiting for result
+                    closePage(page, 1000).catch(() => {});
+                }
+            }
+            
             throw error;
         } finally {
             // Only clean up if NOT using shared page
             if (!useSharedPage) {
                 if (page) {
-                    try {
-                        await page.close();
-                    } catch (e) {
-                        console.warn('Error closing page:', e.message);
+                    const pageClosed = await closePage(page);
+                    
+                    // If page won't close, browser needs restart
+                    if (!pageClosed && browserManagedByPool && browser) {
+                        console.warn('Page stuck - triggering browser restart');
+                        try {
+                            await this.browserPool.forceRestartBrowser(browser);
+                            browserRestartTriggered = true;
+                            acquiredFromPool = false;
+                        } catch (restartError) {
+                            console.error('Browser restart failed:', restartError.message);
+                        }
                     }
                 }
+                
                 if (acquiredFromPool && browser && !browserRestartTriggered) {
                     this.browserPool.releaseBrowser(browser);
                 } else if (browser && !browserInstance && !acquiredFromPool) {
