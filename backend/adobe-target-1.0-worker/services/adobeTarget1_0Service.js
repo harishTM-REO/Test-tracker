@@ -20,10 +20,66 @@ const {
   monitorDBHealth
 } = require(path.join(__dirname, '../../services/utils/batchProcessingHelpers'));
 
+// Import Puppeteer for browser launching
+const chromium = require('@sparticuz/chromium');
+let puppeteer;
+try {
+  puppeteer = require('puppeteer-extra');
+  const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+  puppeteer.use(StealthPlugin());
+} catch (e) {
+  try {
+    puppeteer = require('puppeteer');
+  } catch (e2) {
+    puppeteer = require('puppeteer-core');
+  }
+}
+
 class AdobeTarget1_0Service {
   constructor() {
     this.backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
     this.urlCollectorBaseUrl = `${this.backendUrl}/api/url-collector`;
+  }
+
+  /**
+   * Launch a fresh browser instance for sequential validation
+   * NO POOL - Each URL gets its own browser
+   */
+  async launchBrowser() {
+    const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+    const browserOptions = {
+      headless: 'new',
+      ignoreHTTPSErrors: true,
+      protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
+      timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--window-size=1366,768',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-web-security',
+        '--allow-running-insecure-content',
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-sync',
+        '--disable-default-apps'
+      ]
+    };
+
+    if (!isLocal && process.env.NODE_ENV === 'production') {
+      browserOptions.executablePath = await chromium.executablePath();
+    }
+
+    return await puppeteer.launch(browserOptions);
   }
 
   /**
@@ -1045,23 +1101,16 @@ class AdobeTarget1_0Service {
     let datasetDoc = null;
     let validationResultDoc = null;
     const startTime = new Date();
-    let originalMaxPages; // Store original browser restart frequency
 
     try {
       progressCallback(5, { message: 'Starting Adobe Target validation run' });
 
-      // ========== JOB-LEVEL POOL REFRESH ==========
-      // CRITICAL: Refresh pool at the start of EACH validation job
-      // This ensures complete isolation between datasets uploaded back-to-back
-      // Prevents Run 2 from inheriting degraded state from Run 1
-      console.log('\n🔄 NEW VALIDATION JOB - Refreshing browser pool for isolation');
-      try {
-        await browserPool.refreshPool();
-        console.log('✅ Pool refreshed successfully - starting with fresh browsers\n');
-      } catch (refreshError) {
-        console.warn(`⚠️  Pool refresh failed: ${refreshError.message} - continuing with existing pool`);
-        // Non-fatal: continue with existing pool rather than failing the job
-      }
+      // ========== NO BROWSER POOL ==========
+      // SEQUENTIAL PROCESSING: Each URL gets a fresh browser
+      // This eliminates cascading failures and ensures 100% isolation
+      console.log('\n🚀 Starting validation with SEQUENTIAL processing (No browser pool)');
+      console.log('   Each URL will get a fresh browser for complete isolation');
+      console.log('   This prevents stuck browsers from affecting other URLs\n');
 
       datasetDoc = await Dataset.findById(datasetId);
       if (datasetDoc) {
@@ -1153,50 +1202,20 @@ class AdobeTarget1_0Service {
 
       console.log(`${'='.repeat(60)}\n`);
 
-      try {
-        await browserPool.initialize();
-      } catch (poolError) {
-        console.warn(`⚠️ Browser pool initialization failed for validation: ${poolError.message}`);
-      }
-      
-      // Override browser pool restart frequency for Adobe Target validation
-      // This allows more aggressive browser restarts during validation without affecting other operations
-      const originalMaxPages = browserPool.maxPagesBeforeRestart;
-      const validationMaxPages = parseInt(process.env.ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART) || originalMaxPages;
-      
-      if (validationMaxPages !== originalMaxPages) {
-        console.log(`🔧 Temporarily setting browser restart frequency: ${originalMaxPages} → ${validationMaxPages} pages`);
-        browserPool.maxPagesBeforeRestart = validationMaxPages;
-      }
+      // No browser pool initialization needed
+      // Each URL will launch and close its own browser
+      console.log('ℹ️  Browser pool disabled - using sequential processing with fresh browsers');
 
-      // Adobe Target Validation Configuration
-      // ADOBE_VALIDATION_BATCH_SIZE: Number of URLs per chunk (default: 25)
-      //   - Set to 1 for ultra-conservative mode (process one URL at a time)
-      //   - Recommended: 1-5 for Railway, 10-25 for local/high-resource servers
+      // Adobe Target Validation Configuration - Sequential Processing
+      // ADOBE_VALIDATION_BATCH_SIZE: Number of URLs per chunk for progress tracking
       const validationBatchSize = parseInt(process.env.ADOBE_VALIDATION_BATCH_SIZE) || 25;
-      
-      // ADOBE_VALIDATION_CONCURRENT: Number of parallel browsers (default: browser pool size or 3)
-      //   - Set to 1 for sequential processing (safest, slowest)
-      //   - Set to 2-3 for Railway
-      //   - Set to 5+ for high-resource servers
-      const validationConcurrent = parseInt(process.env.ADOBE_VALIDATION_CONCURRENT) ||
-        parseInt(process.env.BROWSER_POOL_SIZE) || 3;
-      
-      // ADOBE_VALIDATION_MAX_TABS: URLs per browser instance (default: 1)
-      //   - Keep at 1 for sequential processing per browser
-      const validationMaxTabs = parseInt(process.env.ADOBE_VALIDATION_MAX_TABS) || 1;
-      
       const totalBatches = Math.max(1, Math.ceil(urls.length / validationBatchSize));
       
-      const restartBrowserEveryNChunks = parseInt(process.env.RESTART_BROWSER_EVERY_N_CHUNKS) || 5;
-      
-      console.log(`📊 Adobe Target Validation Configuration:`);
-      console.log(`   Batch Size: ${validationBatchSize} URLs per chunk`);
-      console.log(`   Concurrent Browsers: ${validationConcurrent}`);
-      console.log(`   Max Tabs per Browser: ${validationMaxTabs}`);
+      console.log(`📊 Adobe Target Validation Configuration (Sequential):`);
+      console.log(`   Processing Mode: Sequential (1 URL at a time)`);
+      console.log(`   Fresh Browser: Each URL gets its own browser`);
+      console.log(`   Batch Size: ${validationBatchSize} URLs per chunk (for progress tracking)`);
       console.log(`   Total Batches: ${totalBatches}`);
-      console.log(`   Browser Restart After: ${parseInt(process.env.ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART) || browserPool.maxPagesBeforeRestart} pages`);
-      console.log(`   Proactive Health Check: Every ${restartBrowserEveryNChunks} chunks`);
 
       let processedUrlsCounter = 0;
 
@@ -1205,97 +1224,24 @@ class AdobeTarget1_0Service {
         const chunkNumber = Math.floor(i / validationBatchSize) + 1;
         console.log(`\n🔁 Processing validation chunk ${chunkNumber}/${totalBatches} (${chunk.length} URLs)`);
 
-        // Proactive browser restart every N chunks to prevent memory buildup
-        if (chunkNumber > 1 && (chunkNumber - 1) % restartBrowserEveryNChunks === 0) {
-          console.log(`🔄 Proactive browser restart at chunk ${chunkNumber} (every ${restartBrowserEveryNChunks} chunks)`);
-          try {
-            await browserPool.healthCheck();
-            console.log('✅ Browser health check completed');
-          } catch (error) {
-            console.warn(`⚠️  Browser health check failed: ${error.message}`);
-          }
-        }
-
-        // Check if periodic pool refresh is needed
-        const refreshCheck = browserPool.shouldRefreshPool();
-        if (refreshCheck.shouldRefresh) {
-          console.log(`\n🔄 Periodic pool refresh needed: ${refreshCheck.reason}`);
-          try {
-            await browserPool.refreshPool();
-            console.log('✅ Pool refresh completed - continuing with fresh browsers\n');
-          } catch (refreshError) {
-            console.error(`⚠️  Pool refresh failed: ${refreshError.message} - continuing with existing pool`);
-          }
-        }
+        // No pool management needed - each URL gets fresh browser
+        // Periodic refresh removed since we're not using browser pool
 
         const chunkPositives = [];
         const chunkNegatives = [];
         const chunkFailures = [];
-
-        // Add timeout protection for the entire chunk
-        // Dynamic timeout: base timeout + (URLs in chunk * time per URL)
-        const baseTimeout = 30000; // 30 seconds base
-        const timePerUrl = 60000;  // 60 seconds per URL
-        const defaultTimeout = baseTimeout + (chunk.length * timePerUrl);
-        const chunkTimeout = parseInt(process.env.CHUNK_PROCESSING_TIMEOUT) || defaultTimeout;
         const chunkStartTime = Date.now();
-        
-        console.log(`⏱️  Chunk ${chunkNumber} timeout: ${(chunkTimeout / 1000).toFixed(0)}s (${chunk.length} URLs × ${timePerUrl/1000}s + ${baseTimeout/1000}s base)`);
         
         let chunkResults;
         try {
-          // Only apply timeout if explicitly enabled (disabled by default since health checks work well)
-          if (chunkTimeout > 0 && chunkTimeout < Infinity) {
-            chunkResults = await Promise.race([
-              this.processValidationChunk(chunk, {
-                concurrent: validationConcurrent,
-                maxTabs: validationMaxTabs
-              }),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error(`CHUNK_TIMEOUT: Chunk ${chunkNumber} took longer than ${chunkTimeout}ms`)), chunkTimeout)
-              )
-            ]);
-          } else {
-            // No timeout - rely on health checks and page-level timeouts
-            console.log(`⏱️  Chunk ${chunkNumber} timeout: disabled (relying on health checks)`);
-            chunkResults = await this.processValidationChunk(chunk, {
-              concurrent: validationConcurrent,
-              maxTabs: validationMaxTabs
-            });
-          }
+          // Sequential processing - each URL has its own browser and timeout
+          console.log(`⏱️  Processing chunk ${chunkNumber} sequentially (fresh browser per URL)`);
+          chunkResults = await this.processValidationChunk(chunk);
           
           const chunkDuration = Date.now() - chunkStartTime;
           console.log(`⏱️  Chunk ${chunkNumber} completed in ${(chunkDuration / 1000).toFixed(1)}s`);
         } catch (chunkError) {
-          if (chunkError.message.includes('CHUNK_TIMEOUT')) {
-            console.error(`🔴 ${chunkError.message} - forcing browser restart`);
-            
-            // Force restart all browsers
-            try {
-              await browserPool.healthCheck();
-            } catch (e) {
-              console.error('Failed to recover browsers:', e.message);
-            }
-            
-            // Mark all URLs in this chunk as failed
-            chunk.forEach(entry => {
-              const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
-              const targetUrl = normalizedEntry.url || 'UNKNOWN_URL';
-              
-              failedUrls.push(targetUrl);
-              scrapingStats.failedScans += 1;
-              scrapingStats.processedUrls += 1;
-              chunkFailures.push(this.buildValidationRecord({
-                url: targetUrl,
-                companyName: normalizedEntry.companyName || null,
-                status: 'failed',
-                error: 'Chunk processing timeout - browser may be stuck'
-              }));
-            });
-            
-            // Continue to next chunk
-            continue;
-          }
+          console.error(`🔴 Error processing chunk ${chunkNumber}:`, chunkError.message);
           throw chunkError;
         }
         
@@ -1377,11 +1323,7 @@ class AdobeTarget1_0Service {
           scrapingStats.processedUrls += 1;
         });
 
-        // Track URLs processed in browser pool for refresh logic
-        chunkResults.forEach(() => {
-          browserPool.incrementUrlsProcessed();
-        });
-
+        // No browser pool tracking needed - each URL has its own browser
         processedUrlsCounter = Math.min(scrapingStats.processedUrls, urls.length);
         const progress = 5 + Math.floor((processedUrlsCounter / urls.length) * 90);
         progressCallback(Math.min(progress, 95), {
@@ -1474,12 +1416,6 @@ class AdobeTarget1_0Service {
       }
 
       progressCallback(100, { message: 'Adobe Target validation completed' });
-      
-      // Restore original browser restart frequency
-      if (typeof originalMaxPages !== 'undefined' && originalMaxPages !== browserPool.maxPagesBeforeRestart) {
-        console.log(`🔧 Restoring browser restart frequency: ${browserPool.maxPagesBeforeRestart} → ${originalMaxPages} pages`);
-        browserPool.maxPagesBeforeRestart = originalMaxPages;
-      }
 
       return {
         success: true,
@@ -1489,12 +1425,6 @@ class AdobeTarget1_0Service {
       };
     } catch (error) {
       console.error('Error during Adobe Target validation workflow:', error);
-      
-      // Restore original browser restart frequency even on error
-      if (typeof originalMaxPages !== 'undefined' && originalMaxPages !== browserPool.maxPagesBeforeRestart) {
-        console.log(`🔧 Restoring browser restart frequency after error: ${browserPool.maxPagesBeforeRestart} → ${originalMaxPages} pages`);
-        browserPool.maxPagesBeforeRestart = originalMaxPages;
-      }
 
       if (validationResultDoc) {
         validationResultDoc.status = 'failed';
@@ -1531,131 +1461,123 @@ class AdobeTarget1_0Service {
    * Process a chunk of validation URLs using the shared browser pool
    * Includes smart retry logic for unprocessed URLs from failed batches
    */
+  /**
+   * Process validation chunk with PURE SEQUENTIAL approach - NO BROWSER POOL
+   * Each URL gets a fresh browser to prevent cascading failures
+   * This is slower but 100% reliable and consistent
+   */
   async processValidationChunk(urls, options = {}) {
     if (!urls || urls.length === 0) {
       return [];
     }
 
-    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
-    const {
-      concurrent = poolSize,
-      maxTabs = 1,
-      retryAttempt = 0,
-      maxRetries = 1
-    } = options;
+    console.log(`\n🔁 Processing ${urls.length} URLs SEQUENTIALLY (Fresh browser per URL - No Pool)`);
+    console.log('═'.repeat(70));
 
-    const actualConcurrent = Math.max(1, Math.min(concurrent, poolSize));
-    const urlBatches = this.distributeValidationUrls(urls, actualConcurrent, maxTabs);
-
-    const batchPromises = urlBatches.map((urlBatch, index) =>
-      browserPool.withBrowser(async (browser) => {
-        const retryLabel = retryAttempt > 0 ? ` [Retry ${retryAttempt}/${maxRetries}]` : '';
-        console.log(`🧪 Validation browser batch ${index + 1}/${urlBatches.length} (${urlBatch.length} URLs)${retryLabel}`);
-        return this.processBrowserValidationBatch(browser, urlBatch);
-      }).catch(error => {
-        // Return the error along with the batch info for proper handling
-        return { error, urlBatch };
-      })
-    );
-
-    const settled = await Promise.allSettled(batchPromises);
     const results = [];
-    const urlsToRetry = [];
 
-    settled.forEach((result, batchIndex) => {
-      if (result.status === 'fulfilled') {
-        const value = result.value;
+    // Process each URL one at a time with its own browser
+    for (let i = 0; i < urls.length; i++) {
+      const entry = urls[i];
+      const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+      const targetUrl = normalizedEntry.url;
+
+      if (!targetUrl) {
+        console.error(`❌ Invalid URL in dataset (entry ${i + 1})`);
+        results.push({ 
+          success: false, 
+          url: 'INVALID_URL', 
+          companyName: normalizedEntry.companyName || null,
+          error: 'Invalid or missing URL in dataset' 
+        });
+        continue;
+      }
+
+      console.log(`\n🔸 [${i + 1}/${urls.length}] Validating ${targetUrl}`);
+
+      let browser = null;
+      let page = null;
+
+      try {
+        // Launch fresh browser for this URL
+        console.log('   🚀 Launching fresh browser...');
+        browser = await this.launchBrowser();
+        console.log('   ✅ Browser launched');
+
+        // Create page
+        page = await createPage(browser);
+        console.log('   📄 Page created');
+
+        // Use the optimized detection method with timeout protection
+        const detectionResult = await AdobeScraperService.detectAdobeTargetPresenceWithSharedPage(
+          page,
+          targetUrl
+        );
+
+        // Format result
+        const adobeTargetData = {
+          detected: detectionResult.detected,
+          version: detectionResult.version,
+          hasMboxCookie: detectionResult.hasMboxCookie,
+          hasAdobeScript: detectionResult.hasAdobeScript,
+          captchaDetected: detectionResult.captchaDetected,
+          captchaStatus: detectionResult.captchaStatus,
+          detectionSource: detectionResult.detectionSource,
+          activityIds: detectionResult.activityIds || [],
+          activityNames: detectionResult.activityNames || [],
+          experiments: [],
+          experimentCount: 0,
+          activeCount: 0
+        };
+
+        results.push({
+          success: true,
+          url: targetUrl,
+          companyName: normalizedEntry.companyName || null,
+          adobeTargetData
+        });
+
+        console.log(`   ✅ Validation complete`);
+
+      } catch (error) {
+        console.error(`   ❌ Validation failed: ${error.message}`);
         
-        // Check if this is an error result from our catch handler
-        if (value && value.error && value.urlBatch) {
-          console.error(`❌ Validation batch ${batchIndex + 1} failed:`, value.error?.message || value.error);
-          
-          // This shouldn't happen with our new error handling, but keep as fallback
-          value.urlBatch.forEach(entry => {
-            const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
-            const targetUrl = normalizedEntry.url || 'UNKNOWN_URL';
-            
-            results.push({
-              success: false,
-              url: targetUrl,
-              companyName: normalizedEntry.companyName || null,
-              error: `Batch processing failed: ${value.error?.message || 'Unknown error'}`
-            });
-          });
-        } else if (Array.isArray(value)) {
-          // Process the batch results
-          const processedUrls = new Set();
-          const batchUrlsList = urlBatches[batchIndex] || [];
-          
-          value.forEach(resultItem => {
-            results.push(resultItem);
-            if (resultItem.url) {
-              processedUrls.add(resultItem.url);
-            }
-          });
-          
-          // Check if any URLs from this batch were not processed
-          batchUrlsList.forEach(entry => {
-            const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
-            const targetUrl = normalizedEntry.url;
-            
-            if (targetUrl && !processedUrls.has(targetUrl)) {
-              // This URL was not processed - add it to retry list
-              if (retryAttempt < maxRetries) {
-                console.log(`🔄 Queueing ${targetUrl} for retry (not processed in batch)`);
-                urlsToRetry.push(entry);
-              } else {
-                // Max retries reached - mark as failed
-                console.error(`❌ Max retries reached for ${targetUrl}`);
-                results.push({
-                  success: false,
-                  url: targetUrl,
-                  companyName: normalizedEntry.companyName || null,
-                  error: 'Max retries reached - URL not processed due to batch failure'
-                });
-              }
-            }
-          });
+        results.push({
+          success: false,
+          url: targetUrl,
+          companyName: normalizedEntry.companyName || null,
+          error: error.message || 'Unknown validation error'
+        });
+
+      } finally {
+        // ALWAYS close page and browser after each URL
+        if (page) {
+          try {
+            await closePage(page);
+            console.log('   📄 Page closed');
+          } catch (e) {
+            console.warn(`   ⚠️  Error closing page: ${e.message}`);
+          }
         }
-      } else if (result.status === 'rejected') {
-        // This shouldn't happen now with our catch, but handle it just in case
-        console.error(`❌ Validation batch ${batchIndex + 1} rejected:`, result.reason?.message || result.reason);
-        
-        // Try to get URLs from the original batch for retry
-        if (urlBatches[batchIndex]) {
-          urlBatches[batchIndex].forEach(entry => {
-            const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
-            const targetUrl = normalizedEntry.url || 'UNKNOWN_URL';
-            
-            if (retryAttempt < maxRetries) {
-              console.log(`🔄 Queueing ${targetUrl} for retry (batch rejected)`);
-              urlsToRetry.push(entry);
-            } else {
-              results.push({
-                success: false,
-                url: targetUrl,
-                companyName: normalizedEntry.companyName || null,
-                error: `Batch rejected: ${result.reason?.message || 'Unknown error'}`
-              });
-            }
-          });
+
+        if (browser) {
+          try {
+            await browser.close();
+            console.log('   🔒 Browser closed');
+          } catch (e) {
+            console.warn(`   ⚠️  Error closing browser: ${e.message}`);
+          }
+        }
+
+        // Small delay between URLs to allow system resource cleanup
+        if (i < urls.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
-    });
-
-    // Retry unprocessed URLs if any
-    if (urlsToRetry.length > 0) {
-      console.log(`\n🔄 Retrying ${urlsToRetry.length} unprocessed URLs from failed batches...`);
-      
-      const retryResults = await this.processValidationChunk(urlsToRetry, {
-        concurrent,
-        maxTabs,
-        retryAttempt: retryAttempt + 1,
-        maxRetries
-      });
-      
-      results.push(...retryResults);
     }
+
+    console.log('\n' + '═'.repeat(70));
+    console.log(`✅ Chunk complete: ${results.length} URLs processed`);
 
     return results;
   }

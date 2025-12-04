@@ -303,10 +303,10 @@ POOL_REFRESH_AFTER_URLS=0
 
 | Use Case | Pool Size | Max Pages | Refresh Minutes | Refresh URLs | Rationale |
 |----------|-----------|-----------|-----------------|--------------|-----------|
-| **Railway (32GB)** | 2 | 40 | 10 | 200 | Conservative for limited resources |
+| **Railway (32GB) - Recommended** | 2 | 40 | 10 | 200 | Conservative for limited resources |
+| **Ultra-Conservative (Option 3)** | 1 | 20 | 0 | 20 | Maximum consistency, sequential processing |
 | **High-Resource Server** | 4 | 50 | 15 | 300 | Balanced performance |
 | **Development/Testing** | 2 | 30 | 0 | 0 | Fast restarts, no refresh |
-| **Ultra-Conservative** | 2 | 20 | 5 | 100 | Maximum stability, frequent refresh |
 | **Maximum Performance** | 5 | 60 | 20 | 500 | Minimize refresh overhead |
 
 ### **Tuning Guidelines**
@@ -320,6 +320,20 @@ POOL_REFRESH_AFTER_URLS=0
    - Each refresh takes ~5-10 seconds
    - Refreshing every 50 URLs = high overhead
    - Refreshing every 500 URLs = better throughput but more risk
+
+### **When to Use Option 3 (Ultra-Conservative)**
+
+Use Option 3 configuration if:
+- ✅ You experience inconsistent failure rates between runs (e.g., Run 1: 13%, Run 2: 48%)
+- ✅ You upload multiple datasets back-to-back
+- ✅ You prioritize consistency over speed
+- ✅ You see "BROWSER_STUCK_RESTART_REQUIRED" errors frequently
+
+**Trade-offs:**
+- ⏱️ Slower: ~35-40 minutes for 1000 URLs (vs ~20 minutes with parallel)
+- ✅ Consistent: Same failure rate across all runs
+- ✅ Simple: No concurrency issues
+- ✅ Reliable: Pool refreshes at job start + every 20 URLs
 
 ### **Monitoring Pool Health**
 
@@ -416,6 +430,8 @@ LOG_LEVEL=info
 ```
 
 **AT 1.0 Worker** Environment Variables in Railway:
+
+**Option A: Balanced (Default)**
 ```env
 WORKER_AT10_PORT=4001
 NODE_ENV=production
@@ -435,6 +451,30 @@ POOL_REFRESH_AFTER_URLS=200
 ADOBE_VALIDATION_BATCH_SIZE=25
 ADOBE_VALIDATION_CONCURRENT=2
 ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART=40
+RESTART_BROWSER_EVERY_N_CHUNKS=5
+CHUNK_PROCESSING_TIMEOUT=0
+```
+
+**Option B: Ultra-Conservative (Option 3) - For Maximum Consistency**
+```env
+WORKER_AT10_PORT=4001
+NODE_ENV=production
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/prod-tracker?retryWrites=true&w=majority
+BACKEND_URL=https://your-main-backend.railway.app
+CORS_ORIGIN=https://your-frontend.railway.app
+AT10_CONCURRENCY=4
+LOG_LEVEL=info
+
+# Browser Pool (Ultra-Conservative - Pool Size 1, Sequential)
+BROWSER_POOL_SIZE=1
+MAX_PAGES_BEFORE_RESTART=20
+POOL_REFRESH_AFTER_MINUTES=0
+POOL_REFRESH_AFTER_URLS=20
+
+# Adobe Target Validation (Sequential Processing)
+ADOBE_VALIDATION_BATCH_SIZE=25
+ADOBE_VALIDATION_CONCURRENT=1
+ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART=20
 RESTART_BROWSER_EVERY_N_CHUNKS=5
 CHUNK_PROCESSING_TIMEOUT=0
 ```

@@ -62,6 +62,142 @@
         </div>
       </div>
 
+      <!-- Re-scrape Section (Adobe Target 1.0 only) -->
+      <div v-if="dataset.toolType === 'Adobe Target 1.0' && dataset.scrapingStatus === 'completed'" class="rescrape-section">
+        <div class="section-header">
+          <h2>🔄 Re-scrape Experiments</h2>
+        </div>
+        
+        <div class="rescrape-info">
+          <p class="info-text">
+            Re-scrape experiments from the same top 25 URLs to detect changes over time.
+            This skips the crawling and prioritization steps, making it ~40% faster.
+          </p>
+        </div>
+
+        <div class="rescrape-stats" v-if="adobeResults && adobeResults.currentRunNumber">
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span class="stat-label">Current Run:</span>
+              <span class="stat-value">#{{ adobeResults.currentRunNumber }}</span>
+            </div>
+            <div class="stat-item" v-if="adobeResults.lastRescrapedAt">
+              <span class="stat-label">Last Re-scraped:</span>
+              <span class="stat-value">{{ formatDate(adobeResults.lastRescrapedAt) }}</span>
+            </div>
+            <div class="stat-item" v-if="latestRun && latestRun.stats">
+              <span class="stat-label">Unique Experiments:</span>
+              <span class="stat-value">{{ latestRun.stats.uniqueExperimentsFound || 0 }}</span>
+            </div>
+            <div class="stat-item" v-if="latestRun && latestRun.duration">
+              <span class="stat-label">Duration:</span>
+              <span class="stat-value">{{ latestRun.duration }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="rescrape-actions">
+          <button 
+            @click="rescrapeExperiments" 
+            class="rescrape-btn"
+            :disabled="rescrapingInProgress || dataset.scrapingStatus === 'in_progress' || dataset.scrapingStatus === 'pending'"
+          >
+            <span v-if="rescrapingInProgress">⏳ Re-scraping in progress...</span>
+            <span v-else-if="dataset.scrapingStatus === 'in_progress'">🔄 Scraping in progress...</span>
+            <span v-else-if="dataset.scrapingStatus === 'pending'">⏳ Pending...</span>
+            <span v-else>🔄 Re-scrape Experiments</span>
+          </button>
+          
+          <button 
+            v-if="adobeResults && adobeResults.runs && adobeResults.runs.length > 1"
+            @click="viewRunHistory" 
+            class="history-btn"
+          >
+            📜 View Run History ({{ adobeResults.runs.length }} runs)
+          </button>
+        </div>
+
+        <div v-if="rescrapingInProgress" class="progress-indicator">
+          <div class="progress-bar">
+            <div class="progress-fill"></div>
+          </div>
+          <p class="progress-text">Re-scraping in progress... This may take several minutes.</p>
+        </div>
+
+        <div v-if="rescrapeError" class="error-message">
+          <span>❌ Error: {{ rescrapeError }}</span>
+        </div>
+      </div>
+
+      <!-- Run History Modal -->
+      <div v-if="showRunHistory" class="modal-overlay" @click="showRunHistory = false">
+        <div class="modal-content" @click.stop>
+          <div class="modal-header">
+            <h3>📜 Scraping Run History</h3>
+            <button @click="showRunHistory = false" class="close-btn">✕</button>
+          </div>
+          
+          <div class="modal-body">
+            <div v-if="adobeResults && adobeResults.runs" class="runs-timeline">
+              <div 
+                v-for="(run, index) in sortedRuns" 
+                :key="run.runNumber"
+                class="run-item"
+                :class="{ 'latest': index === 0 }"
+              >
+                <div class="run-header">
+                  <div class="run-title">
+                    <span class="run-number">Run #{{ run.runNumber }}</span>
+                    <span v-if="run.runType === 'initial'" class="run-type initial">Initial</span>
+                    <span v-else class="run-type rescrape">Re-scrape</span>
+                    <span v-if="index === 0" class="latest-badge">Latest</span>
+                  </div>
+                  <span class="run-date">{{ formatDate(run.completedAt) }}</span>
+                </div>
+                
+                <div class="run-stats">
+                  <div class="run-stat">
+                    <span class="label">Experiments:</span>
+                    <span class="value">{{ run.stats?.uniqueExperimentsFound || 0 }}</span>
+                  </div>
+                  <div class="run-stat">
+                    <span class="label">Duration:</span>
+                    <span class="value">{{ run.duration || 'N/A' }}</span>
+                  </div>
+                  <div class="run-stat">
+                    <span class="label">Status:</span>
+                    <span :class="['value', 'status-' + run.status]">{{ run.status }}</span>
+                  </div>
+                </div>
+
+                <div v-if="run.changes && (run.changes.newExperiments.length > 0 || run.changes.removedExperiments.length > 0)" class="run-changes">
+                  <span class="changes-label">Changes:</span>
+                  <span v-if="run.changes.newExperiments.length > 0" class="change-badge new">
+                    +{{ run.changes.newExperiments.length }} new
+                  </span>
+                  <span v-if="run.changes.removedExperiments.length > 0" class="change-badge removed">
+                    -{{ run.changes.removedExperiments.length }} removed
+                  </span>
+                </div>
+
+                <div class="run-actions">
+                  <button @click="viewRunDetails(run.runNumber)" class="action-btn">
+                    👁️ View Details
+                  </button>
+                  <button 
+                    v-if="index > 0" 
+                    @click="compareRuns(run.runNumber, sortedRuns[index - 1].runNumber)" 
+                    class="action-btn"
+                  >
+                    📊 Compare with Previous
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Change Detection Section -->
       <div v-if="dataset.scrapingStatus === 'completed'" class="change-detection-section">
         <div class="section-header">
@@ -276,7 +412,20 @@ export default {
       latestVersionSummary: null,
       statusPollingInterval: null,
       apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
-      activeTab: 'companies' // Default tab
+      activeTab: 'companies', // Default tab
+      // Re-scrape related
+      rescrapingInProgress: false,
+      rescrapeError: null,
+      adobeResults: null,
+      latestRun: null,
+      showRunHistory: false
+    }
+  },
+
+  computed: {
+    sortedRuns() {
+      if (!this.adobeResults || !this.adobeResults.runs) return [];
+      return [...this.adobeResults.runs].reverse(); // Latest first
     }
   },
   
@@ -321,6 +470,11 @@ export default {
           if (data.data.scrapingStatus === 'completed') {
             await this.fetchChangeDetectionStatus()
             await this.fetchLatestVersionSummary()
+          }
+
+          // Fetch Adobe Target 1.0 results if applicable
+          if (data.data.toolType === 'Adobe Target 1.0') {
+            await this.fetchAdobeResults()
           }
         } else {
           this.error = data.message || 'Failed to fetch dataset'
@@ -487,6 +641,111 @@ export default {
       // Handle messages from CrawledPages component
       console.log('Message from CrawledPages:', message)
       // You can add toast notifications or other UI feedback here
+    },
+
+    // ===== Re-scrape Methods =====
+    async fetchAdobeResults() {
+      try {
+        const response = await fetch(`${this.apiBaseUrl}/at10/api/results/dataset/${this.datasetId}`)
+        const data = await response.json()
+        
+        if (data.success && data.data) {
+          this.adobeResults = data.data
+          this.latestRun = data.data.runs && data.data.runs.length > 0 
+            ? data.data.runs[data.data.runs.length - 1]
+            : null
+        }
+      } catch (error) {
+        console.error('Error fetching Adobe results:', error)
+      }
+    },
+
+    async rescrapeExperiments() {
+      try {
+        this.rescrapingInProgress = true
+        this.rescrapeError = null
+        
+        const response = await fetch(
+          `${this.apiBaseUrl}/api/datasets/${this.datasetId}/rescrape-experiments`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: 'user123' }) // Replace with actual user ID if available
+          }
+        )
+        
+        const data = await response.json()
+        
+        if (data.success) {
+          alert(`✅ Re-scraping initiated! Job ID: ${data.data.jobId}\n\nThis will take several minutes. The page will update when complete.`)
+          // Poll for status updates
+          this.pollForRescapeUpdates()
+        } else {
+          throw new Error(data.message)
+        }
+      } catch (error) {
+        console.error('Error starting re-scrape:', error)
+        this.rescrapeError = error.message
+        alert(`❌ Failed to start re-scraping: ${error.message}`)
+        this.rescrapingInProgress = false
+      }
+    },
+
+    async pollForRescapeUpdates() {
+      const pollInterval = setInterval(async () => {
+        try {
+          // Fetch dataset status
+          const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}`)
+          const data = await response.json()
+          
+          if (data.success) {
+            this.dataset = data.data
+            
+            // Check if completed
+            if (data.data.scrapingStatus === 'completed') {
+              clearInterval(pollInterval)
+              this.rescrapingInProgress = false
+              
+              // Reload Adobe results
+              await this.fetchAdobeResults()
+              
+              alert('✅ Re-scraping completed successfully!')
+            } else if (data.data.scrapingStatus === 'failed') {
+              clearInterval(pollInterval)
+              this.rescrapingInProgress = false
+              this.rescrapeError = data.data.scrapingError || 'Re-scraping failed'
+              alert('❌ Re-scraping failed')
+            }
+          }
+        } catch (error) {
+          console.error('Error polling for updates:', error)
+        }
+      }, 5000) // Poll every 5 seconds
+      
+      // Stop polling after 30 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval)
+        if (this.rescrapingInProgress) {
+          this.rescrapingInProgress = false
+          alert('⏰ Polling timeout. Please refresh the page to check the status.')
+        }
+      }, 30 * 60 * 1000)
+    },
+
+    viewRunHistory() {
+      this.showRunHistory = true
+    },
+
+    viewRunDetails(runNumber) {
+      console.log('View run details for run:', runNumber)
+      // TODO: Navigate to run details page or show modal with details
+      alert(`Viewing details for Run #${runNumber}\n\nThis feature will show detailed experiment data for this run.`)
+    },
+
+    compareRuns(runNumber1, runNumber2) {
+      console.log('Compare runs:', runNumber1, 'vs', runNumber2)
+      // TODO: Navigate to comparison page or show modal
+      alert(`Comparing Run #${runNumber1} vs Run #${runNumber2}\n\nThis feature will show differences in experiments between the two runs.`)
     }
   }
 }
@@ -622,6 +881,366 @@ export default {
 .info-item .value {
   color: #333;
   font-weight: 600;
+}
+
+/* Re-scrape Section */
+.rescrape-section {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 12px;
+  padding: 25px;
+  margin-bottom: 30px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.rescrape-section h2 {
+  margin: 0 0 15px 0;
+  color: white;
+}
+
+.rescrape-info {
+  background: rgba(255,255,255,0.15);
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.rescrape-info .info-text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.rescrape-stats {
+  background: rgba(255,255,255,0.1);
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.rescrape-stats .stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+}
+
+.rescrape-stats .stat-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.rescrape-stats .stat-label {
+  font-size: 0.85rem;
+  opacity: 0.9;
+  margin-bottom: 5px;
+}
+
+.rescrape-stats .stat-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.rescrape-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.rescrape-btn {
+  background: white;
+  color: #667eea;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.rescrape-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.rescrape-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.rescrape-section .history-btn {
+  background: rgba(255,255,255,0.2);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.3);
+  padding: 10px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.rescrape-section .history-btn:hover {
+  background: rgba(255,255,255,0.3);
+}
+
+.progress-indicator {
+  margin-top: 20px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: white;
+  animation: progress 2s ease-in-out infinite;
+}
+
+@keyframes progress {
+  0% { width: 0%; }
+  50% { width: 70%; }
+  100% { width: 0%; }
+}
+
+.progress-text {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+/* Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 800px;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  padding: 20px 25px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: #333;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #999;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-btn:hover {
+  color: #333;
+}
+
+.modal-body {
+  padding: 25px;
+  overflow-y: auto;
+}
+
+.runs-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.run-item {
+  background: #f8f9fa;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  padding: 20px;
+  transition: all 0.2s ease;
+}
+
+.run-item.latest {
+  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+  border-color: #667eea;
+}
+
+.run-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.run-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 15px;
+}
+
+.run-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.run-number {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #333;
+}
+
+.run-type {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.run-type.initial {
+  background: #d4edda;
+  color: #155724;
+}
+
+.run-type.rescrape {
+  background: #cce5ff;
+  color: #004085;
+}
+
+.latest-badge {
+  background: #667eea;
+  color: white;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.run-date {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.run-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.run-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.run-stat .label {
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.run-stat .value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.run-stat .status-completed {
+  color: #28a745;
+}
+
+.run-stat .status-failed {
+  color: #dc3545;
+}
+
+.run-stat .status-in_progress {
+  color: #ffc107;
+}
+
+.run-changes {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 15px;
+  padding: 10px;
+  background: rgba(255,255,255,0.5);
+  border-radius: 6px;
+}
+
+.changes-label {
+  font-size: 0.9rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.change-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.change-badge.new {
+  background: #d4edda;
+  color: #155724;
+}
+
+.change-badge.removed {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.run-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.action-btn {
+  background: white;
+  color: #667eea;
+  border: 1px solid #667eea;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.action-btn:hover {
+  background: #667eea;
+  color: white;
 }
 
 .change-detection-section {
