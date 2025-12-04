@@ -580,6 +580,7 @@ class AdobeTarget1_0Service {
     let datasetDoc = null;
     let validationResultDoc = null;
     const startTime = new Date();
+    let originalMaxPages; // Store original browser restart frequency
 
     try {
       progressCallback(5, { message: 'Starting Adobe Target validation run' });
@@ -658,6 +659,16 @@ class AdobeTarget1_0Service {
       } catch (poolError) {
         console.warn(`⚠️ Browser pool initialization failed for validation: ${poolError.message}`);
       }
+      
+      // Override browser pool restart frequency for Adobe Target validation
+      // This allows more aggressive browser restarts during validation without affecting other operations
+      const originalMaxPages = browserPool.maxPagesBeforeRestart;
+      const validationMaxPages = parseInt(process.env.ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART) || originalMaxPages;
+      
+      if (validationMaxPages !== originalMaxPages) {
+        console.log(`🔧 Temporarily setting browser restart frequency: ${originalMaxPages} → ${validationMaxPages} pages`);
+        browserPool.maxPagesBeforeRestart = validationMaxPages;
+      }
 
       // Adobe Target Validation Configuration
       // ADOBE_VALIDATION_BATCH_SIZE: Number of URLs per chunk (default: 25)
@@ -678,11 +689,15 @@ class AdobeTarget1_0Service {
       
       const totalBatches = Math.max(1, Math.ceil(urls.length / validationBatchSize));
       
+      const restartBrowserEveryNChunks = parseInt(process.env.RESTART_BROWSER_EVERY_N_CHUNKS) || 5;
+      
       console.log(`📊 Adobe Target Validation Configuration:`);
       console.log(`   Batch Size: ${validationBatchSize} URLs per chunk`);
       console.log(`   Concurrent Browsers: ${validationConcurrent}`);
       console.log(`   Max Tabs per Browser: ${validationMaxTabs}`);
       console.log(`   Total Batches: ${totalBatches}`);
+      console.log(`   Browser Restart After: ${parseInt(process.env.ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART) || browserPool.maxPagesBeforeRestart} pages`);
+      console.log(`   Proactive Health Check: Every ${restartBrowserEveryNChunks} chunks`);
 
       let processedUrlsCounter = 0;
 
@@ -691,14 +706,76 @@ class AdobeTarget1_0Service {
         const chunkNumber = Math.floor(i / validationBatchSize) + 1;
         console.log(`\n🔁 Processing validation chunk ${chunkNumber}/${totalBatches} (${chunk.length} URLs)`);
 
+        // Proactive browser restart every N chunks to prevent memory buildup
+        if (chunkNumber > 1 && (chunkNumber - 1) % restartBrowserEveryNChunks === 0) {
+          console.log(`🔄 Proactive browser restart at chunk ${chunkNumber} (every ${restartBrowserEveryNChunks} chunks)`);
+          try {
+            await browserPool.healthCheck();
+            console.log('✅ Browser health check completed');
+          } catch (error) {
+            console.warn(`⚠️  Browser health check failed: ${error.message}`);
+          }
+        }
+
         const chunkPositives = [];
         const chunkNegatives = [];
         const chunkFailures = [];
 
-        const chunkResults = await this.processValidationChunk(chunk, {
-          concurrent: validationConcurrent,
-          maxTabs: validationMaxTabs
-        });
+        // Add timeout protection for the entire chunk
+        const chunkTimeout = parseInt(process.env.CHUNK_PROCESSING_TIMEOUT) || 120000; // 2 minutes per chunk
+        const chunkStartTime = Date.now();
+        
+        let chunkResults;
+        try {
+          chunkResults = await Promise.race([
+            this.processValidationChunk(chunk, {
+              concurrent: validationConcurrent,
+              maxTabs: validationMaxTabs
+            }),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error(`CHUNK_TIMEOUT: Chunk ${chunkNumber} took longer than ${chunkTimeout}ms`)), chunkTimeout)
+            )
+          ]);
+          
+          const chunkDuration = Date.now() - chunkStartTime;
+          console.log(`⏱️  Chunk ${chunkNumber} completed in ${(chunkDuration / 1000).toFixed(1)}s`);
+        } catch (chunkError) {
+          if (chunkError.message.includes('CHUNK_TIMEOUT')) {
+            console.error(`🔴 ${chunkError.message} - forcing browser restart`);
+            
+            // Force restart all browsers
+            try {
+              await browserPool.healthCheck();
+            } catch (e) {
+              console.error('Failed to recover browsers:', e.message);
+            }
+            
+            // Mark all URLs in this chunk as failed
+            chunk.forEach(entry => {
+              const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+              const targetUrl = normalizedEntry.url || 'UNKNOWN_URL';
+              
+              failedUrls.push(targetUrl);
+              scrapingStats.failedScans += 1;
+              scrapingStats.processedUrls += 1;
+              chunkFailures.push(this.buildValidationRecord({
+                url: targetUrl,
+                companyName: normalizedEntry.companyName || null,
+                status: 'failed',
+                error: 'Chunk processing timeout - browser may be stuck'
+              }));
+            });
+            
+            // Continue to next chunk
+            continue;
+          }
+          throw chunkError;
+        }
+        
+        if (!chunkResults) {
+          console.error(`❌ Chunk ${chunkNumber} returned no results`);
+          continue;
+        }
 
         chunkResults.forEach(result => {
           const targetUrl = result?.url;
@@ -857,6 +934,12 @@ class AdobeTarget1_0Service {
       }
 
       progressCallback(100, { message: 'Adobe Target validation completed' });
+      
+      // Restore original browser restart frequency
+      if (typeof originalMaxPages !== 'undefined' && originalMaxPages !== browserPool.maxPagesBeforeRestart) {
+        console.log(`🔧 Restoring browser restart frequency: ${browserPool.maxPagesBeforeRestart} → ${originalMaxPages} pages`);
+        browserPool.maxPagesBeforeRestart = originalMaxPages;
+      }
 
       return {
         success: true,
@@ -866,6 +949,12 @@ class AdobeTarget1_0Service {
       };
     } catch (error) {
       console.error('Error during Adobe Target validation workflow:', error);
+      
+      // Restore original browser restart frequency even on error
+      if (typeof originalMaxPages !== 'undefined' && originalMaxPages !== browserPool.maxPagesBeforeRestart) {
+        console.log(`🔧 Restoring browser restart frequency after error: ${browserPool.maxPagesBeforeRestart} → ${originalMaxPages} pages`);
+        browserPool.maxPagesBeforeRestart = originalMaxPages;
+      }
 
       if (validationResultDoc) {
         validationResultDoc.status = 'failed';
