@@ -659,11 +659,30 @@ class AdobeTarget1_0Service {
         console.warn(`⚠️ Browser pool initialization failed for validation: ${poolError.message}`);
       }
 
+      // Adobe Target Validation Configuration
+      // ADOBE_VALIDATION_BATCH_SIZE: Number of URLs per chunk (default: 25)
+      //   - Set to 1 for ultra-conservative mode (process one URL at a time)
+      //   - Recommended: 1-5 for Railway, 10-25 for local/high-resource servers
       const validationBatchSize = parseInt(process.env.ADOBE_VALIDATION_BATCH_SIZE) || 25;
+      
+      // ADOBE_VALIDATION_CONCURRENT: Number of parallel browsers (default: browser pool size or 3)
+      //   - Set to 1 for sequential processing (safest, slowest)
+      //   - Set to 2-3 for Railway
+      //   - Set to 5+ for high-resource servers
       const validationConcurrent = parseInt(process.env.ADOBE_VALIDATION_CONCURRENT) ||
         parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+      
+      // ADOBE_VALIDATION_MAX_TABS: URLs per browser instance (default: 1)
+      //   - Keep at 1 for sequential processing per browser
       const validationMaxTabs = parseInt(process.env.ADOBE_VALIDATION_MAX_TABS) || 1;
+      
       const totalBatches = Math.max(1, Math.ceil(urls.length / validationBatchSize));
+      
+      console.log(`📊 Adobe Target Validation Configuration:`);
+      console.log(`   Batch Size: ${validationBatchSize} URLs per chunk`);
+      console.log(`   Concurrent Browsers: ${validationConcurrent}`);
+      console.log(`   Max Tabs per Browser: ${validationMaxTabs}`);
+      console.log(`   Total Batches: ${totalBatches}`);
 
       let processedUrlsCounter = 0;
 

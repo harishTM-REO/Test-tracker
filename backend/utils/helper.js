@@ -173,8 +173,17 @@ const launchBrowser = async (fallbackOptions = {}) => {
 
 // utils/helper.js
 const createPage = async (browser, opts = {}) => {
-  const maxRetries = parseInt(process.env.PAGE_CREATION_RETRIES || opts.retries || 2);
-  const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || opts.timeout || 30000;
+  // Detect constrained environments (Railway, production without high resources)
+  const isRailway = process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID;
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isConstrained = isRailway || (isProduction && !process.env.HIGH_RESOURCE_MODE);
+  
+  // Use longer timeouts in constrained environments
+  const defaultTimeout = isConstrained ? 45000 : 30000; // Railway: 45s, Local: 30s
+  const defaultRetries = isConstrained ? 3 : 2; // Railway: 3 retries, Local: 2
+  
+  const maxRetries = parseInt(process.env.PAGE_CREATION_RETRIES || opts.retries || defaultRetries);
+  const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || opts.timeout || defaultTimeout;
   const backoffBase = parseInt(process.env.PAGE_CREATION_BACKOFF_MS) || opts.backoffMs || 500;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
