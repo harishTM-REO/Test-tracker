@@ -18,6 +18,15 @@ try {
     puppeteer = require('puppeteer-core');
 }
 
+// Helper function to run operations with timeout
+const runWithTimeout = async (promiseOrFn, ms, label = 'operation') => {
+    const fn = (typeof promiseOrFn === 'function') ? promiseOrFn : () => promiseOrFn;
+    return await Promise.race([
+        (async () => fn())(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms))
+    ]);
+};
+
 class AdobeScraperService {
 
     constructor() {
@@ -73,19 +82,7 @@ class AdobeScraperService {
      * @param {string} url
      * @returns {Promise<{detected: boolean, httpStatusCode?: number, captchaDetected?: boolean, captchaStatus?: string, detectionSource?: object}>}
      */
-
-
-// Recommended helper used below
-const runWithTimeout = async (promiseOrFn, ms, label = 'operation') => {
-    const fn = (typeof promiseOrFn === 'function') ? promiseOrFn : () => promiseOrFn;
-    return await Promise.race([
-      (async () => fn())(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms))
-    ]);
-  };
-  
-  // Paste this replacement for detectAdobeTargetPresence()
-  async detectAdobeTargetPresence(url) {
+    async detectAdobeTargetPresence(url) {
     let page = null;
     let requestHandler = null;
   
