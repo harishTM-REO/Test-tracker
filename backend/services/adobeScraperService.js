@@ -389,13 +389,14 @@ class AdobeScraperService {
 
     async detectAdobeTargetPresenceUsingPage(page) {
         const adobeTargetData = await page.evaluate(() => {
+            console.log('the main condition->', window.adobe || window.adobe.target);
             try {
                 if (!window.adobe || !window.adobe.target) {
                     return {
                         detected: false,
                         version: null,
-                        hasMboxCookie: [],
-                        hasAdobeScript: []
+                        hasMboxCookie: false,
+                        hasAdobeScript: false
                     };
                 }
 
@@ -411,8 +412,8 @@ class AdobeScraperService {
                 return {
                     detected: true,
                     version: version,
-                    hasMboxCookie: 'N/A',
-                    hasAdobeScript: []
+                    hasMboxCookie: false,
+                    hasAdobeScript: false
                 };
             } catch (e) {
                 console.error('Error checking Adobe Target:', e);
@@ -427,9 +428,9 @@ class AdobeScraperService {
         });
 
         const detected = Boolean(
-            adobeTargetData?.detected ||
-            adobeTargetData?.hasMboxCookie ||
-            adobeTargetData?.hasAdobeScript
+            adobeTargetData?.detected === true ||
+            adobeTargetData?.hasMboxCookie === true ||
+            adobeTargetData?.hasAdobeScript === true
         );
 
         return {

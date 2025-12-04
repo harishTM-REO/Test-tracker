@@ -203,6 +203,50 @@ router.post('/validation', async (req, res) => {
 });
 
 /**
+ * @route POST /at10/api/optimizely-validation
+ * @desc  Validate Optimizely presence for a dataset's URLs
+ */
+router.post('/optimizely-validation', async (req, res) => {
+  try {
+    const { datasetId, datasetName, urls } = req.body;
+
+    if (!datasetId || !datasetName || !Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: datasetId, datasetName, urls (non-empty array)'
+      });
+    }
+
+    const jobId = jobQueue.createJob('optimizely-validation', {
+      datasetId,
+      datasetName,
+      urls
+    });
+
+    const job = jobQueue.getJob(jobId);
+
+    res.status(202).json({
+      success: true,
+      message: 'Optimizely validation job initiated',
+      jobId,
+      status: job?.status || 'pending',
+      dataset: {
+        id: datasetId,
+        name: datasetName,
+        urlsCount: urls.length
+      }
+    });
+  } catch (error) {
+    console.error('Error initiating Optimizely validation job:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initiate validation job',
+      error: error.message
+    });
+  }
+});
+
+/**
  * GET /at10/api/status/:jobId
  * Get the status of a specific job
  */

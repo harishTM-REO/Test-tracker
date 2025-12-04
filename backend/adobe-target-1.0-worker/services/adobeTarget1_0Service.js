@@ -3,8 +3,11 @@ const path = require('path');
 const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
 const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/AdobeTargetValidationResult'));
 const AdobeTargetValidationDocument = require(path.join(__dirname, '../../models/AdobeTargetValidationDocument'));
+const OptimizelyValidationResult = require(path.join(__dirname, '../../models/OptimizelyValidationResult'));
+const OptimizelyValidationDocument = require(path.join(__dirname, '../../models/OptimizelyValidationDocument'));
 const Dataset = require(path.join(__dirname, '../../models/Dataset'));
 const AdobeScraperService = require(path.join(__dirname, '../../services/adobeScraperService'));
+const OptimizelyValidationService = require(path.join(__dirname, './optimizelyValidationService'));
 const browserPool = require(path.join(__dirname, '../../services/browserPoolService'));
 const {
   sanitizeWorkflowResult
@@ -104,7 +107,12 @@ class AdobeTarget1_0Service {
         return await AdobeTarget1_0Service.prototype.performValidation.call(new AdobeTarget1_0Service(), jobData, progressCallback);
       });
 
-      console.log('✅ Adobe Target 1.0 Service initialized with job queue workers');
+      // Register Optimizely validation worker
+      jobQueue.registerWorker('optimizely-validation', async (jobData, progressCallback) => {
+        return await OptimizelyValidationService.performValidation(jobData, progressCallback);
+      });
+
+      console.log('✅ Adobe Target 1.0 Service initialized with job queue workers (including Optimizely validation)');
     } catch (error) {
       console.error('❌ Failed to initialize AT 1.0 Service:', error);
       throw error;

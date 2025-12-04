@@ -486,6 +486,16 @@ const datasetController = {
             } catch (validationError) {
               console.error(`❌ Failed to start Adobe Target validation job:`, validationError.message);
             }
+          } else if (datasetData.toolType === 'Optimizely Validation') {
+            console.log(`Initiating Optimizely validation workflow for dataset: ${savedDataset._id}`);
+            try {
+              const OptimizelyValidationJobService = require('../services/optimizelyValidationJobService');
+              const result = await OptimizelyValidationJobService.startValidation(savedDataset._id.toString());
+              const optimizelyValidationInitiated = result.success;
+              console.log(`✅ Optimizely validation job started: ${optimizelyValidationInitiated}`);
+            } catch (validationError) {
+              console.error(`❌ Failed to start Optimizely validation job:`, validationError.message);
+            }
           } else {
             // For other tool types, use normal background scraping
             console.log(`Initiating background scraping for dataset: ${savedDataset._id}`);
