@@ -722,20 +722,36 @@ class AdobeTarget1_0Service {
         const chunkFailures = [];
 
         // Add timeout protection for the entire chunk
-        const chunkTimeout = parseInt(process.env.CHUNK_PROCESSING_TIMEOUT) || 120000; // 2 minutes per chunk
+        // Dynamic timeout: base timeout + (URLs in chunk * time per URL)
+        const baseTimeout = 30000; // 30 seconds base
+        const timePerUrl = 60000;  // 60 seconds per URL
+        const defaultTimeout = baseTimeout + (chunk.length * timePerUrl);
+        const chunkTimeout = parseInt(process.env.CHUNK_PROCESSING_TIMEOUT) || defaultTimeout;
         const chunkStartTime = Date.now();
+        
+        console.log(`⏱️  Chunk ${chunkNumber} timeout: ${(chunkTimeout / 1000).toFixed(0)}s (${chunk.length} URLs × ${timePerUrl/1000}s + ${baseTimeout/1000}s base)`);
         
         let chunkResults;
         try {
-          chunkResults = await Promise.race([
-            this.processValidationChunk(chunk, {
+          // Only apply timeout if explicitly enabled (disabled by default since health checks work well)
+          if (chunkTimeout > 0 && chunkTimeout < Infinity) {
+            chunkResults = await Promise.race([
+              this.processValidationChunk(chunk, {
+                concurrent: validationConcurrent,
+                maxTabs: validationMaxTabs
+              }),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error(`CHUNK_TIMEOUT: Chunk ${chunkNumber} took longer than ${chunkTimeout}ms`)), chunkTimeout)
+              )
+            ]);
+          } else {
+            // No timeout - rely on health checks and page-level timeouts
+            console.log(`⏱️  Chunk ${chunkNumber} timeout: disabled (relying on health checks)`);
+            chunkResults = await this.processValidationChunk(chunk, {
               concurrent: validationConcurrent,
               maxTabs: validationMaxTabs
-            }),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error(`CHUNK_TIMEOUT: Chunk ${chunkNumber} took longer than ${chunkTimeout}ms`)), chunkTimeout)
-            )
-          ]);
+            });
+          }
           
           const chunkDuration = Date.now() - chunkStartTime;
           console.log(`⏱️  Chunk ${chunkNumber} completed in ${(chunkDuration / 1000).toFixed(1)}s`);
