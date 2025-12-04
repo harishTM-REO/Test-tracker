@@ -3143,8 +3143,17 @@ class AdobeScraperService {
       
       // Get optimal settings or use provided options
       const optimalSettings = getOptimalBatchSettings(urls.length);
+      
+      // Adobe-specific configuration (can be overridden by options)
+      const adobePoolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
+                           parseInt(process.env.BROWSER_POOL_SIZE) || 
+                           optimalSettings.concurrent;
+      const adobeConcurrent = parseInt(process.env.ADOBE_SCRAPING_CONCURRENT) || 
+                             parseInt(process.env.CONCURRENT_URLS) || 
+                             optimalSettings.concurrent;
+      
       const {
-        concurrent = optimalSettings.concurrent,
+        concurrent = adobeConcurrent,
         batchSize = optimalSettings.batchSize,
         delay = optimalSettings.delay,
         datasetId = null,
@@ -3308,7 +3317,9 @@ class AdobeScraperService {
      * Each browser processes its URLs one at a time to prevent memory spikes
      */
     async processUrlChunkSequential(urls, options = {}) {
-      const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+      // Use Adobe-specific pool size if available, otherwise fall back to global
+      const poolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
+                      parseInt(process.env.BROWSER_POOL_SIZE) || 3;
       const { concurrent = Math.min(poolSize, 5) } = options;
       const results = [];
 
