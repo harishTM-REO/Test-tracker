@@ -179,6 +179,7 @@ class OptimizelyValidationService {
             });
           } finally {
             // Always close browser
+            console.log(`🔒 Closing browser...`);
             if (browser) {
               try {
                 await browser.close();
