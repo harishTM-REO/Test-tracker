@@ -140,8 +140,13 @@ class OptimizelyValidationService {
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1920, height: 1080 });
 
-            // Validate URL
-            const result = await this.validateUrl(page, urlEntry);
+            // Validate URL with timeout to prevent hanging
+            const result = await Promise.race([
+              this.validateUrl(page, urlEntry),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('validateUrl timeout after 60 seconds')), 60000)
+              )
+            ]);
             
             // Categorize result
             if (result.status === 'positive') {
@@ -178,19 +183,33 @@ class OptimizelyValidationService {
               error: error.message
             });
           } finally {
-            // Always close browser
+            // Always close browser with timeout to prevent hanging
             console.log(`🔒 Closing browser...`);
             if (browser) {
               try {
-                await browser.close();
-                console.log(`🔒 Browser closed`);
+                // Add timeout to browser.close() to prevent hanging
+                await Promise.race([
+                  browser.close(),
+                  new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Browser close timeout')), 10000)
+                  )
+                ]);
+                console.log(`🔒 Browser closed successfully`);
               } catch (e) {
-                console.error(`Error closing browser:`, e.message);
+                console.error(`⚠️  Error closing browser (non-fatal):`, e.message);
+                // Try to force close if normal close fails
+                try {
+                  if (browser.process && browser.process()) {
+                    browser.process().kill('SIGKILL');
+                  }
+                } catch (killError) {
+                  console.error(`⚠️  Could not force kill browser process:`, killError.message);
+                }
               }
             }
           }
 
-          // Progress update with error handling
+          // Progress update with error handling and timeout
           try {
             const progress = {
               processedUrls: urlIndex,
@@ -203,10 +222,16 @@ class OptimizelyValidationService {
 
             if (progressCallback) {
               try {
-                progressCallback(progress);
+                // Add timeout to progress callback to prevent hanging
+                await Promise.race([
+                  Promise.resolve(progressCallback(progress)),
+                  new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Progress callback timeout')), 5000)
+                  )
+                ]);
               } catch (callbackError) {
                 console.error(`⚠️  Progress callback error (non-fatal):`, callbackError.message);
-                // Continue processing even if callback fails
+                // Continue processing even if callback fails or times out
               }
             }
 
@@ -355,7 +380,6 @@ class OptimizelyValidationService {
         resultId: validationResult._id,
         summary: validationResult.summary
       };
-
     } catch (error) {
       console.error(`\n❌ Validation failed:`, error);
       console.error(`Stack trace:`, error.stack);
@@ -384,6 +408,11 @@ class OptimizelyValidationService {
 
       throw error;
     } finally {
+      console.log(`\n${'='.repeat(80)}`);
+      console.log(`🏁 PERFORMVALIDATION FINALLY BLOCK EXECUTING`);
+      console.log(`Timestamp: ${new Date().toISOString()}`);
+      console.log(`${'='.repeat(80)}\n`);
+      
       // Restore original unhandled rejection handlers
       try {
         process.removeAllListeners('unhandledRejection');
@@ -392,9 +421,12 @@ class OptimizelyValidationService {
             process.on('unhandledRejection', handler);
           });
         }
+        console.log(`✅ Unhandled rejection handlers restored`);
       } catch (handlerError) {
         console.error(`⚠️  Error restoring unhandled rejection handlers:`, handlerError.message);
       }
+      
+      console.log(`✅ PERFORMVALIDATION FINALLY BLOCK COMPLETED\n`);
     }
   }
 
@@ -446,12 +478,18 @@ class OptimizelyValidationService {
       console.log(`🔍 Checking for captcha...`);
       const captchaDetected = await this.detectCaptcha(page);
       result.detectionDetails.captchaDetected = captchaDetected;
-
+      console.log('captchaDetected', captchaDetected);
       if (captchaDetected) {
         console.log(`⚠️  Captcha detected`);
         result.status = 'failed';
         result.error = 'Captcha detected';
         result.detectionDetails.error = 'Captcha detected';
+        // Add small delay to ensure page state is stable before returning
+        try {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (delayError) {
+          // Ignore delay errors
+        }
         return result;
       }
 
@@ -488,6 +526,9 @@ class OptimizelyValidationService {
       result.status = 'failed';
       result.error = error.message;
       result.detectionDetails.error = error.message;
+    } finally {
+      // Ensure we always return a result, even if there were errors
+      console.log(`✓ validateUrl completed for ${url} with status: ${result.status}`);
     }
 
     return result;
