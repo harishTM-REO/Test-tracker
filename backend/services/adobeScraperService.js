@@ -80,7 +80,13 @@ class AdobeScraperService {
                 };
             }
 
-            const experimentData = await this.scrapeExperimentsFromPage(url, options);
+            // Pass through skipCookieConsent option from options parameter
+            const scrapeOptions = {
+                ...options,
+                skipCookieConsent: options.skipCookieConsent || false
+            };
+
+            const experimentData = await this.scrapeExperimentsFromPage(url, scrapeOptions);
             console.log('the invoking function->',experimentData)
             return this.formatResponse(url, website, experimentData, savedData, startTime);
 
@@ -472,7 +478,8 @@ class AdobeScraperService {
             sharedPage = null,
             browserInstance = null,
             useBrowserPool = false,
-            presenceOnly = false
+            presenceOnly = false,
+            skipCookieConsent = false
         } = options;
 
         let browser = browserInstance;
@@ -506,9 +513,40 @@ class AdobeScraperService {
                 }
             }
 
-            // Navigate to URL
+            
+            // Set up network listener BEFORE navigation to catch early Adobe Target requests
+            // This prevents race condition where network requests fire before listener is ready
+            console.log('🔍 [NETWORK LISTENER] Setting up network listener BEFORE navigation to capture early Adobe Target requests...');
+            
+            try {
+                const currentUrl = page.url ? page.url() : 'unknown';
+                const isClosed = page.isClosed ? page.isClosed() : 'unknown';
+                console.log(`   [NETWORK LISTENER] Page URL before navigation: ${currentUrl}`);
+                console.log(`   [NETWORK LISTENER] Page is closed: ${isClosed}`);
+            } catch (urlError) {
+                console.log(`   [NETWORK LISTENER] Could not get page state: ${urlError.message}`);
+            }
+            
+            const networkListenerPromise = this.setupAdobeTargetNetworkListener(page);
+            console.log('   [NETWORK LISTENER] setupAdobeTargetNetworkListener called, promise created');
+            
+            // Small delay to ensure listener is fully attached before navigation
+            await new Promise(resolve => setTimeout(resolve, 100));
+            console.log('✅ [NETWORK LISTENER] Network listener attached, now navigating...');
+            
             await navigateToPage(page, url);
+            
+            try {
+                const finalUrl = page.url ? page.url() : 'unknown';
+                console.log(`✅ [NETWORK LISTENER] Navigation complete. Page URL: ${finalUrl}`);
+            } catch (urlError) {
+                console.log(`   [NETWORK LISTENER] Navigation complete (could not get final URL: ${urlError.message})`);
+            }
+            
+            // Extract adobeTarget data with intelligent waiting (network listener already set up)
+            const experimentData = await this.extractAdobeTargetData(page, networkListenerPromise);
             // captcha check
+
             const captchaCheck = await detectCaptcha(page);
             if (captchaCheck.detected) {
                 // If captcha is found, return early with the specific flag.
@@ -522,19 +560,26 @@ class AdobeScraperService {
                 };
             }
 
-            // Handle cookie consent with detection
-            const cookieType = await handleCookieConsent(page);
-            const postConsentDelay = presenceOnly ? 3000 : 6000;
-            await new Promise(resolve => setTimeout(resolve, postConsentDelay));
-
+            // Handle cookie consent with detection (skip if flag is set)
+            let cookieType = 'unknown';
+            if (skipCookieConsent) {
+                console.log(`    ⏭️  Skipping cookie consent for ${url} (already handled for this domain)`);
+                // Still wait a bit for page to settle, but shorter delay
+                const postConsentDelay = presenceOnly ? 1000 : 2000;
+                await new Promise(resolve => setTimeout(resolve, postConsentDelay));
+            } else {
+                cookieType = await handleCookieConsent(page);
+                const postConsentDelay = presenceOnly ? 3000 : 6000;
+                await new Promise(resolve => setTimeout(resolve, postConsentDelay));
+            }
+            console.log('the adobe target scraping is called here');
+            console.log(presenceOnly);
             if (presenceOnly) {
                 const detectionResult = await this.detectAdobeTargetPresenceUsingPage(page);
                 const presenceExperiment = this.buildPresenceOnlyExperimentData(detectionResult, cookieType);
                 return presenceExperiment;
             }
 
-            // Extract adobeTarget data with intelligent waiting
-            const experimentData = await this.extractAdobeTargetData(page);
             if (experimentData && typeof experimentData === 'object') {
                 experimentData.cookieType = experimentData.cookieType || cookieType;
             }
@@ -609,24 +654,58 @@ class AdobeScraperService {
         }
     }
 
-    async extractAdobeTargetData(page) {
-        let navigationDetected = false;
-        let mboxResponseData = null;
-        try {
-            console.log("Extracting Adobe Target data with enhanced detection...");
+    /**
+     * Set up network listener for Adobe Target requests BEFORE navigation
+     * This prevents race condition where network requests happen before listener is set up
+     * @param {Object} page - Puppeteer page instance
+     * @returns {Promise} Promise that resolves with mbox/delivery response data or null
+     */
+    setupAdobeTargetNetworkListener(page) {
+        console.log("Setting up Adobe Target network listener BEFORE navigation...");
+        
+        if (!page) {
+            console.error('❌ ERROR: Page is null/undefined, cannot set up network listener!');
+            return Promise.resolve(null);
+        }
+        
+        // Verify page is valid
+        if (typeof page.on !== 'function') {
+            console.error('❌ ERROR: Page.on is not a function! Page type:', typeof page);
+            return Promise.resolve(null);
+        }
+        
+        console.log('✅ Page is valid, attaching response listener...');
+        
+        return new Promise((resolve) => {
+            let resolved = false;
+            const timeout = setTimeout(() => {
+                if (!resolved) {
+                    console.log('No mbox response received within timeout, proceeding without it');
+                    resolved = true;
+                    resolve(null);
+                }
+            }, 45000); // 45 second timeout
 
+            // Attach listener and log when it's attached
+            let responseCount = 0;
             try {
-                const mboxDataPromise = new Promise((resolve) => {
-                    let resolved = false;
-                    const timeout = setTimeout(() => {
-                        if (!resolved) {
-                            console.log('No mbox response received within timeout, proceeding without it');
-                            resolved = true;
-                            resolve(null);
+                const responseHandler = async (response) => {
+                    try {
+                        responseCount++;
+                        const responseUrl = response.url();
+                        
+                        // Log first 10 responses to verify listener is working
+                        if (responseCount <= 10) {
+                            console.log(`📡 [${responseCount}] Network response: ${responseUrl.substring(0, 120)}`);
                         }
-                    }, 8000); // Increased timeout to 8 seconds
-
-                    page.on('response', async (response) => {
+                        
+                        // Check for Adobe Target endpoints
+                        const isDelivery = responseUrl.includes('/v1/delivery');
+                        const isMbox = responseUrl.includes('/mbox/');
+                        
+                        if (isDelivery || isMbox) {
+                            console.log(`🎯 [ADOBE TARGET] Found ${isDelivery ? 'delivery' : 'mbox'} response: ${responseUrl}`);
+                        }
                         if (response.url().includes('/mbox/')) {
                             console.log(`Found mbox response: ${response.url()}`);
 
@@ -781,11 +860,37 @@ class AdobeScraperService {
                                 }
                             }
                         }
-                    });
-                });
+                    } catch (listenerError) {
+                        console.error('❌ Error in response listener callback:', listenerError.message);
+                        console.error('   Stack:', listenerError.stack);
+                    }
+                };
+                
+                page.on('response', responseHandler);
+                console.log('✅ Response listener successfully attached to page');
+                console.log(`   Listener will capture all network responses and filter for Adobe Target endpoints`);
+            } catch (attachError) {
+                console.error('❌ Failed to attach response listener to page:', attachError.message);
+                console.error('   Stack:', attachError.stack);
+                // Still resolve the promise so the flow continues
+                if (!resolved) {
+                    resolved = true;
+                    clearTimeout(timeout);
+                    resolve(null);
+                }
+            }
+        });
+    }
 
-                // Reload the page to trigger Adobe Target requests AFTER listener is set up
-                // await page.reload({waitUntil: 'domcontentloaded'});
+    async extractAdobeTargetData(page, networkListenerPromise = null) {
+        let navigationDetected = false;
+        let mboxResponseData = null;
+        try {
+            console.log("Extracting Adobe Target data with enhanced detection...");
+
+            try {
+                // Use provided network listener promise if available, otherwise set it up now
+                const mboxDataPromise = networkListenerPromise || this.setupAdobeTargetNetworkListener(page);
 
                 // Wait for mbox data (with timeout)
                 mboxResponseData = await mboxDataPromise;

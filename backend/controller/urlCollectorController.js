@@ -1183,11 +1183,36 @@ async function liveCrawlAndPrioritize(req, res) {
         console.log(`⏳ Waiting for JavaScript execution...`);
         await page.waitForTimeout(2000);
 
+        // Scroll page to trigger lazy-loaded content
+        console.log(`📜 Scrolling page to load dynamic content...`);
+        await page.evaluate(async () => {
+            await new Promise((resolve) => {
+                let totalHeight = 0;
+                const distance = 100;
+                const timer = setInterval(() => {
+                    const scrollHeight = document.body.scrollHeight;
+                    window.scrollBy(0, distance);
+                    totalHeight += distance;
+
+                    if (totalHeight >= scrollHeight) {
+                        clearInterval(timer);
+                        resolve();
+                    }
+                }, 100);
+            });
+        });
+        await page.waitForTimeout(1000); // Wait after scrolling
+
         // Extract all URLs from the page with improved selector
         const urls = await page.evaluate(() => {
             const links = [];
             const anchors = document.querySelectorAll('a[href]');
-            const origin = window.location.origin;
+            const currentUrl = window.location.href;
+            const baseUrl = window.location.origin;
+            
+            // Get base tag href if present
+            const baseTag = document.querySelector('base[href]');
+            const baseHref = baseTag ? baseTag.getAttribute('href') : null;
 
             anchors.forEach(anchor => {
                 let href = anchor.getAttribute('href');
@@ -1196,20 +1221,64 @@ async function liveCrawlAndPrioritize(req, res) {
 
                 href = href.trim();
 
-                // Convert relative URLs to absolute URLs
-                if (href.startsWith('/')) {
-                    href = origin + href;
-                } else if (!href.startsWith('http://') && !href.startsWith('https://')) {
-                    // Skip non-http/https and non-absolute paths
-                    return;
-                }
+                try {
+                    let absoluteUrl;
 
-                // Only include http/https URLs
-                if (href.startsWith('http://') || href.startsWith('https://')) {
-                    // Filter out empty and common non-content links
-                    if (href !== origin && href !== origin + '/') {
-                        links.push(href);
+                    // Handle different URL formats
+                    if (href.startsWith('http://') || href.startsWith('https://')) {
+                        // Already absolute
+                        absoluteUrl = href;
+                    } else if (href.startsWith('//')) {
+                        // Protocol-relative URL (//example.com/path)
+                        absoluteUrl = window.location.protocol + href;
+                    } else if (href.startsWith('/')) {
+                        // Root-relative URL (/shop/wd/new)
+                        absoluteUrl = baseUrl + href;
+                    } else if (href.startsWith('#')) {
+                        // Anchor/fragment only, skip
+                        return;
+                    } else if (href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) {
+                        // Non-HTTP protocols, skip
+                        return;
+                    } else {
+                        // Relative URL without leading slash (shop/wd/new)
+                        // Use URL constructor for proper resolution
+                        try {
+                            const base = baseHref ? new URL(baseHref, currentUrl).href : currentUrl;
+                            absoluteUrl = new URL(href, base).href;
+                        } catch (e) {
+                            // Fallback: resolve relative to current page
+                            const currentPath = window.location.pathname;
+                            const pathParts = currentPath.split('/').filter(p => p);
+                            pathParts.pop(); // Remove last segment
+                            const resolvedPath = '/' + pathParts.join('/') + '/' + href;
+                            absoluteUrl = baseUrl + resolvedPath.replace(/\/+/g, '/');
+                        }
                     }
+
+                    // Only include http/https URLs
+                    if (absoluteUrl && (absoluteUrl.startsWith('http://') || absoluteUrl.startsWith('https://'))) {
+                        // Normalize URL (remove trailing slash, remove fragments, remove query params for deduplication)
+                        try {
+                            const urlObj = new URL(absoluteUrl);
+                            urlObj.hash = ''; // Remove fragment
+                            // Keep query params as they might be important
+                            const normalized = urlObj.href;
+                            
+                            // Filter out empty and common non-content links
+                            if (normalized !== baseUrl && normalized !== baseUrl + '/') {
+                                links.push(normalized);
+                            }
+                        } catch (e) {
+                            // If URL parsing fails, use the absoluteUrl as-is if it looks valid
+                            if (absoluteUrl !== baseUrl && absoluteUrl !== baseUrl + '/') {
+                                links.push(absoluteUrl);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    // Skip URLs that cause errors
+                    console.warn('Error processing href:', href, error);
                 }
             });
 

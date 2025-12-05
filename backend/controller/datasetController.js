@@ -496,6 +496,16 @@ const datasetController = {
             } catch (validationError) {
               console.error(`❌ Failed to start Optimizely validation job:`, validationError.message);
             }
+          } else if (datasetData.toolType === 'ABTasty Validation') {
+            console.log(`Initiating ABTasty validation workflow for dataset: ${savedDataset._id}`);
+            try {
+              const ABTastyValidationJobService = require('../services/abTastyValidationJobService');
+              const result = await ABTastyValidationJobService.startValidation(savedDataset._id.toString());
+              const abTastyValidationInitiated = result.success;
+              console.log(`✅ ABTasty validation job started: ${abTastyValidationInitiated}`);
+            } catch (validationError) {
+              console.error(`❌ Failed to start ABTasty validation job:`, validationError.message);
+            }
           } else {
             // For other tool types, use normal background scraping
             console.log(`Initiating background scraping for dataset: ${savedDataset._id}`);

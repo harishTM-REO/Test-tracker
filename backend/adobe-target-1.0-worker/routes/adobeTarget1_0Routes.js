@@ -5,6 +5,8 @@ const AdobeTarget1_0Service = require(path.join(__dirname, '../services/adobeTar
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
 const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
 const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/AdobeTargetValidationResult'));
+const OptimizelyValidationResult = require(path.join(__dirname, '../../models/OptimizelyValidationResult'));
+const OptimizelyValidationDocument = require(path.join(__dirname, '../../models/OptimizelyValidationDocument'));
 
 /**
  * POST /at10/api/scrape
@@ -397,6 +399,122 @@ router.get('/validation/results/:datasetId', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch validation results',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route GET /at10/api/optimizely-validation/results/:datasetId
+ * @desc  Get Optimizely validation result for a dataset
+ * @query batch - (optional) Get a specific batch number: ?batch=5
+ * @query batches - (optional) Get multiple batches: ?batches=1,5,10
+ * @query all - (optional) Get all batches: ?all=true
+ * @query summary - (optional) Get summary view only: ?summary=true
+ */
+router.get('/optimizely-validation/results/:datasetId', async (req, res) => {
+  try {
+    const { datasetId } = req.params;
+    const { batch, batches, all, summary } = req.query;
+
+    console.log(`📊 Fetching Optimizely validation results for dataset: ${datasetId}`);
+
+    // If summary only requested, return just the main result document
+    if (summary === 'true') {
+      const result = await OptimizelyValidationResult.findOne({ datasetId })
+        .sort({ createdAt: -1 });
+
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          message: 'Optimizely validation result not found for dataset',
+          datasetId
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          _id: result._id,
+          datasetId: result.datasetId,
+          datasetName: result.datasetName,
+          status: result.status,
+          summary: result.summary,
+          startedAt: result.startedAt,
+          completedAt: result.completedAt,
+          durationMs: result.durationMs,
+          totalUrls: result.totalUrls,
+          positiveCount: result.positiveUrls?.length || 0,
+          negativeCount: result.negativeUrls?.length || 0,
+          failedCount: result.failedUrls?.length || 0
+        }
+      });
+    }
+
+    // Get the main validation result
+    const result = await OptimizelyValidationResult.findOne({ datasetId })
+      .sort({ createdAt: -1 });
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: 'Optimizely validation result not found for dataset',
+        datasetId
+      });
+    }
+
+    // Determine which batches to fetch
+    let batchesToFetch = null;
+    if (batch) {
+      batchesToFetch = [parseInt(batch)];
+    } else if (batches) {
+      batchesToFetch = batches.split(',').map(b => parseInt(b.trim())).filter(b => !isNaN(b));
+    } else if (all === 'true') {
+      batchesToFetch = null; // Get all batches
+    }
+
+    // Fetch batch documents if requested
+    let batchDocuments = [];
+    if (batchesToFetch !== null) {
+      if (batchesToFetch.length > 0) {
+        // Get specific batches
+        batchDocuments = await OptimizelyValidationDocument.find({
+          datasetId,
+          batchNumber: { $in: batchesToFetch }
+        }).sort({ batchNumber: 1 });
+      }
+    } else if (all === 'true' || (!batch && !batches)) {
+      // Get all batches
+      batchDocuments = await OptimizelyValidationDocument.find({ datasetId })
+        .sort({ batchNumber: 1 });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        result: result,
+        summary: result.summary,
+        batches: batchDocuments.map(doc => ({
+          batchNumber: doc.batchNumber,
+          totalBatches: doc.totalBatches,
+          totalUrls: doc.totalUrls,
+          positiveCount: doc.positiveCount,
+          negativeCount: doc.negativeCount,
+          failedCount: doc.failedCount,
+          detectionRate: doc.detectionRate,
+          positiveUrls: doc.positiveUrls,
+          negativeUrls: doc.negativeUrls,
+          failedUrls: doc.failedUrls,
+          processedAt: doc.processedAt
+        })),
+        batchCount: batchDocuments.length
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching Optimizely validation results:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch Optimizely validation results',
       error: error.message
     });
   }

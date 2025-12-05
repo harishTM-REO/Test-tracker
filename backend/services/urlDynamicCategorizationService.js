@@ -1295,19 +1295,22 @@ URLDynamicCategorizationService.prototype.rankAndLimitTopUrls = function(urlDeta
     const categorySlotCaps = {};
     for (const cat of Object.keys(categoryTotals)) {
         const share = categoryTotals[cat] / eligibleCount;
-        const baseSlots = Math.max(1, Math.ceil(share * limit * 0.6));
+        const baseSlots = Math.max(1, Math.ceil(share * limit * 0.8)); // Increased from 0.6 to 0.8
         const priorityBoost = ranked.find(r => r.category === cat)?.priority || 0;
-        const maxAllowed = priorityBoost >= 80 ? 4 : 3;
+        const maxAllowed = priorityBoost >= 80 ? 6 : priorityBoost >= 60 ? 5 : 4; // Increased caps
         categorySlotCaps[cat] = Math.min(maxAllowed, Math.max(perCategoryLimit, baseSlots));
     }
 
-    const addCandidate = (candidate, output) => {
+    const addCandidate = (candidate, output, enforceCap = true) => {
         const cat = candidate.category;
         bucketed[cat] = bucketed[cat] || 0;
 
-        // Enforce per-category cap
-        if (bucketed[cat] >= (categorySlotCaps[cat] || perCategoryLimit)) {
-            return false;
+        // Enforce per-category cap (relaxed if we're far from limit)
+        if (enforceCap) {
+            const cap = categorySlotCaps[cat] || perCategoryLimit;
+            if (bucketed[cat] >= cap) {
+                return false;
+            }
         }
 
         bucketed[cat]++;
@@ -1325,7 +1328,7 @@ URLDynamicCategorizationService.prototype.rankAndLimitTopUrls = function(urlDeta
         if (coveredCategories.has(category)) continue;
         if (priority < 50) continue; // skip low business value categories in coverage pass
 
-        if (addCandidate(candidate, output)) {
+        if (addCandidate(candidate, output, true)) {
             coveredCategories.add(category);
         }
     }
@@ -1335,7 +1338,17 @@ URLDynamicCategorizationService.prototype.rankAndLimitTopUrls = function(urlDeta
         if (output.length >= limit) break;
         if (output.some(entry => entry.url === candidate.url)) continue; // already selected
 
-        addCandidate(candidate, output);
+        addCandidate(candidate, output, true);
+    }
+
+    // If we still haven't reached the limit, relax caps and fill with best remaining URLs
+    if (output.length < limit && ranked.length > output.length) {
+        const remaining = ranked.filter(c => !output.some(entry => entry.url === c.url));
+        for (const candidate of remaining) {
+            if (output.length >= limit) break;
+            // Don't enforce caps - just add the best remaining URLs to reach the limit
+            addCandidate(candidate, output, false);
+        }
     }
 
     return output;

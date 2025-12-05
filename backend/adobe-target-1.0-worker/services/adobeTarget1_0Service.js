@@ -582,6 +582,19 @@ class AdobeTarget1_0Service {
     };
 
     try {
+      // Track domains that have already handled cookie consent
+      const domainsWithConsentHandled = new Set();
+      
+      // Helper function to extract domain from URL
+      const extractDomainFromUrl = (urlString) => {
+        try {
+          const parsed = new URL(urlString);
+          return parsed.hostname.toLowerCase();
+        } catch (error) {
+          return null;
+        }
+      };
+
       // Process in batches with concurrency control
       const batches = [];
       for (let i = 0; i < urlsToScrape.length; i += concurrency) {
@@ -592,9 +605,61 @@ class AdobeTarget1_0Service {
         const batch = batches[batchIndex];
         console.log(`    Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} URLs)`);
 
-        const batchPromises = batch.map(urlObj => 
-          this.scrapeUrlForAdobeTarget(urlObj.url, urlObj.category, urlObj.priority, urlObj.isSeedUrl)
-        );
+        const batchPromises = batch.map(urlObj => {
+          const domain = extractDomainFromUrl(urlObj.url);
+          const skipCookieConsent = domain && domainsWithConsentHandled.has(domain);
+          
+          // Mark domain as handled if this is the first URL from this domain
+          if (domain && !skipCookieConsent) {
+            domainsWithConsentHandled.add(domain);
+            console.log(`    🍪 Handling cookie consent for domain: ${domain} (first URL from this domain)`);
+          } else if (skipCookieConsent) {
+            console.log(`    ⏭️  Skipping cookie consent for ${urlObj.url} (already handled for domain: ${domain})`);
+          }
+          
+          return AdobeScraperService.scrapeAdobeTargetExperiments(urlObj.url, null, { skipCookieConsent })
+            .then(scrapingResult => {
+              const adobeTargetData = scrapingResult.adobeTarget || scrapingResult.data?.adobeTarget || {};
+              const activityNames = adobeTargetData.activityNames || [];
+              const activityIds = adobeTargetData.activityIds || [];
+
+              // Treat undefined success as true (legacy service never sets the flag)
+              const requestSucceeded = scrapingResult.success ?? true;
+
+              // Adobe Target is detected if we have activity names/IDs or explicit detected flag
+              const isDetected = requestSucceeded && (
+                adobeTargetData.detected === true ||
+                (activityNames.length > 0) ||
+                (activityIds.length > 0)
+              );
+
+              return {
+                url: urlObj.url,
+                category: urlObj.category,
+                priority: urlObj.priority,
+                success: requestSucceeded,
+                adobeTargetDetected: isDetected,
+                experimentCount: adobeTargetData.experimentCount || activityIds.length || 0,
+                experiments: adobeTargetData.experiments || [],
+                version: adobeTargetData.version,
+                activityNames: activityNames,
+                activityIds: activityIds,
+                mboxData: adobeTargetData.mboxData,
+                scrapedAt: new Date(),
+                isSeedUrl: urlObj.isSeedUrl === true
+              };
+            })
+            .catch(error => ({
+              url: urlObj.url,
+              category: urlObj.category,
+              priority: urlObj.priority,
+              success: false,
+              adobeTargetDetected: false,
+              error: error.message,
+              scrapedAt: new Date(),
+              isSeedUrl: urlObj.isSeedUrl === true
+            }));
+        });
 
         const batchResults = await Promise.allSettled(batchPromises);
 
@@ -727,8 +792,10 @@ class AdobeTarget1_0Service {
     try {
       console.log(`    🔍 Quick detection on: ${url}`);
       
-      // Get browser from pool
-      browser = await browserPool.getBrowser();
+      // Use fresh browser (NO browser pool) to avoid memory exhaustion and crashes
+      // This matches the sequential + single browser approach
+      const { launchBrowser } = require('../../utils/helper');
+      browser = await launchBrowser();
       page = await createPage(browser);
       
       // Use existing detection method from AdobeScraperService
@@ -772,8 +839,21 @@ class AdobeTarget1_0Service {
       };
       
     } finally {
+      // CRITICAL: Always close page and browser to prevent memory leaks
       if (page) {
-        await closePage(page);
+        try {
+          await closePage(page);
+        } catch (closeError) {
+          console.warn(`    ⚠️  Error closing page:`, closeError.message);
+        }
+      }
+      if (browser) {
+        try {
+          const { closeBrowser } = require('../../utils/helper');
+          await closeBrowser(browser);
+        } catch (closeError) {
+          console.warn(`    ⚠️  Error closing browser:`, closeError.message);
+        }
       }
     }
   }
@@ -839,14 +919,38 @@ class AdobeTarget1_0Service {
       );
 
       if (response.data.success) {
-        const top25 = response.data.data?.prioritizedTop25 || [];
-        console.log(`    ✅ Categorization success: ${top25.length} URLs in top 25`);
+        let top25 = response.data.data?.prioritizedTop25 || [];
+        const categories = response.data.data?.categories || [];
+        
+        console.log(`    ✅ Categorization success: ${top25.length} URLs in prioritizedTop25, ${categories.length} categories`);
+
+        // If we have less than 25 URLs, build top 25 from categories
+        if (top25.length < 25 && categories.length > 0) {
+          console.log(`    ⚠️  Only ${top25.length} URLs in prioritizedTop25, building top 25 from categories...`);
+          
+          // Count total URLs available in categories
+          const totalUrlsInCategories = categories.reduce((sum, cat) => sum + (cat.urls?.length || 0), 0);
+          console.log(`    📊 Total URLs available in categories: ${totalUrlsInCategories}`);
+          
+          try {
+            top25 = this.buildTop25FromCategories(categories, top25, 25);
+            console.log(`    ✅ Built top 25 from categories: ${top25.length} URLs`);
+            
+            if (top25.length < 25) {
+              console.warn(`    ⚠️  Still only ${top25.length} URLs after building from categories. May not have enough unique URLs.`);
+            }
+          } catch (buildError) {
+            console.error(`    ❌ Error building top 25 from categories:`, buildError.message);
+            console.error(`    Stack:`, buildError.stack);
+            // Continue with existing top25 if build fails
+          }
+        }
 
         return {
           originalUrl: prioritizationResult.originalUrl,
           categorizationSuccess: true,
-          totalCategories: response.data.data?.categories?.length || 0,
-          categories: response.data.data?.categories || [],
+          totalCategories: categories.length,
+          categories: categories,
           prioritizedTop25: top25,
           detectedDomainType: response.data.data?.summary?.detectedDomainType,
           categorizedAt: new Date(),
@@ -868,11 +972,153 @@ class AdobeTarget1_0Service {
   }
 
   /**
-   * Step 3: Scrape Adobe Target from top 25 URLs with concurrency control
+   * Build top 25 URLs from categories when prioritizedTop25 has less than 25
+   * Uses the same categories from categorization to ensure consistency
+   * @param {Array} categories - Categories array from categorization response
+   * @param {Array} existingTop25 - Already selected URLs from prioritizedTop25
+   * @param {number} targetCount - Target number of URLs (default 25)
+   * @returns {Array} Top 25 URLs with category, confidence, priority, etc.
    */
-  // Avinash scrapping the whole 25 urls at once ->
+  buildTop25FromCategories(categories, existingTop25 = [], targetCount = 25) {
+    try {
+      console.log(`    🔧 Building top ${targetCount} from ${categories.length} categories, starting with ${existingTop25.length} existing URLs`);
+      
+      // Categories to prioritize (higher business value)
+      const highPriorityCategories = new Set([
+        'Product Categories',
+        'Product Detail Pages',
+        'Product Listing Pages',
+        'Shopping Cart',
+        'Checkout',
+        'Payment & Financial',
+        'Account & User Functions',
+        'Search & Discovery',
+        'Booking & Reservations'
+      ]);
+
+      // Categories to deprioritize but still include if needed
+      const lowPriorityCategories = new Set([
+        'FAQ / Knowledgebase',
+        'Contact & Support',
+        'Legal & Compliance',
+        'Careers & Jobs',
+        'About / Company',
+        'News & Information'
+      ]);
+
+      // Get business priority for a category
+      const getCategoryPriority = (category) => {
+        if (highPriorityCategories.has(category)) return 90;
+        if (lowPriorityCategories.has(category)) return 60;
+        return 80; // Default priority
+      };
+
+      // Extract all URLs from categories with their metadata
+      const allUrlDetails = [];
+      const existingUrls = new Set(existingTop25.map(item => item.url));
+      
+      console.log(`    📋 Processing ${categories.length} categories...`);
+
+      categories.forEach((cat, catIndex) => {
+        if (!cat || !cat.category) {
+          console.warn(`    ⚠️  Category ${catIndex} is missing category name, skipping`);
+          return;
+        }
+        
+        const categoryPriority = getCategoryPriority(cat.category);
+        const avgConfidence = cat.confidence || 0.1;
+        const urls = cat.urls || [];
+        
+        console.log(`    📂 Category "${cat.category}": ${urls.length} URLs, priority: ${categoryPriority}, confidence: ${avgConfidence}`);
+        
+        urls.forEach(url => {
+          // Skip if already in existing top 25
+          if (existingUrls.has(url)) return;
+
+          allUrlDetails.push({
+            url: url,
+            category: cat.category,
+            confidence: avgConfidence,
+            priority: categoryPriority,
+            finalScore: (categoryPriority * 2) + avgConfidence,
+            reason: `From category: ${cat.category}`,
+            signal: 'category'
+          });
+        });
+      });
+
+      console.log(`    📊 Extracted ${allUrlDetails.length} unique URLs from categories (excluding ${existingTop25.length} existing)`);
+
+      // Sort by finalScore descending
+      allUrlDetails.sort((a, b) => b.finalScore - a.finalScore);
+
+      // Build result: start with existing top 25, then fill remaining slots
+      const result = [...existingTop25];
+      const resultUrls = new Set(result.map(item => item.url));
+
+      // Fill remaining slots from categorized URLs
+      let addedCount = 0;
+      for (const urlDetail of allUrlDetails) {
+        if (result.length >= targetCount) break;
+        if (resultUrls.has(urlDetail.url)) continue; // Skip duplicates
+
+        result.push(urlDetail);
+        resultUrls.add(urlDetail.url);
+        addedCount++;
+      }
+      
+      console.log(`    ✅ Added ${addedCount} URLs from categories. Total: ${result.length}/${targetCount}`);
+
+      // If still not enough, include ALL remaining URLs from categories (as fallback)
+      if (result.length < targetCount) {
+        console.log(`    ⚠️  Only ${result.length} URLs found, including ALL remaining categories to reach ${targetCount}`);
+        
+        let fallbackAdded = 0;
+        categories.forEach(cat => {
+          if (result.length >= targetCount) return;
+          
+          (cat.urls || []).forEach(url => {
+            if (result.length >= targetCount) return;
+            if (resultUrls.has(url)) return;
+
+            result.push({
+              url: url,
+              category: cat.category,
+              confidence: cat.confidence || 0.1,
+              priority: 50, // Lower priority for fallback
+              finalScore: 100 + (cat.confidence || 0.1),
+              reason: `Fallback from category: ${cat.category}`,
+              signal: 'fallback'
+            });
+            resultUrls.add(url);
+            fallbackAdded++;
+          });
+        });
+        
+        console.log(`    📈 Added ${fallbackAdded} fallback URLs. Total now: ${result.length}/${targetCount}`);
+      }
+
+      // Final sort by finalScore
+      result.sort((a, b) => b.finalScore - a.finalScore);
+
+      const finalResult = result.slice(0, targetCount);
+      console.log(`    ✅ Final result: ${finalResult.length} URLs`);
+      
+      return finalResult;
+    } catch (error) {
+      console.error(`    ❌ Error in buildTop25FromCategories:`, error.message);
+      console.error(`    Stack:`, error.stack);
+      // Return existing top25 if build fails
+      return existingTop25;
+    }
+  }
+
+  /**
+   * Step 3: Scrape Adobe Target from top 25 URLs using Sequential + Single Browser approach
+   * This approach processes URLs one at a time using a single browser instance
+   * Benefits: Lower memory usage, simpler logic, better reliability
+   */
   async scrapeTop25Urls(categorizationResult, options = {}, seedUrl) {
-    const concurrency = options.concurrency || 4; // 4 concurrent URLs
     const results = [];
     const uniqueExperimentIds = new Set();
     const uniqueActivityIds = new Set();
@@ -897,6 +1143,8 @@ class AdobeTarget1_0Service {
       seedUrlExperimentCount: 0,
       seedUrlError: null
     };
+
+    let browser = null;
 
     try {
       const top25Urls = (categorizationResult?.categorizationSuccess && categorizationResult.prioritizedTop25)
@@ -948,78 +1196,96 @@ class AdobeTarget1_0Service {
         return { results, summary };
       }
 
-      console.log(`    🚀 Scraping Adobe Target from ${queue.length} URLs (${concurrency} concurrent)...`);
+      console.log(`    🚀 Scraping Adobe Target from ${queue.length} URLs (SEQUENTIAL with single browser)...`);
 
-      // Process URLs with concurrency control
-      for (let i = 0; i < queue.length; i += concurrency) {
-        const batch = queue.slice(i, i + concurrency);
-        console.log(`    📍 Scraping batch ${Math.floor(i / concurrency) + 1}/${Math.ceil(queue.length / concurrency)}: URLs ${i + 1}-${Math.min(i + concurrency, queue.length)}`);
+      // Track domains that have already handled cookie consent
+      const domainsWithConsentHandled = new Set();
+      
+      // Helper function to extract domain from URL
+      const extractDomainFromUrl = (urlString) => {
+        try {
+          const parsed = new URL(urlString);
+          return parsed.hostname.toLowerCase();
+        } catch (error) {
+          return null;
+        }
+      };
 
-        const batchPromises = batch.map(urlItem =>
-          AdobeScraperService.scrapeAdobeTargetExperiments(urlItem.url)
-            .then(scrapingResult => {
-              const adobeTargetData = scrapingResult.adobeTarget || scrapingResult.data?.adobeTarget || {};
-              const activityNames = adobeTargetData.activityNames || [];
-              const activityIds = adobeTargetData.activityIds || [];
+      // Create ONE browser for all URLs (Sequential + Single Browser approach)
+      const { launchBrowser } = require('../../utils/helper');
+      browser = await launchBrowser();
+      console.log(`    🌐 Created single browser for ${queue.length} URLs (sequential processing)`);
 
-              // Treat undefined success as true (legacy service never sets the flag)
-              const requestSucceeded = scrapingResult.success ?? true;
+      // Process URLs SEQUENTIALLY (one at a time)
+      for (let i = 0; i < queue.length; i++) {
+        const urlItem = queue[i];
+        let page = null;
 
-              // Adobe Target is detected if we have activity names/IDs or explicit detected flag
-              const isDetected = requestSucceeded && (
-                adobeTargetData.detected === true ||
-                (activityNames.length > 0) ||
-                (activityIds.length > 0)
-              );
+        try {
+          console.log(`    [${i + 1}/${queue.length}] Processing: ${urlItem.url}`);
 
-              return {
-                url: urlItem.url,
-                category: urlItem.category,
-                priority: urlItem.priority,
-                success: requestSucceeded,
-                adobeTargetDetected: isDetected,
-                experimentCount: adobeTargetData.experimentCount || activityIds.length || 0,
-                experiments: adobeTargetData.experiments || [],
-                version: adobeTargetData.version,
-                activityNames: activityNames,
-                activityIds: activityIds,
-                mboxData: adobeTargetData.mboxData,
-                scrapedAt: new Date(),
-                isSeedUrl: urlItem.isSeedUrl === true
-              };
-            })
-            .catch(error => ({
-              url: urlItem.url,
-              category: urlItem.category,
-              priority: urlItem.priority,
-              success: false,
-              adobeTargetDetected: false,
-              error: error.message,
-              scrapedAt: new Date(),
-              isSeedUrl: urlItem.isSeedUrl === true
-            }))
-        );
+          // Create new page in the same browser
+          const { createPage } = require('../../utils/helper');
+          page = await createPage(browser);
+          console.log(`    📄 Page created for URL ${i + 1}/${queue.length}`);
 
-        const batchResults = await Promise.all(batchPromises);
-        results.push(...batchResults);
+          // Cookie consent logic
+          const domain = extractDomainFromUrl(urlItem.url);
+          const skipCookieConsent = domain && domainsWithConsentHandled.has(domain);
+          
+          // Mark domain as handled if this is the first URL from this domain
+          if (domain && !skipCookieConsent) {
+            domainsWithConsentHandled.add(domain);
+            console.log(`    🍪 Handling cookie consent for domain: ${domain} (first URL from this domain)`);
+          } else if (skipCookieConsent) {
+            console.log(`    ⏭️  Skipping cookie consent for ${urlItem.url} (already handled for domain: ${domain})`);
+          }
 
-        // Update summary
-        batchResults.forEach(result => {
-          const isSeedResult = result.isSeedUrl === true;
-
-          const appendActivityIds = ids => {
-            if (!Array.isArray(ids)) {
-              return;
+          // Scrape using the shared browser and page
+          const scrapingResult = await AdobeScraperService.scrapeExperimentsFromPage(
+            urlItem.url,
+            {
+              browserInstance: browser,
+              sharedPage: page,
+              skipCookieConsent: skipCookieConsent
             }
-            ids.forEach(id => {
-              if (!id) {
-                return;
-              }
-              summary.allActivityIds.push(id);
-              uniqueActivityIds.add(id);
-            });
+          );
+
+          // Process the scraping result
+          const adobeTargetData = scrapingResult || {};
+          const activityNames = adobeTargetData.activityNames || [];
+          const activityIds = adobeTargetData.activityIds || [];
+
+          // Adobe Target is detected if we have activity names/IDs or explicit detected flag
+          const isDetected = (
+            adobeTargetData.hasAdobeTarget === true ||
+            adobeTargetData.detected === true ||
+            (activityNames.length > 0) ||
+            (activityIds.length > 0)
+          );
+
+          const requestSucceeded = !scrapingResult.error && !scrapingResult.captchaDetected;
+
+          const result = {
+            url: urlItem.url,
+            category: urlItem.category,
+            priority: urlItem.priority,
+            success: requestSucceeded,
+            adobeTargetDetected: isDetected,
+            experimentCount: adobeTargetData.experimentCount || activityIds.length || 0,
+            experiments: adobeTargetData.experiments || [],
+            version: adobeTargetData.adobeTargetVersion || adobeTargetData.version,
+            activityNames: activityNames,
+            activityIds: activityIds,
+            mboxData: adobeTargetData.mboxData,
+            scrapedAt: new Date(),
+            isSeedUrl: urlItem.isSeedUrl === true
           };
 
+          results.push(result);
+
+          // Update summary immediately
+          const isSeedResult = result.isSeedUrl === true;
           if (isSeedResult) {
             summary.seedUrlScraped = true;
           }
@@ -1042,6 +1308,7 @@ class AdobeTarget1_0Service {
 
               console.log(`      ✅ Adobe Target DETECTED: ${result.url} (${result.activityIds?.length || 0} activities)`);
 
+              // Track unique experiments
               if (Array.isArray(result.experiments) && result.experiments.length > 0) {
                 result.experiments.forEach(exp => {
                   if (exp.experimentId) {
@@ -1052,45 +1319,96 @@ class AdobeTarget1_0Service {
                   if (exp.experimentName) {
                     uniqueExperimentNames.add(exp.experimentName);
                   }
-                  if (!Array.isArray(result.activityIds) || result.activityIds.length === 0) {
-                    appendActivityIds(exp.activityIds);
-                  }
                 });
               } else if (Array.isArray(result.activityIds)) {
                 result.activityIds.forEach(id => uniqueExperimentIds.add(id));
               }
 
-              appendActivityIds(result.activityIds);
+              // Track activity IDs
+              if (Array.isArray(result.activityIds)) {
+                result.activityIds.forEach(id => {
+                  if (id) {
+                    summary.allActivityIds.push(id);
+                    uniqueActivityIds.add(id);
+                  }
+                });
+              }
             }
           } else {
             if (isSeedResult) {
               summary.seedUrlSuccessful = false;
-              summary.seedUrlError = result.error;
+              summary.seedUrlError = result.error || scrapingResult.error;
             } else {
               summary.failedScrapedUrls += 1;
             }
           }
-        });
 
-        // Delay between batches for resource recovery
-        if (i + concurrency < queue.length) {
-          const delayMs = 2000;
-          console.log(`    ⏱️  Waiting ${delayMs}ms between batches...`);
-          await new Promise(resolve => setTimeout(resolve, delayMs));
+        } catch (error) {
+          console.error(`    ❌ Error processing URL ${i + 1}/${queue.length} (${urlItem.url}):`, error.message);
+          
+          const errorResult = {
+            url: urlItem.url,
+            category: urlItem.category,
+            priority: urlItem.priority,
+            success: false,
+            adobeTargetDetected: false,
+            error: error.message,
+            scrapedAt: new Date(),
+            isSeedUrl: urlItem.isSeedUrl === true
+          };
+
+          results.push(errorResult);
+
+          // Update summary for failed URL
+          if (urlItem.isSeedUrl) {
+            summary.seedUrlScraped = true;
+            summary.seedUrlSuccessful = false;
+            summary.seedUrlError = error.message;
+          } else {
+            summary.failedScrapedUrls += 1;
+          }
+
+        } finally {
+          // CRITICAL: Close page immediately after processing (allows memory cleanup)
+          if (page) {
+            try {
+              const { closePage } = require('../../utils/helper');
+              await closePage(page);
+              // Small delay to allow browser to cleanup memory
+              await new Promise(resolve => setTimeout(resolve, 200));
+            } catch (closeError) {
+              console.warn(`    ⚠️  Error closing page for ${urlItem.url}:`, closeError.message);
+            }
+          }
         }
       }
 
-      console.log(`    ✅ Scraping complete: ${summary.successfulScrapedUrls}/${summary.totalTop25Urls} URLs succeeded`);
+      console.log(`    ✅ Sequential scraping complete: ${summary.successfulScrapedUrls}/${summary.totalTop25Urls} URLs succeeded`);
+      
+      // Finalize summary statistics
       summary.uniqueExperimentIds = Array.from(uniqueExperimentIds);
       summary.uniqueExperimentCount = summary.uniqueExperimentIds.length;
       summary.uniqueActivityIds = Array.from(uniqueActivityIds);
       summary.uniqueActivityCount = summary.uniqueActivityIds.length;
       summary.uniqueExperimentNames = Array.from(uniqueExperimentNames);
       summary.allActivityCount = summary.allActivityIds.length;
-      console.log(`    🎯 Unique experiments detected so far: ${summary.uniqueExperimentCount}`);
+      console.log(`    🎯 Unique experiments detected: ${summary.uniqueExperimentCount}`);
+      console.log(`    🎯 Unique activities detected: ${summary.uniqueActivityCount}`);
 
     } catch (error) {
-      console.error(`    ❌ Error during scraping:`, error.message);
+      console.error(`    ❌ Error during sequential scraping:`, error.message);
+      throw error;
+    } finally {
+      // CRITICAL: Always close the browser at the end
+      if (browser) {
+        try {
+          const { closeBrowser } = require('../../utils/helper');
+          await closeBrowser(browser);
+          console.log(`    🔒 Browser closed successfully`);
+        } catch (closeError) {
+          console.error(`    ⚠️  Error closing browser:`, closeError.message);
+        }
+      }
     }
 
     return { results, summary };
