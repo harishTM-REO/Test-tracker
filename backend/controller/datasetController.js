@@ -176,7 +176,7 @@ const datasetController = {
         .sort(sort)
         .limit(limit * 1)
         .skip((page - 1) * limit)
-        .select('_id name description originalFileName version fileType createdAt totalRows scrapingStatus scrapingStats toolType adobeTargetValidation')
+        .select('_id name description originalFileName version fileType createdAt totalRows scrapingStatus scrapingStats toolType adobeTargetValidation optimizelyValidation abTastyValidation')
         .lean();
       const findDuration = Date.now() - findStartTime;
 

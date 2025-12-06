@@ -208,7 +208,17 @@ export default {
     },
 
     isValidationDataset(dataset) {
-      return dataset?.toolType === 'Adobe Target Validation'
+      return ['Adobe Target Validation', 'Optimizely Validation', 'ABTasty Validation'].includes(dataset?.toolType)
+    },
+
+    getValidationField(dataset) {
+      const map = {
+        'Adobe Target Validation': 'adobeTargetValidation',
+        'Optimizely Validation': 'optimizelyValidation',
+        'ABTasty Validation': 'abTastyValidation'
+      }
+      const key = map[dataset?.toolType]
+      return key ? dataset[key] : null
     },
 
     getValidationStatusText(status) {
@@ -234,44 +244,30 @@ export default {
     },
 
     getDatasetStatusText(dataset) {
-      const scrapingStatus = dataset?.scrapingStatus || 'not_started'
-      const validationStatus = dataset?.adobeTargetValidation?.status || 'not_started'
-
       if (this.isValidationDataset(dataset)) {
-        const scrapingActive = ['pending', 'in_progress', 'failed'].includes(scrapingStatus)
-
-        if (scrapingActive) {
-          // Surface scraping lifecycle while the validation worker is still running
-          return this.getScrapingStatusText(scrapingStatus)
-        }
-
-        if (validationStatus && validationStatus !== 'not_started') {
-          return this.getValidationStatusText(validationStatus)
-        }
+        const validation = this.getValidationField(dataset)
+        const status = validation?.status || 'not_started'
+        return this.getValidationStatusText(status)
       }
 
+      const scrapingStatus = dataset?.scrapingStatus || 'not_started'
       return this.getScrapingStatusText(scrapingStatus)
     },
     
     getDatasetStatusClass(dataset) {
-      const scrapingStatus = dataset?.scrapingStatus || 'not_started'
-      const validationStatus = dataset?.adobeTargetValidation?.status || 'not_started'
-
       if (this.isValidationDataset(dataset)) {
-        const scrapingActive = ['pending', 'in_progress', 'failed'].includes(scrapingStatus)
-
-        if (scrapingActive || !validationStatus || validationStatus === 'not_started') {
-          return this.getScrapingStatusClass(scrapingStatus)
-        }
-
-        return this.getValidationStatusClass(validationStatus)
+        const validation = this.getValidationField(dataset)
+        const status = validation?.status || 'not_started'
+        return this.getValidationStatusClass(status)
       }
 
+      const scrapingStatus = dataset?.scrapingStatus || 'not_started'
       return this.getScrapingStatusClass(scrapingStatus)
     },
 
     getValidationSummary(dataset) {
-      return dataset?.adobeTargetValidation?.summary || null
+      const validation = this.getValidationField(dataset)
+      return validation?.summary || null
     },
 
     formatDetectionRate(rate) {
@@ -293,14 +289,15 @@ export default {
       if (!dataset) {
         return false
       }
-      const scrapingActive = ['pending', 'in_progress'].includes(dataset?.scrapingStatus)
 
       if (this.isValidationDataset(dataset)) {
-        const validationStatus = dataset?.adobeTargetValidation?.status
+        const validation = this.getValidationField(dataset)
+        const validationStatus = validation?.status
         const validationActive = ['pending', 'in_progress'].includes(validationStatus)
-        return scrapingActive || validationActive
+        return validationActive
       }
 
+      const scrapingActive = ['pending', 'in_progress'].includes(dataset?.scrapingStatus)
       return scrapingActive
     },
 

@@ -75,9 +75,7 @@ class OptimizelyValidationService {
       await Dataset.findByIdAndUpdate(datasetId, {
         'optimizelyValidation.status': 'in_progress',
         'optimizelyValidation.lastRunAt': new Date(),
-        'optimizelyValidation.lastResultId': validationResult._id,
-        scrapingStatus: 'in_progress',
-        scrapingStartedAt: new Date()
+        'optimizelyValidation.lastResultId': validationResult._id
       });
 
       const results = {
@@ -345,14 +343,7 @@ class OptimizelyValidationService {
             detectionRate: detectionRate,
             uniqueProjectIds: uniqueProjectIdArray,
             projectIdCount: uniqueProjectIdArray.length
-          },
-          scrapingStatus: 'completed',
-          scrapingCompletedAt: new Date(),
-          'scrapingStats.processedUrls': urls.length,
-          'scrapingStats.successfulScans': results.positive.length + results.negative.length,
-          'scrapingStats.failedScans': results.failed.length,
-          'scrapingStats.optimizelyDetected': results.positive.length,
-          'scrapingStats.duration': Math.round((Date.now() - startTime) / 1000)
+          }
         });
         console.log(`✅ Dataset updated successfully`);
       } catch (datasetError) {
@@ -399,7 +390,15 @@ class OptimizelyValidationService {
       try {
         await Dataset.findByIdAndUpdate(datasetId, {
           'optimizelyValidation.status': 'failed',
-          scrapingStatus: 'failed',
+          'optimizelyValidation.summary': {
+            totalUrls: urls?.length || 0,
+            positiveCount: 0,
+            negativeCount: 0,
+            failedCount: urls?.length || 0,
+            detectionRate: 0,
+            uniqueProjectIds: [],
+            projectIdCount: 0
+          },
           scrapingError: error.message
         });
       } catch (updateError) {

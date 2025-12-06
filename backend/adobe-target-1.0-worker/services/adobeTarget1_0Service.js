@@ -1462,14 +1462,10 @@ class AdobeTarget1_0Service {
             detectionRate: 0
           }
         };
-        datasetDoc.scrapingStatus = 'in_progress';
         datasetDoc.scrapingStats = {
           ...(datasetDoc.scrapingStats || {}),
           ...initialStats
         };
-        datasetDoc.scrapingStartedAt = startTime;
-        datasetDoc.scrapingCompletedAt = null;
-        datasetDoc.scrapingLastUpdate = new Date();
         await datasetDoc.save();
       }
 
@@ -1734,9 +1730,6 @@ class AdobeTarget1_0Service {
             detectionRate: summary.detectionRate
           }
         };
-        datasetDoc.scrapingStatus = 'completed';
-        datasetDoc.scrapingCompletedAt = endTime;
-        datasetDoc.scrapingLastUpdate = endTime;
         datasetDoc.scrapingStats.duration = `${Math.floor((endTime - startTime) / 60000)}m ${Math.floor(((endTime - startTime) % 60000) / 1000)}s`;
         await datasetDoc.save();
       }
@@ -1772,10 +1765,7 @@ class AdobeTarget1_0Service {
             detectionRate: 0
           }
         };
-        datasetDoc.scrapingStatus = 'failed';
         datasetDoc.scrapingError = error.message;
-        datasetDoc.scrapingCompletedAt = new Date();
-        datasetDoc.scrapingLastUpdate = new Date();
         await datasetDoc.save();
       }
 

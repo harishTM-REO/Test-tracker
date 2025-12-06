@@ -56,22 +56,6 @@ class ABTastyValidationJobService {
         }
       };
 
-      dataset.scrapingStatus = 'pending';
-      dataset.scrapingStartedAt = null;
-      dataset.scrapingError = null;
-      dataset.scrapingCompletedAt = null;
-      dataset.scrapingLastUpdate = new Date();
-      dataset.scrapingStats = {
-        ...(dataset.scrapingStats || {}),
-        totalUrls: urlPayload.length,
-        processedUrls: 0,
-        successfulScans: 0,
-        failedScans: 0,
-        abTastyDetected: 0,
-        totalExperiments: 0,
-        duration: null
-      };
-
       await dataset.save();
 
       const workerUrl = `${this.getWorkerUrl()}/abtasty/api/validation`;

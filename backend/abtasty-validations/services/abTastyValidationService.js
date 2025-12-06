@@ -64,9 +64,7 @@ class ABTastyValidationService {
       await Dataset.findByIdAndUpdate(datasetId, {
         'abTastyValidation.status': 'in_progress',
         'abTastyValidation.lastRunAt': new Date(),
-        'abTastyValidation.lastResultId': validationResult._id,
-        scrapingStatus: 'in_progress',
-        scrapingStartedAt: new Date()
+        'abTastyValidation.lastResultId': validationResult._id
       });
 
       const results = {
@@ -323,9 +321,7 @@ class ABTastyValidationService {
           detectionRate,
           uniqueProjectIds: Array.from(projectIds),
           projectIdCount: projectIds.size
-        },
-        scrapingStatus: 'completed',
-        scrapingCompletedAt: new Date()
+        }
       });
 
       console.log(`\n${'='.repeat(80)}`);
@@ -368,7 +364,15 @@ class ABTastyValidationService {
       try {
         await Dataset.findByIdAndUpdate(datasetId, {
           'abTastyValidation.status': 'failed',
-          scrapingStatus: 'failed',
+          'abTastyValidation.summary': {
+            totalUrls: urls?.length || 0,
+            positiveCount: 0,
+            negativeCount: 0,
+            failedCount: urls?.length || 0,
+            detectionRate: 0,
+            uniqueProjectIds: [],
+            projectIdCount: 0
+          },
           scrapingError: error.message
         });
       } catch (updateError) {
