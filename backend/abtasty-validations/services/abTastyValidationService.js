@@ -2,20 +2,9 @@ const ABTastyValidationResult = require('../../models/ABTastyValidationResult');
 const ABTastyValidationDocument = require('../../models/ABTastyValidationDocument');
 const Dataset = require('../../models/Dataset');
 const { isUrlReachable } = require('../../utils/urlValidator');
-const chromium = require('@sparticuz/chromium');
-
-let puppeteer;
-try {
-  puppeteer = require('puppeteer');
-} catch (e) {
-  puppeteer = require('puppeteer-core');
-}
+const { handleCookieConsent, detectCaptcha, launchBrowser } = require('../../utils/helper');
 
 class ABTastyValidationService {
-  constructor() {
-    this.isInProduction = process.env.NODE_ENV === 'production';
-  }
-
   /**
    * Main validation method - processes URLs sequentially with fresh browser instances
    */
@@ -133,7 +122,7 @@ class ABTastyValidationService {
             
             // Launch fresh browser for this URL
             console.log(`🌐 Launching fresh browser...`);
-            browser = await this.launchBrowser();
+            browser = await launchBrowser();
             const page = await browser.newPage();
 
             // Configure page
@@ -456,14 +445,17 @@ class ABTastyValidationService {
 
       // Check for captcha
       console.log(`🔍 Checking for captcha...`);
-      const captchaDetected = await this.detectCaptcha(page);
+      const captchaResult = await detectCaptcha(page);
+      const captchaDetected = typeof captchaResult === 'object'
+        ? !!captchaResult.detected
+        : !!captchaResult;
       result.detectionDetails.captchaDetected = captchaDetected;
-      console.log('captchaDetected', captchaDetected);
+      console.log('captchaDetected', captchaDetected, captchaResult?.reason ? `reason: ${captchaResult.reason}` : '');
       if (captchaDetected) {
         console.log(`⚠️  Captcha detected`);
         result.status = 'failed';
-        result.error = 'Captcha detected';
-        result.detectionDetails.error = 'Captcha detected';
+        result.error = captchaResult?.reason || 'Captcha detected';
+        result.detectionDetails.error = captchaResult?.reason || 'Captcha detected';
         // Add small delay to ensure page state is stable before returning
         try {
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -475,7 +467,7 @@ class ABTastyValidationService {
 
       // Accept cookie consent
       console.log(`🍪 Handling cookie consent...`);
-      await this.handleCookieConsent(page);
+      await handleCookieConsent(page);
 
       // Detect ABTasty
       console.log(`🔍 Detecting ABTasty...`);
@@ -571,108 +563,6 @@ class ABTastyValidationService {
     }
   }
 
-  /**
-   * Detect captcha on page
-   */
-  async detectCaptcha(page) {
-    try {
-      const captchaDetected = await page.evaluate(() => {
-        const captchaSelectors = [
-          '#recaptcha',
-          '.g-recaptcha',
-          '[data-sitekey]',
-          'iframe[src*="recaptcha"]',
-          'iframe[src*="captcha"]',
-          '#px-captcha',
-          '.px-captcha'
-        ];
-
-        for (const selector of captchaSelectors) {
-          if (document.querySelector(selector)) {
-            return true;
-          }
-        }
-
-        return false;
-      });
-
-      return captchaDetected;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
-   * Handle cookie consent banners
-   */
-  async handleCookieConsent(page) {
-    try {
-      const cookieSelectors = [
-        'button[id*="accept"]',
-        'button[class*="accept"]',
-        'button[id*="cookie"]',
-        'button[class*="cookie"]',
-        'button[id*="consent"]',
-        'button[class*="consent"]',
-        'a[id*="accept"]',
-        'a[class*="accept"]'
-      ];
-
-      for (const selector of cookieSelectors) {
-        try {
-          const button = await page.$(selector);
-          if (button) {
-            await button.click();
-            console.log(`✓ Clicked cookie consent button: ${selector}`);
-            await new Promise(resolve => setTimeout(resolve, 500));
-            break;
-          }
-        } catch (e) {
-          // Continue to next selector
-        }
-      }
-    } catch (error) {
-      // Cookie consent not critical
-      console.log(`⚠️  Cookie consent handling failed (non-critical)`);
-    }
-  }
-
-  /**
-   * Launch a fresh browser instance
-   */
-  async launchBrowser() {
-    try {
-      const options = {
-        headless: 'new',
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-gpu',
-          '--window-size=1920,1080',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-web-security'
-        ],
-        defaultViewport: {
-          width: 1920,
-          height: 1080
-        }
-      };
-
-      if (this.isInProduction) {
-        options.executablePath = await chromium.executablePath();
-        options.args = [...chromium.args, ...options.args];
-      }
-
-      const browser = await puppeteer.launch(options);
-      return browser;
-
-    } catch (error) {
-      console.error('Error launching browser:', error);
-      throw error;
-    }
-  }
 }
 
 module.exports = new ABTastyValidationService();
