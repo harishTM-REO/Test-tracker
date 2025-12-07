@@ -495,7 +495,7 @@ class OptimizelyValidationService {
       // Accept cookie consent
       console.log(`🍪 Handling cookie consent...`);
       await this.handleCookieConsent(page);
-
+      await new Promise(resolve => setTimeout(resolve, 3500));
       // Detect Optimizely
       console.log(`🔍 Detecting Optimizely...`);
       const optimizelyDetection = await this.detectOptimizely(page);

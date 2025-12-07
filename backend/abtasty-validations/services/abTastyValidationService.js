@@ -512,7 +512,7 @@ class ABTastyValidationService {
       // Accept cookie consent
       console.log(`🍪 Handling cookie consent...`);
       await handleCookieConsent(page);
-
+      await new Promise(resolve => setTimeout(resolve, 3500));
       // Detect ABTasty
       console.log(`🔍 Detecting ABTasty...`);
       const abTastyDetection = await this.detectABTasty(page);
