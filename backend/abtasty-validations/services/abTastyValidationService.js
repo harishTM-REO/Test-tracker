@@ -2,7 +2,7 @@ const ABTastyValidationResult = require('../../models/ABTastyValidationResult');
 const ABTastyValidationDocument = require('../../models/ABTastyValidationDocument');
 const Dataset = require('../../models/Dataset');
 const { isUrlReachable } = require('../../utils/urlValidator');
-const { handleCookieConsent, detectCaptcha, launchBrowser } = require('../../utils/helper');
+const { handleCookieConsent, detectCaptcha, launchBrowser, createPage } = require('../../utils/helper');
 
 class ABTastyValidationService {
   /**
@@ -120,8 +120,8 @@ class ABTastyValidationService {
             
             // Launch fresh browser for this URL
             console.log(`🌐 Launching fresh browser...`);
-            browser = await launchBrowser();
-            const page = await browser.newPage();
+            const { browser: launchedBrowser, page } = await this.getBrowserAndPage();
+            browser = launchedBrowser;
 
             // Configure page
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -401,6 +401,46 @@ class ABTastyValidationService {
       
       console.log(`✅ ABTASTY VALIDATION FINALLY BLOCK COMPLETED\n`);
     }
+  }
+
+  /**
+   * Launch browser and create a page with bounded timeouts and a small retry
+   */
+  async getBrowserAndPage() {
+    const protocolTimeout = Number(process.env.PROTOCOL_TIMEOUT || 120000);
+    const pageCreationTimeout = Number(process.env.PAGE_CREATION_TIMEOUT) || 45000;
+    const maxAttempts = 2;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let browser = null;
+      try {
+        console.log(`[getBrowserAndPage] Launch attempt ${attempt}/${maxAttempts} (protocolTimeout=${protocolTimeout}ms, pageTimeout=${pageCreationTimeout}ms)`);
+        browser = await launchBrowser({ protocolTimeout });
+        const page = await createPage(browser, {
+          timeout: pageCreationTimeout,
+          retries: 1,
+          backoffMs: 500
+        });
+        return { browser, page };
+      } catch (error) {
+        lastError = error;
+        console.warn(`[getBrowserAndPage] attempt ${attempt} failed: ${error?.message || error}`);
+        // Best-effort cleanup
+        try {
+          if (browser) {
+            await browser.close();
+          }
+        } catch (_) {}
+
+        if (attempt === maxAttempts) {
+          throw error;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    throw lastError || new Error('Failed to launch browser and page');
   }
 
   /**
