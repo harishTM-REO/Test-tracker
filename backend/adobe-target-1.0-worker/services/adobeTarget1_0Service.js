@@ -1912,7 +1912,16 @@ class AdobeTarget1_0Service {
             await browser.close();
             console.log('   🔒 Browser closed');
           } catch (e) {
-            console.warn(`   ⚠️  Error closing browser: ${e.message}`);
+            console.error(`   ⚠️  Error closing browser (non-fatal): ${e.message}`);
+            // Try to force close if normal close fails (like Optimizely)
+            try {
+              if (browser.process && browser.process()) {
+                browser.process().kill('SIGKILL');
+                console.log('   🔒 Browser force killed');
+              }
+            } catch (killError) {
+              console.error(`   ⚠️  Could not force kill browser process: ${killError.message}`);
+            }
           }
         }
 

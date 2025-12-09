@@ -183,7 +183,9 @@ class AdobeScraperService {
             console.warn(`⚠️ Request interception setup failed for ${url} (continuing):`, e.message);
           }
         } 
-        await new Promise(r => setTimeout(r, 4000)); 
+        // Reduced wait time from 4s to 2.5s to match Optimizely's efficiency
+        // This reduces memory accumulation during long validation runs
+        await new Promise(r => setTimeout(r, 2500)); 
         // Run detection with timeout (15s for batch efficiency, down from 20s)
         let detectionResult = {
           detected: false,
