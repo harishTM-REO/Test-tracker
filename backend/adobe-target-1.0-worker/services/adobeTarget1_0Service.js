@@ -14,6 +14,7 @@ const {
 } = require(path.join(__dirname, '../../utils/adobeTargetResultSanitizer'));
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
 const { createPage, closePage } = require(path.join(__dirname, '../../utils/helper'));
+const { isUrlReachable } = require(path.join(__dirname, '../../utils/urlValidator'));
 
 // Import batch processing helpers for memory management and performance
 const { 
@@ -1855,6 +1856,24 @@ class AdobeTarget1_0Service {
       let page = null;
 
       try {
+        // Check URL reachability BEFORE launching browser (saves resources)
+        console.log('   ⏱️  Checking if URL is reachable...');
+        const isReachable = await isUrlReachable(targetUrl);
+        
+        if (!isReachable) {
+          console.log('   ❌ URL is not reachable - skipping browser launch');
+          results.push({
+            success: false,
+            url: targetUrl,
+            companyName: normalizedEntry.companyName || null,
+            error: 'URL is not reachable or timed out'
+          });
+          console.log('   ⚠️  FAILED - URL not reachable');
+          continue; // Skip to next URL
+        }
+        
+        console.log('   ✅ URL is reachable - launching browser...');
+        
         // Launch fresh browser for this URL
         console.log('   🚀 Launching fresh browser...');
         browser = await this.launchBrowser();
@@ -2051,6 +2070,24 @@ class AdobeTarget1_0Service {
         }
 
         console.log(`🔸 [${i + 1}/${urlEntries.length}] Validating ${targetUrl}`);
+        
+        // Check URL reachability BEFORE creating page (saves resources)
+        console.log('   ⏱️  Checking if URL is reachable...');
+        const isReachable = await isUrlReachable(targetUrl);
+        
+        if (!isReachable) {
+          console.log('   ❌ URL is not reachable - skipping page creation');
+          results.push({
+            success: false,
+            url: targetUrl,
+            companyName: normalizedEntry.companyName || null,
+            error: 'URL is not reachable or timed out'
+          });
+          console.log('   ⚠️  FAILED - URL not reachable');
+          continue; // Skip to next URL
+        }
+        
+        console.log('   ✅ URL is reachable - creating page...');
         
         let freshPage = null;
         

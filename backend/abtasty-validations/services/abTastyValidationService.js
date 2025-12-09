@@ -127,15 +127,39 @@ class ABTastyValidationService {
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1920, height: 1080 });
 
-            // Validate URL with timeout to prevent hanging
-            const result = await Promise.race([
-              this.validateUrl(page, urlEntry),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('validateUrl timeout after 60 seconds')), 60000)
-              )
-            ]);
+            // Validate URL with timeout wrapper (like Optimizely Validation)
+            // This prevents the validation from hanging and ensures finally block always executes
+            let result;
+            try {
+              result = await Promise.race([
+                this.validateUrl(page, urlEntry),
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('validateUrl timeout after 60 seconds')), 60000)
+                )
+              ]);
+            } catch (timeoutError) {
+              // Timeout wrapper caught - convert to failed result (like Optimizely)
+              console.error(`   ❌ Validation timeout: ${timeoutError.message}`);
+              result = {
+                url: urlEntry.url,
+                companyName: urlEntry.companyName,
+                status: 'failed',
+                detectionDetails: {
+                  projectId: null,
+                  experiments: [],
+                  experimentCount: 0,
+                  activeCount: 0,
+                  detectedExplicitly: false,
+                  captchaDetected: false,
+                  cookieType: 'unknown',
+                  error: timeoutError.message || 'Validation timeout after 60 seconds'
+                },
+                scrapedAt: new Date(),
+                error: timeoutError.message || 'Validation timeout after 60 seconds'
+              };
+            }
             
-            // Categorize result
+            // Categorize result (validateUrl never throws - always returns result object like Optimizely)
             if (result.status === 'positive') {
               results.positive.push(result);
               if (result.detectionDetails.projectId) {
@@ -147,7 +171,7 @@ class ABTastyValidationService {
               console.log(`❌ NEGATIVE - No ABTasty detected`);
             } else {
               results.failed.push(result);
-              console.log(`⚠️  FAILED - ${result.error}`);
+              console.log(`⚠️  FAILED - ${result.error || 'Unknown error'}`);
             }
 
           } catch (error) {
@@ -164,6 +188,7 @@ class ABTastyValidationService {
                 activeCount: 0,
                 detectedExplicitly: false,
                 captchaDetected: false,
+                cookieType: 'unknown',
                 error: error.message
               },
               scrapedAt: new Date(),
@@ -487,27 +512,46 @@ class ABTastyValidationService {
     try {
       console.log(`🔍 Navigating to: ${url}`);
       
-      // Navigate with timeout
-      const navigationPromise = page.goto(url, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000
-      });
+      // Navigate with timeout (with error handling to ensure validateUrl never throws)
+      let response = null;
+      try {
+        const navigationPromise = page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 30000
+        });
 
-      const response = await Promise.race([
-        navigationPromise,
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Navigation timeout')), 30000)
-        )
-      ]);
+        response = await Promise.race([
+          navigationPromise,
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Navigation timeout')), 30000)
+          )
+        ]);
 
-      console.log(`✓ Page loaded (status: ${response.status()})`);
+        console.log(`✓ Page loaded (status: ${response?.status() || 'unknown'})`);
+      } catch (navError) {
+        console.error(`❌ Navigation error: ${navError.message}`);
+        result.status = 'failed';
+        result.error = `Navigation failed: ${navError.message}`;
+        result.detectionDetails.error = `Navigation failed: ${navError.message}`;
+        return result; // Return failed result instead of throwing
+      }
 
       // Wait for page to settle
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      try {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (delayError) {
+        // Ignore delay errors - non-fatal
+      }
 
-      // Check for captcha
+      // Check for captcha (with error handling to ensure validateUrl never throws)
       console.log(`🔍 Checking for captcha...`);
-      const captchaResult = await detectCaptcha(page);
+      let captchaResult = { detected: false };
+      try {
+        captchaResult = await detectCaptcha(page);
+      } catch (captchaError) {
+        console.warn(`⚠️  Captcha detection error (non-fatal): ${captchaError.message}`);
+        // Continue - assume no captcha if detection fails
+      }
       const captchaDetected = typeof captchaResult === 'object'
         ? !!captchaResult.detected
         : !!captchaResult;
@@ -527,13 +571,29 @@ class ABTastyValidationService {
         return result;
       }
 
-      // Accept cookie consent
+      // Accept cookie consent (with error handling to ensure validateUrl never throws)
       console.log(`🍪 Handling cookie consent...`);
-      await handleCookieConsent(page);
+      try {
+        await handleCookieConsent(page);
+      } catch (cookieError) {
+        console.warn(`⚠️  Cookie consent handling error (non-fatal): ${cookieError.message}`);
+        // Continue - assume cookies handled if operation fails
+      }
       await new Promise(resolve => setTimeout(resolve, 3500));
-      // Detect ABTasty
+      
+      // Detect ABTasty (with error handling to ensure validateUrl never throws)
       console.log(`🔍 Detecting ABTasty...`);
-      const abTastyDetection = await this.detectABTasty(page);
+      let abTastyDetection = { detected: false };
+      try {
+        abTastyDetection = await this.detectABTasty(page);
+      } catch (detectionError) {
+        console.error(`❌ ABTasty detection error: ${detectionError.message}`);
+        // Set error in result but don't throw - return failed result instead
+        result.status = 'failed';
+        result.error = `Detection error: ${detectionError.message}`;
+        result.detectionDetails.error = `Detection error: ${detectionError.message}`;
+        return result;
+      }
 
       if (abTastyDetection.detected) {
         result.status = 'positive';
