@@ -229,14 +229,26 @@ class AdobeScraperService {
       } catch (error) {
         console.error(`❌ Error detecting Adobe Target on ${url}:`, error.message);
         
-        // Check if it's a protocol/timeout error that should trigger browser restart
-        if (error.message.includes('Protocol') || 
-            error.message.includes('timeout') || 
-            error.message.includes('callFunctionOn')) {
-          throw new Error('BROWSER_PROTOCOL_ERROR: ' + error.message);
-        }
-        
-        throw error;
+        // Return error result instead of throwing (like Optimizely Validation)
+        // This ensures the caller's finally block always executes for browser cleanup
+        return {
+          detected: false,
+          version: null,
+          hasMboxCookie: false,
+          hasAdobeScript: false,
+          httpStatusCode: null,
+          captchaDetected: false,
+          detectionSource: { 
+            error: error.message,
+            isProtocolError: error.message.includes('Protocol') || 
+                             error.message.includes('timeout') || 
+                             error.message.includes('callFunctionOn'),
+            isBrowserError: error.message.includes('Target closed') ||
+                           error.message.includes('Session closed') ||
+                           error.message.includes('Connection closed') ||
+                           error.message.includes('Browser closed')
+          }
+        };
       } finally {
         // Cleanup request handler (only if we enabled it)
         if (requestHandler && sharedPage) {

@@ -798,12 +798,31 @@ class AdobeTarget1_0Service {
       browser = await launchBrowser();
       page = await createPage(browser);
       
-      // Use existing detection method from AdobeScraperService
-      const detectionResult = await AdobeScraperService.prototype.detectAdobeTargetPresenceWithSharedPage.call(
-        new AdobeScraperService(),
-        page,
-        url
-      );
+      // Use existing detection method from AdobeScraperService with timeout wrapper (like Optimizely)
+      const detectionResult = await Promise.race([
+        AdobeScraperService.prototype.detectAdobeTargetPresenceWithSharedPage.call(
+          new AdobeScraperService(),
+          page,
+          url
+        ),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Quick detection timeout after 60 seconds')), 60000)
+        )
+      ]);
+      
+      // Check if detection returned an error result (like Optimizely's validateUrl pattern)
+      if (detectionResult.detectionSource?.error) {
+        console.error(`    ❌ Quick detection error: ${detectionResult.detectionSource.error}`);
+        // On error, assume Adobe Target might be present (fail-safe)
+        // Better to waste time than miss experiments
+        console.warn(`    ⚠️  Assuming Adobe Target present due to detection error (fail-safe)`);
+        return {
+          detected: true, // Continue with full workflow if detection fails
+          version: null,
+          captchaDetected: false,
+          detectionSource: { error: detectionResult.detectionSource.error, assumedPresent: true }
+        };
+      }
       
       console.log(`    ${detectionResult.detected ? '✅' : '❌'} Adobe Target ${detectionResult.detected ? 'detected' : 'not detected'}`);
       
@@ -840,6 +859,7 @@ class AdobeTarget1_0Service {
       
     } finally {
       // CRITICAL: Always close page and browser to prevent memory leaks
+      // Even if detectAdobeTargetPresenceWithSharedPage throws an exception
       if (page) {
         try {
           await closePage(page);
@@ -849,10 +869,30 @@ class AdobeTarget1_0Service {
       }
       if (browser) {
         try {
-          const { closeBrowser } = require('../../utils/helper');
-          await closeBrowser(browser);
+          // Add timeout to browser.close() to prevent hanging
+          await Promise.race([
+            browser.close(),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Browser close timeout')), 10000)
+            )
+          ]);
         } catch (closeError) {
-          console.warn(`    ⚠️  Error closing browser:`, closeError.message);
+          console.warn(`    ⚠️  Error closing browser: ${closeError.message}`);
+          // Try to force close if normal close fails or times out
+          try {
+            if (browser.process && browser.process()) {
+              browser.process().kill('SIGKILL');
+              console.log(`    🔒 Browser force killed`);
+            } else {
+              const pid = browser.process()?.pid;
+              if (pid) {
+                process.kill(pid, 'SIGKILL');
+                console.log(`    🔒 Browser process ${pid} force killed`);
+              }
+            }
+          } catch (killError) {
+            console.warn(`    ⚠️  Could not force kill browser process: ${killError.message}`);
+          }
         }
       }
     }
@@ -1847,47 +1887,77 @@ class AdobeTarget1_0Service {
           // Don't retry - just move to next URL with fresh browser (like Optimizely)
           if (browser) {
             try {
-              await browser.close();
+              await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('Browser close timeout')), 10000)
+                )
+              ]);
             } catch (closeError) {
               console.warn(`   ⚠️  Error closing browser after page creation failure: ${closeError.message}`);
+              // Force kill if close fails
+              try {
+                if (browser.process && browser.process()) {
+                  browser.process().kill('SIGKILL');
+                }
+              } catch (killError) {
+                console.warn(`   ⚠️  Could not force kill browser: ${killError.message}`);
+              }
             }
           }
           throw new Error(`Page creation failed: ${pageError.message}`);
         }
 
-        // Use the optimized detection method with timeout protection
-        const detectionResult = await AdobeScraperService.detectAdobeTargetPresenceWithSharedPage(
-          page,
-          targetUrl
-        );
+        // Use the optimized detection method with timeout wrapper (like Optimizely Validation)
+        // This prevents the detection from hanging and ensures finally block always executes
+        const detectionResult = await Promise.race([
+          AdobeScraperService.detectAdobeTargetPresenceWithSharedPage(page, targetUrl),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Adobe Target detection timeout after 60 seconds')), 60000)
+          )
+        ]);
 
-        // Format result
-        const adobeTargetData = {
-          detected: detectionResult.detected,
-          version: detectionResult.version,
-          hasMboxCookie: detectionResult.hasMboxCookie,
-          hasAdobeScript: detectionResult.hasAdobeScript,
-          captchaDetected: detectionResult.captchaDetected,
-          captchaStatus: detectionResult.captchaStatus,
-          detectionSource: detectionResult.detectionSource,
-          activityIds: detectionResult.activityIds || [],
-          activityNames: detectionResult.activityNames || [],
-          experiments: [],
-          experimentCount: 0,
-          activeCount: 0
-        };
+        // Check if detection returned an error result (like Optimizely's validateUrl pattern)
+        // detectAdobeTargetPresenceWithSharedPage now returns error results instead of throwing
+        if (detectionResult.detectionSource?.error) {
+          console.error(`   ❌ Detection error: ${detectionResult.detectionSource.error}`);
+          results.push({
+            success: false,
+            url: targetUrl,
+            companyName: normalizedEntry.companyName || null,
+            error: detectionResult.detectionSource.error || 'Unknown detection error'
+          });
+          // Browser will be closed in finally block
+        } else {
+          // Format result (detection succeeded)
+          const adobeTargetData = {
+            detected: detectionResult.detected,
+            version: detectionResult.version,
+            hasMboxCookie: detectionResult.hasMboxCookie,
+            hasAdobeScript: detectionResult.hasAdobeScript,
+            captchaDetected: detectionResult.captchaDetected,
+            captchaStatus: detectionResult.captchaStatus,
+            detectionSource: detectionResult.detectionSource,
+            activityIds: detectionResult.activityIds || [],
+            activityNames: detectionResult.activityNames || [],
+            experiments: [],
+            experimentCount: 0,
+            activeCount: 0
+          };
 
-        results.push({
-          success: true,
-          url: targetUrl,
-          companyName: normalizedEntry.companyName || null,
-          adobeTargetData
-        });
+          results.push({
+            success: true,
+            url: targetUrl,
+            companyName: normalizedEntry.companyName || null,
+            adobeTargetData
+          });
 
-        console.log(`   ✅ Validation complete`);
+          console.log(`   ✅ Validation complete`);
+        }
 
       } catch (error) {
         console.error(`   ❌ Validation failed: ${error.message}`);
+        console.error(`   Stack trace:`, error.stack);
         
         results.push({
           success: false,
@@ -1897,30 +1967,50 @@ class AdobeTarget1_0Service {
         });
 
       } finally {
-        // ALWAYS close page and browser after each URL
+        // CRITICAL: ALWAYS close page and browser after each URL, even if exceptions occur
+        // This ensures no browsers are left hanging, especially when detectAdobeTargetPresenceWithSharedPage throws
+        
+        // Close page first
         if (page) {
           try {
             await closePage(page);
             console.log('   📄 Page closed');
           } catch (e) {
             console.warn(`   ⚠️  Error closing page: ${e.message}`);
+            // Continue - page close failure shouldn't prevent browser close
           }
         }
 
+        // Close browser with timeout protection (CRITICAL for preventing hanging browsers)
         if (browser) {
           try {
-            await browser.close();
+            // Add timeout to browser.close() to prevent hanging (like Optimizely)
+            await Promise.race([
+              browser.close(),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Browser close timeout')), 10000)
+              )
+            ]);
             console.log('   🔒 Browser closed');
           } catch (e) {
             console.error(`   ⚠️  Error closing browser (non-fatal): ${e.message}`);
-            // Try to force close if normal close fails (like Optimizely)
+            // Try to force close if normal close fails or times out (like Optimizely)
             try {
               if (browser.process && browser.process()) {
                 browser.process().kill('SIGKILL');
                 console.log('   🔒 Browser force killed');
+              } else {
+                // Alternative: try to get process ID from browser
+                const pid = browser.process()?.pid;
+                if (pid) {
+                  process.kill(pid, 'SIGKILL');
+                  console.log(`   🔒 Browser process ${pid} force killed`);
+                }
               }
             } catch (killError) {
               console.error(`   ⚠️  Could not force kill browser process: ${killError.message}`);
+              // Last resort: log warning but continue - don't block next URL
+              console.warn(`   ⚠️  Browser may be left hanging - will be cleaned up by OS`);
             }
           }
         }
@@ -1990,32 +2080,48 @@ class AdobeTarget1_0Service {
             throw new Error(`Page creation failed: ${pageError.message}`);
           }
           
-          // Use the optimized shared page method with timeout protection ⚡
-          const detectionResult = await AdobeScraperService.detectAdobeTargetPresenceWithSharedPage(
-            freshPage,
-            targetUrl
-          );
+          // Use the optimized shared page method with timeout wrapper (like Optimizely Validation)
+          // This prevents the detection from hanging and ensures finally block always executes
+          const detectionResult = await Promise.race([
+            AdobeScraperService.detectAdobeTargetPresenceWithSharedPage(freshPage, targetUrl),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Adobe Target detection timeout after 60 seconds')), 60000)
+            )
+          ]);
 
-          // Format result to match expected structure
-          const adobeTargetData = {
-            detected: detectionResult.detected,
-            version: detectionResult.version,
-            hasMboxCookie: detectionResult.hasMboxCookie,
-            hasAdobeScript: detectionResult.hasAdobeScript,
-            captchaDetected: detectionResult.captchaDetected,
-            captchaStatus: detectionResult.captchaStatus,
-            detectionSource: detectionResult.detectionSource,
-            experiments: [],
-            experimentCount: 0,
-            activeCount: 0
-          };
+          // Check if detection returned an error result (like Optimizely's validateUrl pattern)
+          // detectAdobeTargetPresenceWithSharedPage now returns error results instead of throwing
+          if (detectionResult.detectionSource?.error) {
+            console.error(`❌ Detection error for ${targetUrl}: ${detectionResult.detectionSource.error}`);
+            results.push({
+              success: false,
+              url: targetUrl,
+              companyName: normalizedEntry.companyName || null,
+              error: detectionResult.detectionSource.error || 'Unknown detection error'
+            });
+            // Page will be closed in finally block
+          } else {
+            // Format result to match expected structure (detection succeeded)
+            const adobeTargetData = {
+              detected: detectionResult.detected,
+              version: detectionResult.version,
+              hasMboxCookie: detectionResult.hasMboxCookie,
+              hasAdobeScript: detectionResult.hasAdobeScript,
+              captchaDetected: detectionResult.captchaDetected,
+              captchaStatus: detectionResult.captchaStatus,
+              detectionSource: detectionResult.detectionSource,
+              experiments: [],
+              experimentCount: 0,
+              activeCount: 0
+            };
 
-          results.push({
-            success: true,
-            url: targetUrl,
-            companyName: normalizedEntry.companyName || null,
-            adobeTargetData
-          });
+            results.push({
+              success: true,
+              url: targetUrl,
+              companyName: normalizedEntry.companyName || null,
+              adobeTargetData
+            });
+          }
         } catch (error) {
           console.error(`❌ Validation failed for ${targetUrl}:`, error.message);
           
