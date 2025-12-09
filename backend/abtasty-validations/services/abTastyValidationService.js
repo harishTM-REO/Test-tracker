@@ -2,7 +2,7 @@ const ABTastyValidationResult = require('../../models/ABTastyValidationResult');
 const ABTastyValidationDocument = require('../../models/ABTastyValidationDocument');
 const Dataset = require('../../models/Dataset');
 const { isUrlReachable } = require('../../utils/urlValidator');
-const { handleCookieConsent, detectCaptcha, launchBrowser, createPage } = require('../../utils/helper');
+const { handleCookieConsent, detectCaptcha, launchBrowser } = require('../../utils/helper');
 
 class ABTastyValidationService {
   /**
@@ -404,43 +404,61 @@ class ABTastyValidationService {
   }
 
   /**
-   * Launch browser and create a page with bounded timeouts and a small retry
+   * Launch browser and create a page with timeout protection (no retry logic)
+   * Uses direct newPage() like Optimizely/Adobe Validation to avoid BROWSER_STUCK_RESTART_REQUIRED errors
    */
   async getBrowserAndPage() {
     const protocolTimeout = Number(process.env.PROTOCOL_TIMEOUT || 120000);
-    const pageCreationTimeout = Number(process.env.PAGE_CREATION_TIMEOUT) || 45000;
-    const maxAttempts = 2;
-    let lastError = null;
+    const pageCreationTimeout = Number(process.env.PAGE_CREATION_TIMEOUT) || 30000; // 30s default
+    let browser = null;
+    let page = null;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      let browser = null;
+    try {
+      console.log(`[getBrowserAndPage] Launching browser (protocolTimeout=${protocolTimeout}ms, pageTimeout=${pageCreationTimeout}ms)`);
+      browser = await launchBrowser({ protocolTimeout });
+      
+      // Create page with timeout protection (no retry logic - just fail fast)
+      // This prevents BROWSER_STUCK_RESTART_REQUIRED errors that occur with createPage() helper
       try {
-        console.log(`[getBrowserAndPage] Launch attempt ${attempt}/${maxAttempts} (protocolTimeout=${protocolTimeout}ms, pageTimeout=${pageCreationTimeout}ms)`);
-        browser = await launchBrowser({ protocolTimeout });
-        const page = await createPage(browser, {
-          timeout: pageCreationTimeout,
-          retries: 1,
-          backoffMs: 500
-        });
+        page = await Promise.race([
+          browser.newPage(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Page creation timeout after 30s')), pageCreationTimeout)
+          )
+        ]);
+        
+        // Configure page (same as Optimizely/Adobe Validation)
+        await page.setViewport({ width: 1920, height: 1080 });
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        await page.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
+        const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 40000);
+        page.setDefaultNavigationTimeout(navigationTimeout);
+        page.setDefaultTimeout(navigationTimeout);
+        
+        console.log(`[getBrowserAndPage] Browser and page created successfully`);
         return { browser, page };
-      } catch (error) {
-        lastError = error;
-        console.warn(`[getBrowserAndPage] attempt ${attempt} failed: ${error?.message || error}`);
-        // Best-effort cleanup
-        try {
-          if (browser) {
+      } catch (pageError) {
+        console.error(`[getBrowserAndPage] Failed to create page: ${pageError.message}`);
+        // If page creation fails, close browser and throw
+        if (browser) {
+          try {
             await browser.close();
+          } catch (closeError) {
+            console.warn(`[getBrowserAndPage] Error closing browser after page creation failure: ${closeError.message}`);
           }
-        } catch (_) {}
-
-        if (attempt === maxAttempts) {
-          throw error;
         }
-        await new Promise(r => setTimeout(r, 1000));
+        throw new Error(`Page creation failed: ${pageError.message}`);
       }
+    } catch (error) {
+      console.error(`[getBrowserAndPage] Failed to launch browser and page: ${error.message}`);
+      // Best-effort cleanup
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (_) {}
+      }
+      throw error;
     }
-
-    throw lastError || new Error('Failed to launch browser and page');
   }
 
   /**
