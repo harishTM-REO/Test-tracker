@@ -1,4 +1,5 @@
 const chromium = require('@sparticuz/chromium');
+const browserPool = require('./browserPoolService'); // ✅ Import once
 const {
     extractDomainName,
     extractDomain,
@@ -10,7 +11,6 @@ const {
     createPage,
     navigateToPage
 } = require('../utils/helper');
-const browserPool = require('./browserPoolService');
 
 // Import batch processing helpers for advanced batch operations
 const {
@@ -48,11 +48,7 @@ class AdobeScraperService {
 
     /**
      * Main function to scrape Adobe Target experiments from a URL
-     * @param {string} url - The website URL to scrape
-     * @param {Object} res - Express response object (optional)
-     * @returns {Object} Scraping results
      */
-
     async scrapeAdobeTargetExperiments(url, res = null, options = {}) {
         const startTime = Date.now();
         let savedData = null;
@@ -91,10 +87,6 @@ class AdobeScraperService {
 
     /**
      * Lightweight detection using a shared page (optimized for batch processing)
-     * Uses a pre-created page to avoid page creation overhead
-     * @param {Object} sharedPage - Pre-created page to reuse
-     * @param {string} url - URL to validate
-     * @returns {Promise<{detected: boolean, version?: string, hasMboxCookie?: boolean, hasAdobeScript?: boolean, captchaDetected?: boolean, detectionSource?: object}>}
      */
     async detectAdobeTargetPresenceWithSharedPage(sharedPage, url) {
         let requestHandler = null;
@@ -242,9 +234,6 @@ class AdobeScraperService {
 
     /**
      * Lightweight detector to quickly determine if Adobe Target is present on a page
-     * Creates its own page and browser context (use detectAdobeTargetPresenceWithSharedPage for batch operations)
-     * @param {string} url
-     * @returns {Promise<{detected: boolean, httpStatusCode?: number, captchaDetected?: boolean, captchaStatus?: string, detectionSource?: object}>}
      */
     async detectAdobeTargetPresence(url) {
         let page = null;
@@ -583,10 +572,8 @@ class AdobeScraperService {
     }
 
     /**
-     * Set up network listener for Adobe Target requests BEFORE navigation
-     * This prevents race condition where network requests happen before listener is set up
-     * @param {Object} page - Puppeteer page instance
-     * @returns {Promise} Promise that resolves with mbox/delivery response data or null
+     * Set up network listener for Adobe Target requests
+     * ✅ FIX: Returns { promise, cleanup } to fix memory leaks
      */
     setupAdobeTargetNetworkListener(page) {
         console.log("Setting up Adobe Target network listener...");
@@ -782,16 +769,9 @@ class AdobeScraperService {
 
     /**
      * Format the final response
-     * @param {string} url - Website URL
-     * @param {Object} website - Website record
-     * @param {Object} experimentData - Experiment data
-     * @param {Object} savedData - Saved data
-     * @param {number} startTime - Start timestamp
-     * @returns {Object} Formatted response
      */
     formatResponse(url, website, experimentData, savedData = [], startTime) {
         const duration = Date.now() - startTime;
-        // console.log('the data->>', experimentData)
         return {
             url,
             website: {
@@ -3160,6 +3140,216 @@ class AdobeScraperService {
       }
 
       return results;
+    }
+    
+    async batchScrapeUrlsAdvanced(urls, options = {}) {
+        const AdobeResult = require('../models/AdobeResult');
+        
+        // Get optimal settings or use provided options
+        const optimalSettings = getOptimalBatchSettings(urls.length);
+        
+        // Adobe-specific configuration (can be overridden by options)
+        const adobePoolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
+                              parseInt(process.env.BROWSER_POOL_SIZE) || 
+                              optimalSettings.concurrent;
+        const adobeConcurrent = parseInt(process.env.ADOBE_SCRAPING_CONCURRENT) || 
+                               parseInt(process.env.CONCURRENT_URLS) || 
+                               optimalSettings.concurrent;
+        
+        const {
+            concurrent = adobeConcurrent,
+            batchSize = optimalSettings.batchSize,
+            delay = optimalSettings.delay,
+            datasetId = null,
+            datasetName = 'Adobe Target Dataset'
+        } = options;
+
+        if (!datasetId) {
+            throw new Error('datasetId is required for batch scraping');
+        }
+
+        const startTime = new Date();
+        
+        console.log(`\n${'='.repeat(60)}`);
+        console.log('🔍 PRE-FLIGHT CHECKS');
+        console.log(`${'='.repeat(60)}`);
+
+        try {
+            await ensureDBConnection(batchSize, AdobeResult);
+            const dbHealth = await monitorDBHealth(AdobeResult);
+            if (!dbHealth.healthy) {
+                throw new Error('Database is not healthy. Cannot proceed with scraping.');
+            }
+        } catch (error) {
+            console.error('❌ PRE-FLIGHT CHECK FAILED:', error.message);
+            throw error;
+        }
+
+        console.log(`${'='.repeat(60)}\n`);
+        console.log(`\n🚀 STREAMING SAVE MODE: Saving every chunk immediately (prevents 16MB limit)`);
+        console.log(`Starting Adobe Target batch scrape of ${urls.length} URLs`);
+        console.log(`Config: ${concurrent} concurrent, ${batchSize} batch size\n`);
+
+        const results = [];
+        const saveTasks = [];
+        let totalChunksSaved = 0;
+
+        // Process URLs in chunks
+        for (let i = 0; i < urls.length; i += batchSize) {
+            const chunk = urls.slice(i, i + batchSize);
+            const chunkNumber = Math.floor(i / batchSize) + 1;
+            const totalChunks = Math.ceil(urls.length / batchSize);
+            
+            console.log(`\n📥 Processing chunk ${chunkNumber}/${totalChunks}: URLs ${i + 1}-${Math.min(i + batchSize, urls.length)}`);
+
+            // SCRAPE THIS CHUNK using sequential browser processing
+            const chunkResults = await this.processUrlChunkSequential(chunk, { concurrent });
+            results.push(...chunkResults);
+
+            // ========== CRITICAL: SAVE THIS CHUNK IMMEDIATELY ==========
+            const saveTask = (async () => {
+                try {
+                    const saveBatchStart = Date.now();
+                    console.log(`💾 Batch ${chunkNumber} MongoDB Save: Starting write for ${chunkResults.length} results...`);
+
+                    const saveResult = await saveResultsStreamingBatch(
+                        datasetId,
+                        datasetName,
+                        chunkResults,
+                        startTime,
+                        urls.length,
+                        AdobeResult,
+                        this.extractDomain.bind(this),
+                        'adobeTargetDetected'
+                    );
+
+                    const saveDuration = Date.now() - saveBatchStart;
+                    totalChunksSaved++;
+
+                    console.log(`\n✅ Batch ${chunkNumber} MongoDB Write Complete`);
+                    console.log(`   Batch number in DB: ${saveResult.batchNumber}`);
+                    
+                    return { success: true, chunkNumber, batchNumber: saveResult.batchNumber, duration: saveDuration };
+                } catch (saveError) {
+                    console.error(`❌ Chunk ${chunkNumber}: Save failed - ${saveError.message}`);
+                    return { success: false, chunkNumber, error: saveError.message };
+                }
+            })();
+
+            saveTasks.push(saveTask);
+
+            // ========== MEMORY CLEANUP BETWEEN CHUNKS ==========
+            if (i + batchSize < urls.length) {
+                await performMemoryCleanup(delay);
+            }
+        }
+
+        // Wait for all saves
+        await Promise.allSettled(saveTasks);
+
+        // Finalize
+        try {
+            await finalizeStreamingSave(datasetId, AdobeResult);
+        } catch (finalizeError) {
+            console.error('⚠️  Error finalizing batch count:', finalizeError.message);
+        }
+
+        const endTime = new Date();
+        const successful = results.filter(r => r.success).length;
+        const failed = results.length - successful;
+
+        generateBatchCompletionReport(
+            'Adobe Target',
+            Math.ceil(urls.length / batchSize),
+            urls.length,
+            successful,
+            failed,
+            startTime,
+            endTime,
+            datasetId
+        );
+
+        return {
+            success: true,
+            totalUrls: urls.length,
+            successfulScrapes: successful,
+            duration: `${Math.round((endTime - startTime) / 1000)}s`,
+            datasetId: datasetId
+        };
+    }
+
+    async processUrlChunkSequential(urls, options = {}) {
+        const poolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
+                         parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+        const { concurrent = Math.min(poolSize, 5) } = options;
+        const results = [];
+
+        try {
+            const actualBrowserCount = Math.max(1, Math.min(concurrent, poolSize));
+            console.log(`🌐 Using browser pool (${actualBrowserCount}/${poolSize} browsers) for ${urls.length} URLs`);
+
+            const urlBatches = distributeUrlsAcrossBrowsers(urls, actualBrowserCount, 1);
+
+            const batchPromises = urlBatches.map(async (urlBatch) => {
+                return browserPool.withBrowser(async (browser) => {
+                    return await this.processBrowserBatchSequential(browser, urlBatch);
+                });
+            });
+
+            const batchResults = await Promise.allSettled(batchPromises);
+
+            batchResults.forEach(result => {
+                if (result.status === 'fulfilled' && result.value) {
+                    results.push(...result.value);
+                } else if (result.status === 'rejected') {
+                    console.error('❌ Batch processing failed:', result.reason?.message || result.reason);
+                }
+            });
+
+        } catch (error) {
+            console.error('Error in processUrlChunkSequential:', error);
+        }
+
+        return results;
+    }
+
+    async processBrowserBatchSequential(browser, urls) {
+        const results = [];
+        try {
+            console.log(`Processing ${urls.length} URLs SEQUENTIALLY in browser batch`);
+            for (let i = 0; i < urls.length; i++) {
+                const url = urls[i];
+                let page = null;
+                try {
+                    console.log(`[${i + 1}/${urls.length}] Processing: ${url}`);
+                    page = await createPage(browser);
+                    browserPool.incrementPageCount(browser);
+                    
+                    const experimentData = await this.scrapeExperimentsFromPage(url, {
+                        sharedPage: page,
+                        presenceOnly: false
+                    });
+                    
+                    results.push({ url, success: true, data: { adobeTarget: experimentData } });
+                    console.log(`✅ ${url}`);
+                } catch (error) {
+                    console.error(`❌ Error processing ${url}:`, error.message);
+                    results.push({ url, success: false, error: error.message });
+                } finally {
+                    if (page) {
+                        try {
+                            await closePage(page);
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        } catch (e) {
+                            console.warn('⚠️ Error closing page:', e.message);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error in processBrowserBatchSequential:', error);
+        }
+        return results;
     }
 
 }

@@ -1,18 +1,12 @@
 /**
  * Browser Pool Service
  * Manages a reusable pool of browser instances to prevent resource exhaustion
- * when scraping large numbers of URLs (e.g., 12,000 URLs)
- *
- * Key Benefits:
- * - Fixes "pthread_create: Resource temporarily unavailable" errors
- * - Reuses 2-3 browsers instead of launching new ones per URL
- * - Properly manages browser lifecycle
- * - Provides queuing for URLs waiting for available browsers
+ * when scraping large numbers of URLs.
  */
 
 const chromium = require('@sparticuz/chromium');
 
-// Import puppeteer with Stealth Plugin for better bot detection evasion
+// Import puppeteer with Stealth Plugin
 let puppeteer;
 let StealthPlugin;
 try {
@@ -20,7 +14,6 @@ try {
   StealthPlugin = require('puppeteer-extra-plugin-stealth');
   puppeteer.use(StealthPlugin());
 } catch (e) {
-  // Fallback if puppeteer-extra not available
   try {
     puppeteer = require('puppeteer');
   } catch (e2) {
@@ -41,7 +34,7 @@ class BrowserPoolService {
     this.pageCountPerBrowser = new Map();
     this.maxPagesBeforeRestart = parseInt(process.env.MAX_PAGES_BEFORE_RESTART) || 30;
 
-    // Pool lifecycle tracking for periodic refresh
+    // Pool lifecycle tracking
     this.poolCreatedAt = null;
     this.totalUrlsProcessed = 0;
     this.lastRefreshAt = null;
@@ -58,18 +51,10 @@ class BrowserPoolService {
     console.log(`🌐 BrowserPoolService initialized with pool size: ${poolSize}, max pages before restart: ${this.maxPagesBeforeRestart}`);
   }
 
-  /**
-   * Determine if a browser instance is currently managed by this pool
-   * @param {Object} browser
-   * @returns {boolean}
-   */
   isManagedBrowser(browser) {
     return !!browser && this.browsers.includes(browser);
   }
 
-  /**
-   * Initialize the browser pool by launching initial browsers
-   */
   async initialize() {
     if (this.isInitialized) {
       console.log('⚠️  Browser pool already initialized, skipping...');
@@ -79,14 +64,12 @@ class BrowserPoolService {
     console.log(`\n🚀 Starting browser pool initialization with ${this.poolSize} browsers...`);
   
     try {
-      // Ensure pageCountPerBrowser map exists
       if (!this.pageCountPerBrowser) this.pageCountPerBrowser = new Map();
       if (!this.browserAcquisitionTimes) this.browserAcquisitionTimes = new WeakMap();
   
       for (let i = 0; i < this.poolSize; i++) {
         try {
-          // Protect launch with timeout to avoid hangs
-          const launchTimeoutMs = parseInt(process.env.LAUNCH_TIMEOUT) || 30000;
+          const launchTimeoutMs = parseInt(process.env.LAUNCH_TIMEOUT) || 60000; // Increased to 60s
           const browser = await Promise.race([
             this.launchBrowser(i + 1),
             new Promise((_, reject) =>
@@ -94,18 +77,15 @@ class BrowserPoolService {
             )
           ]);
   
-          // Track page count and add to pool
           this.pageCountPerBrowser.set(browser, 0);
           this.browsers.push(browser);
           this.availableBrowsers.push(browser);
           this.stats.totalBrowsersCreated = (this.stats.totalBrowsersCreated || 0) + 1;
   
-          // Helpful debug: PID if available
           const pid = browser.process && typeof browser.process === 'function' ? (browser.process()?.pid || 'n/a') : 'n/a';
           console.log(`   ✅ Browser ${i + 1}/${this.poolSize} launched successfully (pid: ${pid})`);
         } catch (error) {
           console.error(`   ❌ Failed to launch browser ${i + 1}: ${error.message}`);
-          // Cleanup any that succeeded so far
           await this.closeAll();
           throw error;
         }
@@ -117,51 +97,35 @@ class BrowserPoolService {
       console.log(`\n✅ Browser pool initialized successfully with ${this.poolSize} browsers\n`);
     } catch (error) {
       console.error('❌ Failed to initialize browser pool:', error.message);
-      // closeAll already called in inner catch, but safe to call again
       try { await this.closeAll(); } catch (e) { /* ignore */ }
       throw error;
     }
   }
   
-
-  /**
-   * Launch a single browser instance with optimized settings and stealth mode
-   * Uses headless: 'new' for better bot detection evasion
-   * @param {number} browserNumber - Browser number for logging
-   */
   async launchBrowser(browserNumber = 0) {
     const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
 
     const browserOptions = {
-      // headless: 'new' provides better stealth than headless: true
-      // Modern Chrome headless mode with improved bot detection evasion
       headless: 'new',
       ignoreHTTPSErrors: true,
-      // CRITICAL: protocolTimeout prevents CDP communication hangs
-      // When set too low, browsers can't respond to page creation requests
-      protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000, // 60 seconds for CDP communication
-      timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000, // 30 seconds for browser launch
+      protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
+      timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 60000, // Optimization: Increased default to 60s
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-gpu',
-        '--disable-dev-shm-usage', // Critical: prevents /dev/shm exhaustion
+        '--disable-dev-shm-usage',
         '--window-size=1366,768',
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
-        '--no-zygote', // Prevents fork issues
-        // REMOVED: '--single-process' - Causes browser instability with multiple pages
+        '--no-zygote',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
-
-        // Anti-bot detection flags
         '--disable-blink-features=AutomationControlled',
         '--disable-web-security',
         '--allow-running-insecure-content',
         '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-
-        // Additional stealth flags for better detection evasion
         '--disable-features=IsolateOrigins,site-per-process',
         '--disable-sync',
         '--disable-default-apps'
@@ -180,18 +144,13 @@ class BrowserPoolService {
     }
   }
 
-  /**
-   * Acquire a browser from the pool
-   * If all browsers busy, wait in queue with timeout to detect stuck browsers
-   */
   async acquireBrowser() {
     return new Promise((resolve, reject) => {
-      const queueTimeout = parseInt(process.env.QUEUE_TIMEOUT) || 40000; // 40 seconds max wait
+      const queueTimeout = parseInt(process.env.QUEUE_TIMEOUT) || 40000;
       let timeoutHandle;
 
       const requestHandler = (browser) => {
         clearTimeout(timeoutHandle);
-        // Track when this browser was acquired
         if (!this.browserAcquisitionTimes) {
           this.browserAcquisitionTimes = new WeakMap();
         }
@@ -200,14 +159,12 @@ class BrowserPoolService {
       };
 
       if (this.availableBrowsers.length > 0) {
-        // pop until we find a connected browser or pool empty
         let browser;
         while (this.availableBrowsers.length > 0) {
           browser = this.availableBrowsers.pop();
           try {
             if (!browser || (browser.isConnected && !browser.isConnected())) {
               console.warn('[acquireBrowser] Found disconnected browser, replacing...');
-              // schedule restart async (so next acquisition recovers)
               this.forceRestartBrowser(browser).catch(e => console.error('forceRestartBrowser:', e.message));
               browser = null;
               continue;
@@ -221,8 +178,10 @@ class BrowserPoolService {
         }
       
         if (!browser) {
-          // no usable browser found -> fallback to queue path (will trigger recover)
           console.error('[acquireBrowser] No usable browsers available after filtering; queuing request');
+          // If we ran out of available browsers due to filtering, we must queue
+          // Logic falls through to queue block below if we add a check here, 
+          // or we can recurse. For simplicity, falling through:
         } else {
           this.busyBrowsers.add(browser);
           this.stats.totalAcquisitions++;
@@ -233,40 +192,34 @@ class BrowserPoolService {
           return;
         }
       }
-      else {
-        // All browsers busy, check if we should trigger a health check for stuck browsers
-        if (this.waitingQueue.length === 0) {
-          // First time all browsers are busy, might want to check health
+      
+      // If we are here, either availableBrowsers was empty OR we filtered them all out
+      // Check if we should trigger a health check
+      if (this.waitingQueue.length === 0 && this.busyBrowsers.size === 0 && this.availableBrowsers.length === 0 && this.browsers.some(b => b === null)) {
+          // Edge case: All browsers are restarting
+          console.log('⏳ All browsers are restarting, waiting...');
+      } else if (this.waitingQueue.length === 0 && this.busyBrowsers.size > 0) {
           this.forceRecoverStuckBrowsers(90000).catch(e => console.error('Error in force recovery:', e.message));
-        }
-
-        // Add to queue
-        this.waitingQueue.push(requestHandler);
-        console.log(`⏳ All ${this.poolSize} browsers busy, queuing request (queue length: ${this.waitingQueue.length})`);
-
-        // Set timeout - if not acquired in 40s, browsers are likely stuck
-        timeoutHandle = setTimeout(() => {
-          // Remove from queue if still waiting
-          const index = this.waitingQueue.indexOf(requestHandler);
-          if (index > -1) {
-            this.waitingQueue.splice(index, 1);
-            console.error(`❌ Browser acquisition timeout after ${queueTimeout}ms - browsers may be stuck!`);
-            console.error(`📊 Pool status: ${this.busyBrowsers.size} in use, ${this.availableBrowsers.length} available, ${this.waitingQueue.length} waiting`);
-
-            // Trigger health check and recovery
-            this.healthCheck().catch(e => console.error('Health check failed:', e.message));
-
-            reject(new Error(`Browser pool timeout - all ${this.poolSize} browsers unresponsive after ${queueTimeout}ms`));
-          }
-        }, queueTimeout);
       }
+
+      this.waitingQueue.push(requestHandler);
+      console.log(`⏳ All ${this.poolSize} browsers busy/unavailable, queuing request (queue length: ${this.waitingQueue.length})`);
+
+      timeoutHandle = setTimeout(() => {
+        const index = this.waitingQueue.indexOf(requestHandler);
+        if (index > -1) {
+          this.waitingQueue.splice(index, 1);
+          console.error(`❌ Browser acquisition timeout after ${queueTimeout}ms - browsers may be stuck!`);
+          console.error(`📊 Pool status: ${this.busyBrowsers.size} in use, ${this.availableBrowsers.length} available, ${this.waitingQueue.length} waiting`);
+
+          this.healthCheck().catch(e => console.error('Health check failed:', e.message));
+
+          reject(new Error(`Browser pool timeout - all ${this.poolSize} browsers unresponsive after ${queueTimeout}ms`));
+        }
+      }, queueTimeout);
     });
   }
 
-  /**
-   * Increment page count for a browser
-   * CRITICAL: Tracks resource usage to detect when restart is needed
-   */
   incrementPageCount(browser) {
     const currentCount = this.pageCountPerBrowser.get(browser) || 0;
     this.pageCountPerBrowser.set(browser, currentCount + 1);
@@ -279,48 +232,34 @@ class BrowserPoolService {
     return newCount;
   }
 
-  /**
-   * Check if browser needs restart due to page count
-   */
   needsRestart(browser) {
     const pageCount = this.pageCountPerBrowser.get(browser) || 0;
     return pageCount >= this.maxPagesBeforeRestart;
   }
 
-  /**
-   * Release a browser back to the pool
-   * Serves next waiting request if any
-   * CRITICAL: Checks if browser needs restart before returning to pool
-   */
   releaseBrowser(browser) {
     this.busyBrowsers.delete(browser);
     this.stats.totalReleases++;
 
-    // Clear acquisition time tracking
     if (this.browserAcquisitionTimes) {
       this.browserAcquisitionTimes.delete(browser);
     }
 
-    // Check if browser needs restart due to page count
     if (this.needsRestart(browser)) {
       console.log(`🔄 Browser reached page limit (${this.pageCountPerBrowser.get(browser)}/${this.maxPagesBeforeRestart}), scheduling restart...`);
       this.scheduleAsyncRestart(browser);
-      // Don't put back in queue if it needs restart
+      
       if (this.waitingQueue.length > 0) {
         const resolve = this.waitingQueue.shift();
-        // Acquire a different browser from available or skip this browser
         if (this.availableBrowsers.length > 0) {
           const availableBrowser = this.availableBrowsers.pop();
           this.busyBrowsers.add(availableBrowser);
           this.stats.totalAcquisitions++;
-          if (!this.browserAcquisitionTimes) {
-            this.browserAcquisitionTimes = new WeakMap();
-          }
+          if (!this.browserAcquisitionTimes) this.browserAcquisitionTimes = new WeakMap();
           this.browserAcquisitionTimes.set(availableBrowser, Date.now());
           console.log(`📋 Browser released to waiting request with different browser (remaining in queue: ${this.waitingQueue.length})`);
           resolve(availableBrowser);
         } else {
-          // No other browsers available, queue will wait
           this.waitingQueue.unshift(resolve);
           console.log(`⏳ No available browsers, request re-queued`);
         }
@@ -333,10 +272,7 @@ class BrowserPoolService {
       this.busyBrowsers.add(browser);
       this.stats.totalAcquisitions++;
 
-      // Track when this browser was acquired
-      if (!this.browserAcquisitionTimes) {
-        this.browserAcquisitionTimes = new WeakMap();
-      }
+      if (!this.browserAcquisitionTimes) this.browserAcquisitionTimes = new WeakMap();
       this.browserAcquisitionTimes.set(browser, Date.now());
 
       console.log(`📋 Browser released to waiting request (remaining in queue: ${this.waitingQueue.length})`);
@@ -349,9 +285,6 @@ class BrowserPoolService {
     }
   }
 
-  /**
-   * Schedule async restart of browser to prevent blocking
-   */
   async scheduleAsyncRestart(browser) {
     setTimeout(async () => {
       try {
@@ -360,14 +293,15 @@ class BrowserPoolService {
 
         console.log(`🔧 Restarting browser ${browserIndex + 1} due to page limit...`);
 
-        // Close old browser
         try {
           await browser.close();
         } catch (e) {
           console.warn(`Could not close browser: ${e.message}`);
         }
 
-        // Launch new one
+        // Mark as null during restart to prevent usage
+        this.browsers[browserIndex] = null;
+
         const newBrowser = await this.launchBrowser(browserIndex + 1);
         this.browsers[browserIndex] = newBrowser;
         this.pageCountPerBrowser.delete(browser);
@@ -376,26 +310,31 @@ class BrowserPoolService {
         this.stats.totalBrowserRestarts++;
 
         console.log(`✅ Browser ${browserIndex + 1} restarted successfully`);
+        
+        // Check if anyone is waiting for this new browser
+        if (this.waitingQueue.length > 0 && this.availableBrowsers.length > 0) {
+             const resolve = this.waitingQueue.shift();
+             const b = this.availableBrowsers.pop();
+             this.busyBrowsers.add(b);
+             if (!this.browserAcquisitionTimes) this.browserAcquisitionTimes = new WeakMap();
+             this.browserAcquisitionTimes.set(b, Date.now());
+             resolve(b);
+        }
+
       } catch (error) {
         console.error(`❌ Failed to restart browser: ${error.message}`);
       }
-    }, 0); // Use setImmediate-like behavior
+    }, 0);
   }
 
-  /**
-   * Execute a function with a browser from the pool
-   * Automatically acquires and releases browser
-   */
   async withBrowser(fn) {
     const browser = await this.acquireBrowser();
     let releasedNormally = false;
     try {
-      // run user function (passes browser)
       const result = await fn(browser);
       releasedNormally = true;
       return result;
     } catch (err) {
-      // If page creation or navigation indicated the browser is stuck, force-restart it.
       const stuckBrowserErrors = [
         'BROWSER_STUCK_RESTART_REQUIRED',
         'BROWSER_NOT_CONNECTED',
@@ -406,35 +345,31 @@ class BrowserPoolService {
       
       if (isStuckBrowser) {
         console.error(`[withBrowser] Detected stuck browser -> forcing restart: ${err.message}`);
-        // Ensure browser is not returned to pool and restart it
         try { 
           await this.forceRestartBrowser(browser); 
           console.log('[withBrowser] Browser restart completed');
         } catch (e) { 
           console.error('forceRestartBrowser failed:', e.message); 
         }
-        // propagate original error
         throw err;
       }
       throw err;
     } finally {
-      // Only release back to pool if it wasn't already scheduled for restart
       if (releasedNormally) {
         try { this.releaseBrowser(browser); } catch (e) { console.error('releaseBrowser error:', e.message); }
       } else {
-        // prevent accidental reuse — ensure it's not in busy set
         this.busyBrowsers.delete(browser);
       }
     }
   }
   
-
-  /**
-   * Get current pool statistics
-   */
   getStats() {
     const browserPageCounts = {};
     for (let i = 0; i < this.browsers.length; i++) {
+      if (!this.browsers[i]) {
+          browserPageCounts[`browser_${i + 1}`] = 'RESTARTING';
+          continue;
+      }
       const pageCount = this.pageCountPerBrowser.get(this.browsers[i]) || 0;
       browserPageCounts[`browser_${i + 1}`] = pageCount;
     }
@@ -458,142 +393,23 @@ class BrowserPoolService {
     };
   }
 
-  /**
-   * Print pool statistics to console
-   */
-  printStats() {
-    const stats = this.getStats();
-    const poolAgeMinutes = stats.poolAgeMinutes || 0;
-    console.log('\n📊 Browser Pool Statistics:');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`   Pool Size:              ${stats.poolSize}`);
-    console.log(`   Available:              ${stats.available}/${stats.poolSize}`);
-    console.log(`   In Use:                 ${stats.inUse}`);
-    console.log(`   Waiting in Queue:       ${stats.waiting}`);
-    console.log(`   Pool Age:               ${poolAgeMinutes.toFixed(1)} minutes`);
-    console.log(`   URLs Processed:         ${stats.totalUrlsProcessed}`);
-    console.log(`   Total Acquisitions:     ${stats.totalAcquisitions}`);
-    console.log(`   Total Releases:         ${stats.totalReleases}`);
-    console.log(`   Total Restarts:         ${stats.totalBrowserRestarts}`);
-    console.log(`   Total Pool Refreshes:   ${stats.totalPoolRefreshes}`);
-    console.log(`   Max Pages per Browser:  ${stats.maxPagesBeforeRestart}`);
-    console.log('   Browser Page Counts:');
-    for (const [browser, pageCount] of Object.entries(stats.browserPageCounts)) {
-      const indicator = pageCount >= stats.maxPagesBeforeRestart ? '🔴' : pageCount >= stats.maxPagesBeforeRestart * 0.8 ? '🟡' : '🟢';
-      console.log(`      ${indicator} ${browser}: ${pageCount}/${stats.maxPagesBeforeRestart}`);
-    }
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-  }
-
-  /**
-   * Increment URLs processed counter (called after successful URL processing)
-   */
   incrementUrlsProcessed() {
     this.totalUrlsProcessed++;
   }
 
-  /**
-   * Get pool age in minutes
-   */
   getPoolAgeMinutes() {
     if (!this.poolCreatedAt) return 0;
     return (Date.now() - this.poolCreatedAt) / 60000;
   }
 
-  /**
-   * Check if pool should be refreshed based on age or URLs processed
-   * @returns {Object} { shouldRefresh: boolean, reason: string }
-   */
-  shouldRefreshPool() {
-    // Get configuration from environment variables
-    const refreshAfterMinutes = parseInt(process.env.POOL_REFRESH_AFTER_MINUTES) || 0; // 0 = disabled
-    const refreshAfterUrls = parseInt(process.env.POOL_REFRESH_AFTER_URLS) || 0; // 0 = disabled
-
-    // If both are 0, feature is disabled
-    if (refreshAfterMinutes === 0 && refreshAfterUrls === 0) {
-      return { shouldRefresh: false, reason: 'Periodic refresh disabled' };
-    }
-
-    const poolAgeMinutes = this.getPoolAgeMinutes();
-
-    // Check age-based refresh
-    if (refreshAfterMinutes > 0 && poolAgeMinutes >= refreshAfterMinutes) {
-      return {
-        shouldRefresh: true,
-        reason: `Pool age (${poolAgeMinutes.toFixed(1)} min) >= threshold (${refreshAfterMinutes} min)`
-      };
-    }
-
-    // Check URL count-based refresh
-    if (refreshAfterUrls > 0 && this.totalUrlsProcessed >= refreshAfterUrls) {
-      return {
-        shouldRefresh: true,
-        reason: `URLs processed (${this.totalUrlsProcessed}) >= threshold (${refreshAfterUrls})`
-      };
-    }
-
-    return { shouldRefresh: false, reason: 'Thresholds not reached' };
-  }
-
-  /**
-   * Perform full pool refresh: close all browsers and recreate fresh pool
-   * This provides a clean slate and prevents accumulated degradation
-   */
-  async refreshPool() {
-    console.log('\n🔄 PERIODIC POOL REFRESH TRIGGERED');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`   Pool Age: ${this.getPoolAgeMinutes().toFixed(1)} minutes`);
-    console.log(`   URLs Processed: ${this.totalUrlsProcessed}`);
-    console.log(`   Status: Closing all browsers and recreating pool...`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-    const refreshStartTime = Date.now();
-
-    try {
-      // Step 1: Close all browsers
-      await this.closeAll();
-      console.log('✅ All browsers closed');
-
-      // Step 2: Reset URL counter (new pool, new count)
-      this.totalUrlsProcessed = 0;
-
-      // Step 3: Reinitialize pool with fresh browsers
-      await this.initialize();
-      console.log('✅ Pool reinitialized with fresh browsers');
-
-      // Step 4: Update stats
-      this.stats.totalPoolRefreshes++;
-      this.lastRefreshAt = Date.now();
-
-      const refreshDuration = Date.now() - refreshStartTime;
-      console.log('\n🎉 POOL REFRESH COMPLETED');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log(`   Duration: ${(refreshDuration / 1000).toFixed(1)}s`);
-      console.log(`   Total Refreshes: ${this.stats.totalPoolRefreshes}`);
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-      return { success: true, duration: refreshDuration };
-    } catch (error) {
-      console.error('❌ Pool refresh failed:', error.message);
-      // Try to recover by at least initializing the pool
-      try {
-        await this.initialize();
-        console.log('⚠️  Recovered by reinitializing pool');
-      } catch (recoverError) {
-        console.error('❌ Failed to recover pool:', recoverError.message);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Close all browsers in the pool
-   */
   async closeAll() {
     console.log('\n🛑 Closing all browsers in pool...');
 
     try {
       const closePromises = this.browsers.map((browser, index) => {
+        // ✅ FIX: Check if browser exists (it might be null during restart)
+        if (!browser) return Promise.resolve();
+
         return browser.close()
           .then(() => {
             this.stats.totalBrowsersClosed++;
@@ -619,19 +435,12 @@ class BrowserPoolService {
     }
   }
 
-  /**
-   * Restart the pool (close all and reinitialize)
-   */
   async restart() {
     console.log('🔄 Restarting browser pool...');
     await this.closeAll();
     await this.initialize();
   }
 
-  /**
-   * Health check - verify all browsers are responsive
-   * Also attempts to recover unhealthy browsers
-   */
   async healthCheck() {
     console.log('\n🏥 Running browser pool health check...');
     let healthy = 0;
@@ -640,8 +449,14 @@ class BrowserPoolService {
 
     for (let i = 0; i < this.browsers.length; i++) {
       const browser = this.browsers[i];
+      
+      // ✅ FIX: Skip checks on browsers currently restarting
+      if (!browser) {
+          console.log(`   ⚠️ Browser ${i + 1}: Restarting (Skipping check)`);
+          continue;
+      }
+
       try {
-        // Check if browser is responsive with timeout
         const healthPromise = browser.version();
         const version = await Promise.race([
           healthPromise,
@@ -661,7 +476,6 @@ class BrowserPoolService {
 
     console.log(`   Result: ${healthy} healthy, ${unhealthy} unhealthy\n`);
 
-    // Attempt to recover unhealthy browsers
     if (unhealthy > 0) {
       await this.recoverUnhealthyBrowsers(healthCheckResults);
     }
@@ -669,9 +483,6 @@ class BrowserPoolService {
     return unhealthy === 0;
   }
 
-  /**
-   * Recover unhealthy browsers by restarting them
-   */
   async recoverUnhealthyBrowsers(healthCheckResults) {
     console.log('🔧 Attempting to recover unhealthy browsers...');
 
@@ -681,18 +492,19 @@ class BrowserPoolService {
           const index = result.index;
           console.log(`   Restarting browser ${index + 1}...`);
 
-          // Close the unhealthy browser
-          try {
-            await this.browsers[index].close();
-          } catch (e) {
-            console.warn(`   Could not close browser ${index + 1}: ${e.message}`);
+          // ✅ FIX: Safety check for existence
+          const oldBrowser = this.browsers[index];
+          if (oldBrowser) {
+              try { await oldBrowser.close(); } catch (e) { /* ignore */ }
+              this.busyBrowsers.delete(oldBrowser);
+              // Cleanly remove from available
+              const availIdx = this.availableBrowsers.indexOf(oldBrowser);
+              if (availIdx > -1) this.availableBrowsers.splice(availIdx, 1);
           }
 
-          // Remove from busy/available lists
-          this.busyBrowsers.delete(this.browsers[index]);
-          this.availableBrowsers = this.availableBrowsers.filter(b => b !== this.browsers[index]);
+          // Mark slot as null
+          this.browsers[index] = null;
 
-          // Restart it
           const newBrowser = await this.launchBrowser(index + 1);
           this.browsers[index] = newBrowser;
           this.availableBrowsers.push(newBrowser);
@@ -705,11 +517,7 @@ class BrowserPoolService {
     }
   }
 
-  /**
-   * Detect and force-recover stuck browsers (browsers that have been busy for too long)
-   */
   async forceRecoverStuckBrowsers(maxBusyDuration = 120000) {
-    // Track when browsers were acquired
     if (!this.browserAcquisitionTimes) {
       this.browserAcquisitionTimes = new WeakMap();
     }
@@ -729,9 +537,7 @@ class BrowserPoolService {
       console.log(`🚨 Force recovering ${stuckBrowsers.length} stuck browser(s)...`);
       for (const browser of stuckBrowsers) {
         try {
-          this.busyBrowsers.delete(browser);
-          this.browserAcquisitionTimes.delete(browser);
-          console.log(`   ♻️  Force released stuck browser`);
+          await this.forceRestartBrowser(browser);
         } catch (e) {
           console.error(`   Failed to force release: ${e.message}`);
         }
@@ -739,49 +545,41 @@ class BrowserPoolService {
     }
   }
 
-  /**
-   * Force immediate restart of a specific browser
-   * Called when a browser becomes unresponsive (page creation timeout)
-   * CRITICAL: Prevents stuck browsers from being returned to pool
-   * CRITICAL FIX: Add timeout to launch to prevent infinite hangs on resource-starved systems
-   */
   async forceRestartBrowser(browser) {
     try {
       const browserIndex = this.browsers.indexOf(browser);
       if (browserIndex === -1) {
-        console.warn(`⚠️  Browser not found in pool, cannot restart`);
+        // It might be a zombie browser instance not in our main array anymore
+        console.warn(`⚠️  Browser not found in pool index, closing orphaned instance`);
+        try { await browser.close(); } catch(e) {}
         return;
       }
   
       console.log(`🔄 Force restarting browser ${browserIndex + 1} due to timeout...`);
   
-      // immediate removal so other code won't reuse it
       this.busyBrowsers.delete(browser);
-      this.availableBrowsers = this.availableBrowsers.filter(b => b !== browser);
+      // ✅ FIX: Cleaner array removal
+      const availIdx = this.availableBrowsers.indexOf(browser);
+      if (availIdx > -1) this.availableBrowsers.splice(availIdx, 1);
+
       if (this.browserAcquisitionTimes) this.browserAcquisitionTimes.delete(browser);
   
-      // Close the old browser with timeout (guard for null/disconnected)
       try {
-        if (browser && (typeof browser.isConnected !== 'function' || browser.isConnected())) {
+        if (browser) {
           await Promise.race([
             browser.close(),
             new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 5000))
           ]);
           this.stats.totalBrowsersClosed = (this.stats.totalBrowsersClosed || 0) + 1;
           console.log(`✅ Old browser ${browserIndex + 1} closed`);
-        } else {
-          console.warn(`⚠️ Old browser ${browserIndex + 1} not connected or already gone`);
         }
       } catch (closeError) {
         console.warn(`⚠️  Could not gracefully close browser ${browserIndex + 1}: ${closeError.message}`);
-        // continue to attempt restart
       }
   
-      // Mark slot as null so acquire/healthCheck knows it's missing
       this.browsers[browserIndex] = null;
       this.pageCountPerBrowser.delete(browser);
   
-      // Launch new browser WITH TIMEOUT to prevent hanging
       let newBrowser;
       try {
         newBrowser = await Promise.race([
@@ -798,8 +596,7 @@ class BrowserPoolService {
         console.log(`✅ Browser ${browserIndex + 1} force-restarted successfully (pid: ${newBrowser.process?.().pid || 'n/a'})`);
       } catch (launchError) {
         console.error(`❌ Failed to launch new browser ${browserIndex + 1}: ${launchError.message}`);
-        console.warn(`⚠️  Browser ${browserIndex + 1} will be retried on next acquisition or by healthCheck`);
-        // leave this.browsers[browserIndex] as null so healthCheck/recoverUnhealthyBrowsers can restart it later
+        this.browsers[browserIndex] = null; // Ensure it stays null so health check can catch it later
       }
     } catch (error) {
       console.error(`❌ Unexpected error in forceRestartBrowser: ${error.message}`);
@@ -808,7 +605,6 @@ class BrowserPoolService {
   
 }
 
-// Create and export singleton instance
 const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
 const browserPool = new BrowserPoolService(poolSize);
 
