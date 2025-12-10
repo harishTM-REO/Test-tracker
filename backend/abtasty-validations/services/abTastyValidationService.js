@@ -36,9 +36,10 @@ class ABTastyValidationService {
     let validationResult = null;
 
     // Configs (env overrides)
-    const CONCURRENCY = Number(process.env.PQUEUE_CONCURRENCY) || 3; // 3-5 recommended
-    const BATCH_SIZE = Number(process.env.BROWSER_RESTART_EVERY) || 100; // restart browser every 100 URLs
-    const PAGE_CREATION_TIMEOUT = Number(process.env.PAGE_CREATION_TIMEOUT) || 30000;
+    // Use single-page-at-a-time with a single shared browser to reduce resource pressure
+    const CONCURRENCY = Number(process.env.PQUEUE_CONCURRENCY) || 1;
+    const BATCH_SIZE = Number(process.env.BROWSER_RESTART_EVERY) || 100;
+    const PAGE_CREATION_TIMEOUT = Number(process.env.PAGE_CREATION_TIMEOUT) || 45000;
     const BROWSER_CLOSE_TIMEOUT = Number(process.env.BROWSER_CLOSE_TIMEOUT) || 15000;
     const PROGRESS_CALLBACK_TIMEOUT = Number(process.env.PROGRESS_CALLBACK_TIMEOUT) || 5000;
 
@@ -77,23 +78,21 @@ class ABTastyValidationService {
       const results = { positive: [], negative: [], failed: [] };
       const projectIds = new Set();
 
-      // Process URLs in batches
+      // Process URLs in batches, reusing a single shared browser for the whole run
       const total = urls.length;
       const batches = Math.ceil(total / BATCH_SIZE);
+      const browser = await this._launchBrowserWithArgs();
+      console.log(`🌐 Launched shared browser for all batches (total URLs: ${total})`);
 
-      for (let b = 0; b < batches; b++) {
-        const startIdx = b * BATCH_SIZE;
-        const endIdx = Math.min(startIdx + BATCH_SIZE, total);
-        const batchUrls = urls.slice(startIdx, endIdx);
+      try {
+        for (let b = 0; b < batches; b++) {
+          const startIdx = b * BATCH_SIZE;
+          const endIdx = Math.min(startIdx + BATCH_SIZE, total);
+          const batchUrls = urls.slice(startIdx, endIdx);
 
-        console.log(`\n📦 STARTING BATCH ${b + 1}/${batches} (URLs ${startIdx + 1}-${endIdx})`);
-        // Launch browser for this batch
-        let browser = null;
-        try {
-          browser = await this._launchBrowserWithArgs();
-          console.log(`🌐 Launched browser for batch ${b + 1}`);
+          console.log(`\n📦 STARTING BATCH ${b + 1}/${batches} (URLs ${startIdx + 1}-${endIdx})`);
 
-          // create queue for this batch
+          // create queue for this batch (single-page concurrency)
           const queue = new PQueue({ concurrency: CONCURRENCY });
 
           // task function for each URL entry
@@ -171,6 +170,11 @@ class ABTastyValidationService {
                     } catch (_) {}
                   }
                 }
+                // small pause to ease resource usage between tasks
+                const pauseMs = Number(process.env.BROWSER_LAUNCH_PAUSE_MS) || 150;
+                if (pauseMs > 0) {
+                  await new Promise(resolve => setTimeout(resolve, pauseMs));
+                }
               }
             })
           );
@@ -224,32 +228,30 @@ class ABTastyValidationService {
             const urlEntry = urls[j];
             results.failed.push(this._makeFailedResult(urlEntry, `Batch error: ${batchErr.message}`));
           }
-        } finally {
-          // Close browser for batch with timeout and forced kill fallback
-          if (browser) {
-            try {
-              await Promise.race([
-                browser.close(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Browser close timeout')), BROWSER_CLOSE_TIMEOUT))
-              ]);
-              console.log(`🔒 Browser closed for batch ${b + 1}`);
-            } catch (closeErr) {
-              console.warn(`⚠️ Browser close failed for batch ${b + 1}:`, closeErr.message);
-              // Try force-kill if possible
-              try {
-                if (browser.process && typeof browser.process === 'function') {
-                  const proc = browser.process();
-                  if (proc && proc.pid) {
-                    try { process.kill(proc.pid, 'SIGKILL'); } catch (kerr) { /* best-effort */ }
-                  }
-                }
-              } catch (killErr) {
-                console.warn(`⚠️ Could not force-kill browser for batch ${b + 1}:`, killErr.message);
+        }
+      } finally {
+        // Close shared browser after all batches
+        try {
+          await Promise.race([
+            browser.close(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Browser close timeout')), BROWSER_CLOSE_TIMEOUT))
+          ]);
+          console.log(`🔒 Shared browser closed after all batches`);
+        } catch (closeErr) {
+          console.warn(`⚠️ Shared browser close failed:`, closeErr.message);
+          // Try force-kill if possible
+          try {
+            if (browser.process && typeof browser.process === 'function') {
+              const proc = browser.process();
+              if (proc && proc.pid) {
+                try { process.kill(proc.pid, 'SIGKILL'); } catch (kerr) { /* best-effort */ }
               }
             }
+          } catch (killErr) {
+            console.warn(`⚠️ Could not force-kill shared browser:`, killErr.message);
           }
-        } // end finally for batch
-      } // end batches loop
+        }
+      } // end shared browser finally
 
       // Save results in batch with error handling
       try {

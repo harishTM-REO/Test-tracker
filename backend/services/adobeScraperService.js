@@ -696,12 +696,18 @@ class AdobeScraperService {
         
         return new Promise((resolve) => {
             let resolved = false;
+            let cleanup = () => {};
+
+            const finish = (value) => {
+                if (resolved) return;
+                resolved = true;
+                try { cleanup(); } catch (_) {}
+                resolve(value);
+            };
+
             const timeout = setTimeout(() => {
-                if (!resolved) {
-                    console.log('No mbox response received within timeout, proceeding without it');
-                    resolved = true;
-                    resolve(null);
-                }
+                console.log('No mbox response received within timeout, proceeding without it');
+                finish(null);
             }, 45000); // 45 second timeout
 
             // Attach listener and log when it's attached
@@ -735,9 +741,7 @@ class AdobeScraperService {
 
                             if (response.ok()) {
                                 // Clear timeout immediately to prevent race condition
-                                if (!resolved) {
-                                    clearTimeout(timeout);
-                                }
+                                clearTimeout(timeout);
 
                                 try {
                                     const fullResponse = await response.json();
@@ -767,28 +771,16 @@ class AdobeScraperService {
                                     mboxData.activityIds = activityIds;
                                     console.log('mbox resposedata-> ', mboxData);
 
-                                    if (!resolved) {
-                                        resolved = true;
-                                        clearTimeout(timeout);
-                                        resolve(mboxData);
-                                    }
+                                    finish(mboxData);
                                 } catch (error) {
                                     console.error(`Failed to parse mbox JSON: ${error.message}`);
                                     try {
                                         const textData = await response.text();
                                         console.log('Captured mbox text data:', textData);
-                                        if (!resolved) {
-                                            resolved = true;
-                                            clearTimeout(timeout);
-                                            resolve(textData);
-                                        }
+                                        finish(textData);
                                     } catch (textError) {
                                         console.error(`Failed to read mbox response as text: ${textError.message}`);
-                                        if (!resolved) {
-                                            resolved = true;
-                                            clearTimeout(timeout);
-                                            resolve(null);
-                                        }
+                                        finish(null);
                                     }
                                 }
                             }
@@ -804,9 +796,7 @@ class AdobeScraperService {
 
                             if (response.ok()) {
                                 // Clear timeout immediately to prevent race condition
-                                if (!resolved) {
-                                    clearTimeout(timeout);
-                                }
+                                clearTimeout(timeout);
 
                                 try {
                                     const fullResponse = await response.json();
@@ -852,28 +842,16 @@ class AdobeScraperService {
                                     mboxData.activityIds = activityIds;
                                     console.log('mbox response data-> ', mboxData);
 
-                                    if (!resolved) {
-                                        resolved = true;
-                                        clearTimeout(timeout);
-                                        resolve(mboxData);
-                                    }
+                                    finish(mboxData);
                                 } catch (error) {
                                     console.error(`Failed to parse delivery JSON: ${error.message}`);
                                     try {
                                         const textData = await response.text();
                                         console.log('Captured delivery text data:', textData);
-                                        if (!resolved) {
-                                            resolved = true;
-                                            clearTimeout(timeout);
-                                            resolve(textData);
-                                        }
+                                        finish(textData);
                                     } catch (textError) {
                                         console.error(`Failed to read delivery response as text: ${textError.message}`);
-                                        if (!resolved) {
-                                            resolved = true;
-                                            clearTimeout(timeout);
-                                            resolve(null);
-                                        }
+                                        finish(null);
                                     }
                                 }
                             }
@@ -885,17 +863,17 @@ class AdobeScraperService {
                 };
                 
                 page.on('response', responseHandler);
+                cleanup = () => {
+                    try { page.off('response', responseHandler); } catch (_) {}
+                    clearTimeout(timeout);
+                };
                 console.log('✅ Response listener successfully attached to page');
                 console.log(`   Listener will capture all network responses and filter for Adobe Target endpoints`);
             } catch (attachError) {
                 console.error('❌ Failed to attach response listener to page:', attachError.message);
                 console.error('   Stack:', attachError.stack);
                 // Still resolve the promise so the flow continues
-                if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    resolve(null);
-                }
+                finish(null);
             }
         });
     }

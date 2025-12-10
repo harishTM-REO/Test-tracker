@@ -1828,204 +1828,240 @@ class AdobeTarget1_0Service {
    * Each URL gets a fresh browser to prevent cascading failures
    * This is slower but 100% reliable and consistent
    */
+  /**
+   * Process a chunk of URLs sequentially using a SINGLE shared browser instance.
+   * This prevents "EAGAIN" errors by avoiding repeated browser spawning.
+   */
   async processValidationChunk(urls, options = {}) {
+    // 1. Input validation
     if (!urls || urls.length === 0) {
       return [];
     }
 
-    console.log(`\n🔁 Processing ${urls.length} URLs SEQUENTIALLY (Fresh browser per URL - No Pool)`);
+    console.log(`\n🔁 Processing ${urls.length} URLs SEQUENTIALLY (Shared Browser Mode)`);
     console.log('═'.repeat(70));
 
-    const CONCURRENCY = Number(process.env.PQUEUE_CONCURRENCY) || 2;
-    const QueueCtor = await loadPQueue();
-    const queue = new QueueCtor({ concurrency: CONCURRENCY });
+    // 2. Define browser OUTSIDE the try block so 'finally' can access it
+    let browser = null;
 
-    const tasks = urls.map((entry, idx) => queue.add(async () => {
-      const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
-      const targetUrl = normalizedEntry.url;
+    try {
+      // Load Queue dynamically
+      const QueueCtor = await loadPQueue();
+      
+      // Concurrency 1 ensures sequential processing (one tab at a time)
+      const queue = new QueueCtor({ concurrency: 1 });
 
-      if (!targetUrl) {
-        console.error(`❌ Invalid URL in dataset (entry ${idx + 1})`);
-        return { index: idx, result: { success: false, url: 'INVALID_URL', companyName: normalizedEntry.companyName || null, error: 'Invalid or missing URL in dataset' } };
-      }
+      // 3. Launch the browser ONCE for the entire batch
+      browser = await this.launchBrowser();
+      console.log('   🌐 Single browser launched for entire chunk');
 
-      console.log(`\n🔸 [${idx + 1}/${urls.length}] Validating ${targetUrl} (p-queue concurrency=${CONCURRENCY})`);
+      // 4. Map URLs to Queue Tasks
+      const tasks = urls.map((entry, idx) => queue.add(async () => {
+        const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+        const targetUrl = normalizedEntry.url;
 
-      let browser = null;
-      let page = null;
-
-      try {
-        // Reachability check
-        console.log('   ⏱️  Checking if URL is reachable...');
-        let isReachable = false;
-        try {
-          isReachable = await isUrlReachable(targetUrl);
-        } catch (reachErr) {
-          console.warn(`   ⚠️ Reachability check error: ${reachErr.message}`);
-          return {
-            index: idx,
-            result: {
-              success: false,
-              url: targetUrl,
-              companyName: normalizedEntry.companyName || null,
-              error: `Reachability check failed: ${reachErr.message}`
-            }
-          };
-        }
-        if (!isReachable) {
-          console.log('   ❌ URL is not reachable - skipping browser launch');
-          return {
-            index: idx,
-            result: {
-              success: false,
-              url: targetUrl,
-              companyName: normalizedEntry.companyName || null,
-              error: 'URL is not reachable or timed out'
-            }
+        // Validation: Check for empty URL
+        if (!targetUrl) {
+          console.error(`❌ Invalid URL in dataset (entry ${idx + 1})`);
+          return { 
+            index: idx, 
+            result: { 
+              success: false, 
+              url: 'INVALID_URL', 
+              companyName: normalizedEntry.companyName || null, 
+              error: 'Invalid or missing URL in dataset' 
+            } 
           };
         }
 
-        // Launch browser per task
-        console.log('   🚀 Launching fresh browser...');
-        browser = await this.launchBrowser();
-        console.log('   ✅ Browser launched');
+        console.log(`\n🔸 [${idx + 1}/${urls.length}] Validating ${targetUrl}`);
 
-        // Create page with timeout
+        let page = null;
+
         try {
-          const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 30000;
-          page = await Promise.race([
-            browser.newPage(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Page creation timeout after 30s')), pageCreationTimeout))
+          // A. Reachability Check
+          console.log('   ⏱️  Checking if URL is reachable...');
+          let isReachable = false;
+          try {
+            isReachable = await isUrlReachable(targetUrl);
+          } catch (reachErr) {
+            console.warn(`   ⚠️ Reachability check error: ${reachErr.message}`);
+            return {
+              index: idx,
+              result: {
+                success: false,
+                url: targetUrl,
+                companyName: normalizedEntry.companyName || null,
+                error: `Reachability check failed: ${reachErr.message}`
+              }
+            };
+          }
+
+          if (!isReachable) {
+            console.log('   ❌ URL is not reachable - skipping browser interaction');
+            return {
+              index: idx,
+              result: {
+                success: false,
+                url: targetUrl,
+                companyName: normalizedEntry.companyName || null,
+                error: 'URL is not reachable or timed out'
+              }
+            };
+          }
+
+          // B. Create Page (Reuse the shared browser)
+          try {
+            const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 30000;
+            
+            // Race condition to prevent hanging on newPage()
+            page = await Promise.race([
+              browser.newPage(),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Page creation timed out')), pageCreationTimeout))
+            ]);
+
+            // Configure Page settings
+            await page.setViewport({ width: 1920, height: 1080 });
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            await page.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
+            
+            const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 40000);
+            page.setDefaultNavigationTimeout(navigationTimeout);
+            page.setDefaultTimeout(navigationTimeout);
+            
+            console.log('   📄 Page created');
+          } catch (pageError) {
+            console.error(`   ❌ Failed to create page: ${pageError.message}`);
+            throw new Error(`Page creation failed: ${pageError.message}`);
+          }
+
+          // C. Detect Adobe Target (using the shared page)
+          const detectionResult = await Promise.race([
+            AdobeScraperService.detectAdobeTargetPresenceWithSharedPage(page, targetUrl),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Detection timed out')), 60000))
           ]);
 
-          await page.setViewport({ width: 1920, height: 1080 });
-          await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-          await page.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
-          const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 40000);
-          page.setDefaultNavigationTimeout(navigationTimeout);
-          page.setDefaultTimeout(navigationTimeout);
-          console.log('   📄 Page created');
-        } catch (pageError) {
-          console.error(`   ❌ Failed to create page: ${pageError.message}`);
-          throw new Error(`Page creation failed: ${pageError.message}`);
-        }
+          // Handle Detection Errors
+          if (detectionResult.detectionSource?.error) {
+            console.error(`   ❌ Detection error: ${detectionResult.detectionSource.error}`);
+            return {
+              index: idx,
+              result: {
+                success: false,
+                url: targetUrl,
+                companyName: normalizedEntry.companyName || null,
+                error: detectionResult.detectionSource.error
+              }
+            };
+          }
 
-        // Detection with timeout
-        const detectionResult = await Promise.race([
-          AdobeScraperService.detectAdobeTargetPresenceWithSharedPage(page, targetUrl),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Adobe Target detection timeout after 60 seconds')), 60000))
-        ]);
+          // D. Success! Structure the data
+          const adobeTargetData = {
+            detected: detectionResult.detected,
+            version: detectionResult.version,
+            hasMboxCookie: detectionResult.hasMboxCookie,
+            hasAdobeScript: detectionResult.hasAdobeScript,
+            captchaDetected: detectionResult.captchaDetected,
+            captchaStatus: detectionResult.captchaStatus,
+            detectionSource: detectionResult.detectionSource,
+            activityIds: detectionResult.activityIds || [],
+            activityNames: detectionResult.activityNames || [],
+            experiments: [],
+            experimentCount: 0,
+            activeCount: 0
+          };
 
-        if (detectionResult.detectionSource?.error) {
-          console.error(`   ❌ Detection error: ${detectionResult.detectionSource.error}`);
+          console.log('   ✅ Validation complete');
+          return {
+            index: idx,
+            result: {
+              success: true,
+              url: targetUrl,
+              companyName: normalizedEntry.companyName || null,
+              adobeTargetData
+            }
+          };
+
+        } catch (error) {
+          console.error(`   ❌ Validation failed: ${error.message}`);
           return {
             index: idx,
             result: {
               success: false,
-              url: targetUrl,
+              url: normalizedEntry.url || 'INVALID_URL',
               companyName: normalizedEntry.companyName || null,
-              error: detectionResult.detectionSource.error || 'Unknown detection error'
+              error: error.message || 'Unknown validation error'
             }
           };
-        }
 
-        const adobeTargetData = {
-          detected: detectionResult.detected,
-          version: detectionResult.version,
-          hasMboxCookie: detectionResult.hasMboxCookie,
-          hasAdobeScript: detectionResult.hasAdobeScript,
-          captchaDetected: detectionResult.captchaDetected,
-          captchaStatus: detectionResult.captchaStatus,
-          detectionSource: detectionResult.detectionSource,
-          activityIds: detectionResult.activityIds || [],
-          activityNames: detectionResult.activityNames || [],
-          experiments: [],
-          experimentCount: 0,
-          activeCount: 0
-        };
-
-        console.log('   ✅ Validation complete');
-        return {
-          index: idx,
-          result: {
-            success: true,
-            url: targetUrl,
-            companyName: normalizedEntry.companyName || null,
-            adobeTargetData
+        } finally {
+          // E. Cleanup: Close only the page, keep browser for next URL
+          if (page) {
+            try {
+              // Ensure we don't wait forever for a page close
+              await Promise.race([
+                  closePage(page),
+                  new Promise(resolve => setTimeout(resolve, 2000)) // Force continue after 2s
+              ]).catch(() => {}); 
+              console.log('   📄 Page closed');
+            } catch (e) {
+              console.warn(`   ⚠️ Error closing page: ${e.message}`);
+            }
           }
-        };
-      } catch (error) {
-        console.error(`   ❌ Validation failed: ${error.message}`);
+
+          // Small pause to let CPU cool down
+          const pauseMs = Number(process.env.BROWSER_LAUNCH_PAUSE_MS) || 150;
+          if (pauseMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, pauseMs));
+          }
+        }
+      }));
+
+      // 5. Wait for all tasks to finish
+      const settled = await Promise.allSettled(tasks);
+      
+      const results = settled.map((res, idx) => {
+        if (res.status === 'fulfilled') return res.value;
         return {
           index: idx,
           result: {
             success: false,
-            url: normalizedEntry.url || 'INVALID_URL',
-            companyName: normalizedEntry.companyName || null,
-            error: error.message || 'Unknown validation error'
+            url: urls[idx]?.url || urls[idx] || 'INVALID_URL',
+            companyName: typeof urls[idx] === 'object' ? urls[idx].companyName || null : null,
+            error: res.reason?.message || 'Validation task failed'
           }
         };
-      } finally {
-        // Close page
-        if (page) {
-          try {
-            await closePage(page);
-            console.log('   📄 Page closed');
-          } catch (e) {
-            console.warn(`   ⚠️  Error closing page: ${e.message}`);
-          }
-        }
+      });
 
-        // Close browser with timeout
-        if (browser) {
-          try {
-            await Promise.race([
-              browser.close(),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Browser close timeout')), 10000))
-            ]);
-            console.log('   🔒 Browser closed');
-          } catch (e) {
-            console.error(`   ⚠️  Error closing browser (non-fatal): ${e.message}`);
-            try {
-              if (browser.process && browser.process()) {
-                browser.process().kill('SIGKILL');
-                console.log('   🔒 Browser force killed');
-              } else {
-                const pid = browser.process()?.pid;
-                if (pid) {
-                  process.kill(pid, 'SIGKILL');
-                  console.log(`   🔒 Browser process ${pid} force killed`);
-                }
-              }
-            } catch (killError) {
-              console.error(`   ⚠️  Could not force kill browser process: ${killError.message}`);
-            }
+      // Sort results to match original order
+      results.sort((a, b) => a.index - b.index);
+
+      console.log('\n' + '═'.repeat(70));
+      console.log(`✅ Chunk complete: ${results.length} URLs processed`);
+
+      return results.map(r => r.result);
+
+    } finally {
+      // 6. FINAL CLEANUP: Close the shared browser
+      // This runs whether the batch succeeded or failed
+      if (browser) {
+        try {
+          console.log('   🔒 Closing shared browser...');
+          await closeBrowser(browser);
+          console.log('   ✅ Shared browser closed successfully');
+        } catch (e) {
+          console.error('   ⚠️ Error closing shared browser:', e.message);
+          
+          // Force kill if graceful close fails
+          if (browser.process && browser.process()) {
+             try { 
+               process.kill(browser.process().pid, 'SIGKILL');
+               console.log('   💀 Browser process force killed');
+             } catch(err) { /* ignore */ }
           }
         }
       }
-    }));
-
-    const settled = await Promise.allSettled(tasks);
-    const results = settled.map((res, idx) => {
-      if (res.status === 'fulfilled') return res.value;
-      return {
-        index: idx,
-        result: {
-          success: false,
-          url: urls[idx]?.url || urls[idx] || 'INVALID_URL',
-          companyName: typeof urls[idx] === 'object' ? urls[idx].companyName || null : null,
-          error: res.reason?.message || 'Validation task failed'
-        }
-      };
-    });
-
-    // Preserve original ordering
-    results.sort((a, b) => a.index - b.index);
-
-    console.log('\n' + '═'.repeat(70));
-    console.log(`✅ Chunk complete: ${results.length} URLs processed (p-queue)`);
-
-    return results.map(r => r.result);
+    }
   }
 
   /**
