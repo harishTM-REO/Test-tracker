@@ -10,6 +10,8 @@ const rateLimit = require('express-rate-limit');
 const backendRoot = path.join(__dirname, '..');
 const { connectDB } = require(path.join(backendRoot, 'db/connection'));
 const AdobeTarget1_0Service = require(path.join(__dirname, 'services/adobeTarget1_0Service'));
+const AdobeTargetValidationService = require(path.join(__dirname, 'services/adobeTargetValidationService'));
+const jobQueue = require(path.join(__dirname, '../services/jobQueue'));
 
 const app = express();
 const port = process.env.WORKER_AT10_PORT || 4001;
@@ -82,6 +84,16 @@ app.listen(port, async () => {
     console.log('✅ Adobe Target 1.0 Service initialized');
   } catch (error) {
     console.error('❌ Failed to initialize AT 1.0 Service:', error.message);
+  }
+
+  // Register Adobe Target validation worker separately (mirrors ABTasty structure)
+  try {
+    jobQueue.registerWorker('adobe-target-validation', async (jobData, progressCallback) => {
+      return await AdobeTargetValidationService.performValidation(jobData, progressCallback);
+    });
+    console.log('✅ Adobe Target validation worker registered');
+  } catch (error) {
+    console.error('❌ Failed to register Adobe Target validation worker:', error.message);
   }
 });
 
