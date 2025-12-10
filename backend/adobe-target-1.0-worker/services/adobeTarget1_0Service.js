@@ -392,142 +392,108 @@ class AdobeTarget1_0Service {
     }
 
     /**
-     * Process a chunk of URLs sequentially or concurrently using a SINGLE shared browser instance.
-     * ✅ FIX: Variable scope fixed, Concurrency enabled
-     */
-    async processValidationChunk(urls, options = {}) {
-        if (!urls || urls.length === 0) {
-            return [];
+   * Process a chunk of URLs using the BROWSER POOL.
+   * ✅ FIX: True isolation. One crash does not kill the rest of the batch.
+   */
+  async processValidationChunk(urls, options = {}) {
+    if (!urls || urls.length === 0) return [];
+
+    // 1. Safe Concurrency (Pool handles the load)
+    // You can safely raise PQUEUE_CONCURRENCY to 5 or 8 now
+    const concurrency = options.concurrency || 2;
+
+    console.log(`\n🔁 Processing ${urls.length} URLs (Browser Pool Mode)`);
+    console.log(`   Concurrency: ${concurrency}`);
+    console.log('═'.repeat(70));
+
+    // Ensure pool is ready
+    await browserPool.initialize();
+
+    const QueueCtor = await loadPQueue();
+    const queue = new QueueCtor({ concurrency: concurrency });
+
+    // 2. Create tasks (NO manual browser launch here)
+    const tasks = urls.map((entry, idx) => queue.add(async () => {
+        const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+        const targetUrl = normalizedEntry.url;
+
+        if (!targetUrl) {
+            return { index: idx, result: { success: false, url: 'INVALID_URL', error: 'Invalid URL' } };
         }
 
-        const concurrency = options.concurrency || 1;
-
-        console.log(`\n🔁 Processing ${urls.length} URLs (Shared Browser Mode)`);
-        console.log(`   Concurrency: ${concurrency}`);
-        console.log('═'.repeat(70));
-
-        let browser = null; // Defined outside try block
+        console.log(`\n🔸 [${idx + 1}/${urls.length}] Validating ${targetUrl}`);
 
         try {
-            const QueueCtor = await loadPQueue();
-            const queue = new QueueCtor({ concurrency: concurrency });
-
-            browser = await this.launchBrowser();
-            console.log('   🌐 Single shared browser launched for chunk');
-
-            const tasks = urls.map((entry, idx) => queue.add(async () => {
-                const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
-                const targetUrl = normalizedEntry.url;
-
-                if (!targetUrl) {
-                    return { index: idx, result: { success: false, url: 'INVALID_URL', error: 'Invalid URL' } };
-                }
-
-                console.log(`\n🔸 [${idx + 1}/${urls.length}] Validating ${targetUrl}`);
-
-                let page = null;
-
-                try {
-                    let isReachable = false;
-                    try { isReachable = await isUrlReachable(targetUrl); } catch (e) {}
-
-                    if (!isReachable) {
-                        console.log('   ❌ URL not reachable - skipping');
-                        return { index: idx, result: { success: false, url: targetUrl, error: 'URL unreachable' } };
-                    }
-
-                    try {
-                        const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || 30000;
-                        page = await Promise.race([
-                            browser.newPage(),
-                            new Promise((_, r) => setTimeout(() => r(new Error('Page creation timed out')), pageCreationTimeout))
-                        ]);
-                        
-                        await page.setViewport({ width: 1920, height: 1080 });
-                        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-                        await page.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
-                        
-                        const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 40000);
-                        page.setDefaultNavigationTimeout(navigationTimeout);
-                        page.setDefaultTimeout(navigationTimeout);
-                        console.log('   📄 Page created');
-                        
-                    } catch (pageError) {
-                        throw new Error(`Page creation failed: ${pageError.message}`);
-                    }
-
-                    const detectionResult = await Promise.race([
-                        AdobeScraperService.detectAdobeTargetPresenceWithSharedPage(page, targetUrl),
-                        new Promise((_, r) => setTimeout(() => r(new Error('Detection timed out')), 60000))
-                    ]);
-
-                    if (detectionResult.detectionSource?.error) {
-                        return { index: idx, result: { success: false, url: targetUrl, error: detectionResult.detectionSource.error } };
-                    }
-
-                    console.log('   ✅ Validation complete');
-                    return {
-                        index: idx,
-                        result: {
-                            success: true,
-                            url: targetUrl,
-                            companyName: normalizedEntry.companyName,
-                            adobeTargetData: {
-                                detected: detectionResult.detected,
-                                version: detectionResult.version,
-                                hasMboxCookie: detectionResult.hasMboxCookie,
-                                hasAdobeScript: detectionResult.hasAdobeScript,
-                                captchaDetected: detectionResult.captchaDetected,
-                                captchaStatus: detectionResult.captchaStatus,
-                                detectionSource: detectionResult.detectionSource,
-                                activityIds: detectionResult.activityIds || [],
-                                activityNames: detectionResult.activityNames || [],
-                                experiments: [],
-                                experimentCount: 0,
-                                activeCount: 0
-                            }
-                        }
-                    };
-
-                } catch (error) {
-                    console.error(`   ❌ Validation failed: ${error.message}`);
-                    return { index: idx, result: { success: false, url: targetUrl, error: error.message } };
-                } finally {
-                    if (page) {
-                        try { await closePage(page); } catch (e) {}
-                    }
-                    if (concurrency === 1) {
-                        await new Promise(r => setTimeout(r, 150));
-                    }
-                }
-            }));
-
-            const settled = await Promise.allSettled(tasks);
-            
-            const results = settled.map((res, idx) => {
-                if (res.status === 'fulfilled') return res.value;
-                return { index: idx, result: { success: false, url: urls[idx]?.url, error: 'Task failed' } };
-            });
-
-            results.sort((a, b) => a.index - b.index);
-            console.log('\n' + '═'.repeat(70));
-            console.log(`✅ Chunk complete: ${results.length} URLs processed`);
-            return results.map(r => r.result);
-
-        } finally {
-            if (browser) {
-                try {
-                    await closeBrowser(browser);
-                    console.log('   🔒 Shared browser closed');
-                } catch (e) {
-                    if (browser.process && browser.process()) {
-                        try { process.kill(browser.process().pid, 'SIGKILL'); } catch (err) {}
-                    }
-                }
+            // A. Reachability Check
+            try {
+                await isUrlReachable(targetUrl);
+            } catch (e) {
+                console.log(`   ❌ URL unreachable: ${targetUrl}`);
+                return { index: idx, result: { success: false, url: targetUrl, error: 'URL unreachable' } };
             }
-        }
-    }
 
+            // B. Use Scraper Service (Handles Browser Pool Internally)
+            // This isolates every URL. If one hangs, only that one fails.
+            const detectionResult = await AdobeScraperService.detectAdobeTargetPresence(targetUrl);
+
+            // Check for errors
+            if (detectionResult.detectionSource?.error) {
+                return { 
+                    index: idx, 
+                    result: { 
+                        success: false, 
+                        url: targetUrl, 
+                        error: detectionResult.detectionSource.error 
+                    } 
+                };
+            }
+
+            // C. Success
+            console.log('   ✅ Validation complete');
+            return {
+                index: idx,
+                result: {
+                    success: true,
+                    url: targetUrl,
+                    companyName: normalizedEntry.companyName,
+                    adobeTargetData: {
+                        detected: detectionResult.detected,
+                        version: detectionResult.version,
+                        hasMboxCookie: detectionResult.hasMboxCookie,
+                        hasAdobeScript: detectionResult.hasAdobeScript,
+                        captchaDetected: detectionResult.captchaDetected,
+                        captchaStatus: detectionResult.captchaStatus,
+                        detectionSource: detectionResult.detectionSource,
+                        activityIds: [], 
+                        activityNames: [],
+                        experiments: [],
+                        experimentCount: 0,
+                        activeCount: 0
+                    }
+                }
+            };
+
+        } catch (error) {
+            console.error(`   ❌ Task failed for ${targetUrl}: ${error.message}`);
+            return { index: idx, result: { success: false, url: targetUrl, error: error.message } };
+        }
+    }));
+
+    // 3. Wait for results
+    const settled = await Promise.allSettled(tasks);
+    
+    const results = settled.map((res, idx) => {
+        if (res.status === 'fulfilled') return res.value;
+        return { index: idx, result: { success: false, url: urls[idx]?.url || 'UNKNOWN', error: 'Task failed' } };
+    });
+
+    results.sort((a, b) => a.index - b.index);
+    
+    console.log('\n' + '═'.repeat(70));
+    console.log(`✅ Chunk complete: ${results.length} URLs processed`);
+    
+    return results.map(r => r.result);
+  }
     // Helper: Build record
     buildValidationRecord({ url, companyName, status, adobeTargetData = {}, error = null }) {
         const activityIds = adobeTargetData.activityIds || [];
