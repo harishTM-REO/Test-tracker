@@ -9,7 +9,8 @@ const {
     closePage,
     closeBrowser,
     createPage,
-    navigateToPage
+    navigateToPage,
+    httpCheck
 } = require('../utils/helper');
 
 // Import batch processing helpers for advanced batch operations
@@ -93,6 +94,30 @@ class AdobeScraperService {
         console.log('detectAdobeTargetPresenceWithSharedPage is called');
         try {
             console.log(`🔍 Validating Adobe Target presence: ${url}`);
+
+            // Pre-flight: skip navigation when TLS/cert errors are obvious
+            try {
+                const preflightCheck = await httpCheck(url, 4000);
+                const certIssue = preflightCheck.error && preflightCheck.error.toLowerCase().includes('cert');
+                if (!preflightCheck.isValid && certIssue) {
+                    console.warn(`⚠️  Pre-flight certificate issue for ${url}: ${preflightCheck.error}`);
+                    return {
+                        detected: false,
+                        version: null,
+                        hasMboxCookie: false,
+                        hasAdobeScript: false,
+                        httpStatusCode: preflightCheck.status || null,
+                        captchaDetected: false,
+                        detectionSource: {
+                            error: 'certificate_error',
+                            details: preflightCheck.error,
+                            preflightCheck: true
+                        }
+                    };
+                }
+            } catch (e) {
+                console.warn(`⚠️  Reachability pre-check failed for ${url}: ${e.message}`);
+            }
             
             // Navigate with helper (has timeout protection)
             await navigateToPage(sharedPage, url);
@@ -245,6 +270,30 @@ class AdobeScraperService {
     
                 try { browserPool.incrementPageCount(browser); } catch (e) {}
     
+                // Pre-flight: avoid navigation when TLS/cert errors are detected
+                try {
+                    const preflightCheck = await httpCheck(url, 4000);
+                    const certIssue = preflightCheck.error && preflightCheck.error.toLowerCase().includes('cert');
+                    if (!preflightCheck.isValid && certIssue) {
+                        console.warn(`⚠️  Pre-flight certificate issue for ${url}: ${preflightCheck.error}`);
+                        return {
+                            detected: false,
+                            version: null,
+                            hasMboxCookie: false,
+                            hasAdobeScript: false,
+                            httpStatusCode: preflightCheck.status || null,
+                            captchaDetected: false,
+                            detectionSource: {
+                                error: 'certificate_error',
+                                details: preflightCheck.error,
+                                preflightCheck: true
+                            }
+                        };
+                    }
+                } catch (e) {
+                    console.warn(`⚠️  Reachability pre-check failed for ${url}: ${e.message}`);
+                }
+
                 await navigateToPage(page, url);
     
                 try {

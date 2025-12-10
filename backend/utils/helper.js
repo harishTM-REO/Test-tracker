@@ -460,44 +460,46 @@ const detectCaptcha = async (page) => {
     try {
         console.log("🕵️  Running captcha detection...");
 
+        // 1. Fast Check (Low CPU)
         const fastSelectorCheck = await page.$(
-            '#g-recaptcha, div.g-recaptcha, [data-sitekey], #h-captcha,' +
-            'div.h-captcha, .cf-turnstile, .frc-captcha, #captcha-container,' +
-            '[class*="captcha"]'
+            '#g-recaptcha, div.g-recaptcha, [data-sitekey], #h-captcha, div.h-captcha, .cf-turnstile, .frc-captcha, #captcha-container, [class*="captcha"]'
         );
 
         if (fastSelectorCheck) {
-            return {detected: true, reason: 'Fast selector match'};
+            console.warn(`🚫 Captcha detected (Fast Check)`);
+            return { detected: true, reason: 'Fast selector match' };
         }
 
-        const captchaResult = await page.evaluate(() => {
-            const iframeKeywords = [
-                'recaptcha',
-                'hcaptcha',
-                'challenges.cloudflare.com',
-                'arkoselabs'
-            ];
-
-            for (const iframe of document.querySelectorAll('iframe')) {
-                try {
-                    const src = iframe.src || '';
-                    if (iframeKeywords.some(k => src.includes(k))) {
-                        return {detected: true, reason: `iframe src contains: ${src}`};
-                    }
-                } catch (e) {
+        // 2. Safe Deep Check (With Timeout)
+        // We wrap the evaluate in a race to prevent browser hangs
+        const captchaResult = await Promise.race([
+            page.evaluate(() => {
+                const iframeKeywords = ['recaptcha', 'hcaptcha', 'challenges.cloudflare.com', 'arkoselabs'];
+                
+                // Check Iframes
+                for (const iframe of document.querySelectorAll('iframe')) {
+                    try {
+                        const src = iframe.src || '';
+                        if (iframeKeywords.some(k => src.includes(k))) {
+                            return { detected: true, reason: `iframe src contains: ${src}` };
+                        }
+                    } catch (e) {}
                 }
-            }
 
-            const title = document.title.toLowerCase();
-            if (title.includes('verify') || title.includes('robot')) {
-                return {detected: true, reason: `title: ${document.title}`};
-            }
+                // Check Title
+                const title = document.title.toLowerCase();
+                if (title.includes('verify you are') || title.includes('security check')) {
+                    return { detected: true, reason: `Suspicious title: ${document.title}` };
+                }
 
-            return {detected: false, reason: 'No captcha indicators found'};
-        });
+                return { detected: false, reason: 'No indicators' };
+            }),
+            // Force timeout after 2 seconds inside the evaluation step
+            new Promise(resolve => setTimeout(() => resolve({ detected: false, reason: 'Detection timed out' }), 4500))
+        ]);
 
         if (captchaResult.detected) {
-            console.warn(`CAPTCHA detected! Reason: ${captchaResult.reason}`);
+            console.warn(`🚫 Captcha detected! Reason: ${captchaResult.reason}`);
         } else {
             console.log("✅ No captcha detected.");
         }
@@ -505,8 +507,10 @@ const detectCaptcha = async (page) => {
         return captchaResult;
 
     } catch (error) {
-        console.error('Error during captcha detection:', error.message);
-        return {detected: false, reason: 'Error in detection function'};
+        // If the browser is truly dead, this catch block runs. 
+        // We return false to let the scraper try to proceed or fail gracefully later.
+        console.warn(`⚠️ Captcha detection skipped (Browser busy/dead): ${error.message}`);
+        return { detected: false, reason: 'Browser unresponsive' };
     }
 }
 
