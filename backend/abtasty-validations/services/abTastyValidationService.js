@@ -1,3 +1,5 @@
+// /app/abtasty-validations/services/abTastyValidationService.js
+const PQueue = require('p-queue').default;
 const ABTastyValidationResult = require('../../models/ABTastyValidationResult');
 const ABTastyValidationDocument = require('../../models/ABTastyValidationDocument');
 const Dataset = require('../../models/Dataset');
@@ -6,34 +8,39 @@ const { handleCookieConsent, detectCaptcha, launchBrowser } = require('../../uti
 
 class ABTastyValidationService {
   /**
-   * Main validation method - processes URLs sequentially with fresh browser instances
+   * Main validation method - uses p-queue for concurrency and restarts browser every batch
    */
   async performValidation(jobData, progressCallback) {
     const { datasetId, datasetName, urls = [] } = jobData;
-    
+
     console.log(`\n${'='.repeat(80)}`);
     console.log(`🚀 ABTASTY VALIDATION STARTED`);
     console.log(`Dataset: ${datasetName} (${datasetId})`);
     console.log(`Total URLs: ${urls.length}`);
     console.log(`${'='.repeat(80)}\n`);
 
-    // Set up unhandled rejection handler for this process
+    // Unhandled rejection handling (best-effort)
     let originalUnhandledRejection = [];
     try {
       originalUnhandledRejection = process.listeners('unhandledRejection');
       process.removeAllListeners('unhandledRejection');
-      process.on('unhandledRejection', (reason, promise) => {
-        console.error(`\n❌ UNHANDLED PROMISE REJECTION DETECTED:`);
-        console.error(`Reason:`, reason);
-        console.error(`This may cause the scraping to stop. Continuing with error handling...`);
-        // Don't exit - let the error handling continue
+      process.on('unhandledRejection', (reason) => {
+        console.error(`\n❌ UNHANDLED PROMISE REJECTION DETECTED:`, reason);
+        // don't exit; continue with error handling
       });
-    } catch (handlerSetupError) {
-      console.warn(`⚠️  Could not set up unhandled rejection handler:`, handlerSetupError.message);
+    } catch (e) {
+      console.warn('⚠️ Could not set up unhandledRejection handler:', e.message);
     }
 
     const startTime = Date.now();
     let validationResult = null;
+
+    // Configs (env overrides)
+    const CONCURRENCY = Number(process.env.PQUEUE_CONCURRENCY) || 3; // 3-5 recommended
+    const BATCH_SIZE = Number(process.env.BROWSER_RESTART_EVERY) || 100; // restart browser every 100 URLs
+    const PAGE_CREATION_TIMEOUT = Number(process.env.PAGE_CREATION_TIMEOUT) || 30000;
+    const BROWSER_CLOSE_TIMEOUT = Number(process.env.BROWSER_CLOSE_TIMEOUT) || 15000;
+    const PROGRESS_CALLBACK_TIMEOUT = Number(process.env.PROGRESS_CALLBACK_TIMEOUT) || 5000;
 
     try {
       // Create validation result record
@@ -67,224 +74,182 @@ class ABTastyValidationService {
         'abTastyValidation.lastResultId': validationResult._id
       });
 
-      const results = {
-        positive: [],
-        negative: [],
-        failed: []
-      };
-
+      const results = { positive: [], negative: [], failed: [] };
       const projectIds = new Set();
 
-      // Process URLs sequentially
-      for (let i = 0; i < urls.length; i++) {
-        const urlEntry = urls[i];
-        const urlIndex = i + 1;
-        
+      // Process URLs in batches
+      const total = urls.length;
+      const batches = Math.ceil(total / BATCH_SIZE);
+
+      for (let b = 0; b < batches; b++) {
+        const startIdx = b * BATCH_SIZE;
+        const endIdx = Math.min(startIdx + BATCH_SIZE, total);
+        const batchUrls = urls.slice(startIdx, endIdx);
+
+        console.log(`\n📦 STARTING BATCH ${b + 1}/${batches} (URLs ${startIdx + 1}-${endIdx})`);
+        // Launch browser for this batch
+        let browser = null;
         try {
-          console.log(`\n${'─'.repeat(80)}`);
-          console.log(`📍 Processing URL ${urlIndex}/${urls.length}`);
-          console.log(`URL: ${urlEntry.url}`);
-          console.log(`Company: ${urlEntry.companyName || 'N/A'}`);
-          console.log(`${'─'.repeat(80)}`);
+          browser = await this._launchBrowserWithArgs();
+          console.log(`🌐 Launched browser for batch ${b + 1}`);
 
-          let browser = null;
-          try {
-            // Check URL reachability BEFORE launching browser (saves resources)
-            console.log(`⏱️  Checking if URL is reachable...`);
-            const isReachable = await isUrlReachable(urlEntry.url);
-            
-            if (!isReachable) {
-              console.log(`❌ URL is not reachable - skipping browser launch`);
-              results.failed.push({
-                url: urlEntry.url,
-                companyName: urlEntry.companyName,
-                status: 'failed',
-                detectionDetails: {
-                  projectId: null,
-                  experiments: [],
-                  experimentCount: 0,
-                  activeCount: 0,
-                  detectedExplicitly: false,
-                  captchaDetected: false,
-                  cookieType: 'unknown',
-                  error: 'URL is not reachable or timed out'
-                },
-                scrapedAt: new Date(),
-                error: 'URL is not reachable or timed out'
-              });
-              console.log(`⚠️  FAILED - URL not reachable`);
-              continue; // Skip to next URL
-            }
-            
-            console.log(`✅ URL is reachable - launching browser...`);
-            
-            // Launch fresh browser for this URL
-            console.log(`🌐 Launching fresh browser...`);
-            const { browser: launchedBrowser, page } = await this.getBrowserAndPage();
-            browser = launchedBrowser;
+          // create queue for this batch
+          const queue = new PQueue({ concurrency: CONCURRENCY });
 
-            // Configure page
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-            await page.setViewport({ width: 1920, height: 1080 });
+          // task function for each URL entry
+          const taskPromises = batchUrls.map((urlEntry, idxInBatch) =>
+            queue.add(async () => {
+              const globalIndex = startIdx + idxInBatch; // zero-based
+              const seqIndex = globalIndex + 1; // human index
+              console.log(`\n[Task] #${seqIndex} queued: ${urlEntry.url}`);
 
-            // Validate URL with timeout wrapper (like Optimizely Validation)
-            // This prevents the validation from hanging and ensures finally block always executes
-            let result;
-            try {
-              result = await Promise.race([
-                this.validateUrl(page, urlEntry),
-                new Promise((_, reject) => 
-                  setTimeout(() => reject(new Error('validateUrl timeout after 60 seconds')), 60000)
-                )
-              ]);
-            } catch (timeoutError) {
-              // Timeout wrapper caught - convert to failed result (like Optimizely)
-              console.error(`   ❌ Validation timeout: ${timeoutError.message}`);
-              result = {
-                url: urlEntry.url,
-                companyName: urlEntry.companyName,
-                status: 'failed',
-                detectionDetails: {
-                  projectId: null,
-                  experiments: [],
-                  experimentCount: 0,
-                  activeCount: 0,
-                  detectedExplicitly: false,
-                  captchaDetected: false,
-                  cookieType: 'unknown',
-                  error: timeoutError.message || 'Validation timeout after 60 seconds'
-                },
-                scrapedAt: new Date(),
-                error: timeoutError.message || 'Validation timeout after 60 seconds'
-              };
-            }
-            
-            // Categorize result (validateUrl never throws - always returns result object like Optimizely)
-            if (result.status === 'positive') {
-              results.positive.push(result);
-              if (result.detectionDetails.projectId) {
-                projectIds.add(result.detectionDetails.projectId);
-              }
-              console.log(`✅ POSITIVE - ABTasty detected (ProjectID: ${result.detectionDetails.projectId || 'N/A'})`);
-            } else if (result.status === 'negative') {
-              results.negative.push(result);
-              console.log(`❌ NEGATIVE - No ABTasty detected`);
-            } else {
-              results.failed.push(result);
-              console.log(`⚠️  FAILED - ${result.error || 'Unknown error'}`);
-            }
-
-          } catch (error) {
-            console.error(`❌ Error processing ${urlEntry.url}:`, error.message);
-            console.error(`Stack trace:`, error.stack);
-            results.failed.push({
-              url: urlEntry.url,
-              companyName: urlEntry.companyName,
-              status: 'failed',
-              detectionDetails: {
-                projectId: null,
-                experiments: [],
-                experimentCount: 0,
-                activeCount: 0,
-                detectedExplicitly: false,
-                captchaDetected: false,
-                cookieType: 'unknown',
-                error: error.message
-              },
-              scrapedAt: new Date(),
-              error: error.message
-            });
-          } finally {
-            // Always close browser with timeout to prevent hanging
-            console.log(`🔒 Closing browser...`);
-            if (browser) {
+              // First, check reachability BEFORE creating page
               try {
-                // Add timeout to browser.close() to prevent hanging
-                await Promise.race([
-                  browser.close(),
-                  new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Browser close timeout')), 10000)
-                  )
+                console.log(`⏱️ Checking if URL is reachable (#${seqIndex})...`);
+                const reachable = await isUrlReachable(urlEntry.url);
+                if (!reachable) {
+                  console.log(`❌ URL not reachable (#${seqIndex}) - skipping`);
+                  return {
+                    index: globalIndex,
+                    result: this._makeFailedResult(urlEntry, 'URL is not reachable or timed out')
+                  };
+                }
+              } catch (reachErr) {
+                console.warn(`⚠️ Reachability check error (#${seqIndex}): ${reachErr.message}`);
+                // proceed to attempt with page if reachability check errored (optimistic)
+              }
+
+              // Create a page with timeout protection
+              let page = null;
+              try {
+                page = await Promise.race([
+                  browser.newPage(),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Page creation timeout')), PAGE_CREATION_TIMEOUT))
                 ]);
-                console.log(`🔒 Browser closed successfully`);
-              } catch (e) {
-                console.error(`⚠️  Error closing browser (non-fatal):`, e.message);
-                // Try to force close if normal close fails
+
+                // Configure page
+                try { await page.setViewport({ width: 1920, height: 1080 }); } catch (_) {}
+                try { await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'); } catch (_) {}
+                try { await page.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' }); } catch (_) {}
                 try {
-                  if (browser.process && browser.process()) {
-                    browser.process().kill('SIGKILL');
+                  const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 40000);
+                  page.setDefaultNavigationTimeout(navigationTimeout);
+                  page.setDefaultTimeout(navigationTimeout);
+                } catch (_) {}
+
+                // Run validateUrl with a 60s fallback (same as before)
+                let result;
+                try {
+                  result = await Promise.race([
+                    this.validateUrl(page, urlEntry),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('validateUrl timeout after 60 seconds')), 60000))
+                  ]);
+                } catch (timeoutErr) {
+                  console.error(`   ❌ Validation timeout (#${seqIndex}): ${timeoutErr.message}`);
+                  result = this._makeFailedResult(urlEntry, timeoutErr.message || 'Validation timeout after 60 seconds');
+                }
+
+                // Return result
+                return { index: globalIndex, result };
+              } catch (taskError) {
+                console.error(`❌ Task error for #${seqIndex} (${urlEntry.url}):`, taskError.message);
+                return { index: globalIndex, result: this._makeFailedResult(urlEntry, taskError.message) };
+              } finally {
+                if (page) {
+                  try {
+                    await Promise.race([
+                      page.close(),
+                      new Promise((_, reject) => setTimeout(() => reject(new Error('Page close timeout')), 5000))
+                    ]);
+                  } catch (closeErr) {
+                    console.warn(`⚠️ Page close failed for #${seqIndex}:`, closeErr.message);
+                    // best-effort: try to continue
+                    try {
+                      if (page.browser && typeof page.browser === 'function') {
+                        // noop - safeguard
+                      }
+                    } catch (_) {}
                   }
-                } catch (killError) {
-                  console.error(`⚠️  Could not force kill browser process:`, killError.message);
                 }
               }
-            }
-          }
+            })
+          );
 
-          // Progress update with error handling and timeout
-          try {
+          // Wait for batch tasks to complete
+          const taskResults = await Promise.all(taskPromises);
+
+          // Sort by original index (to preserve order)
+          taskResults.sort((a, b) => a.index - b.index);
+
+          // Collect results and update progress after each result to keep user informed
+          for (const task of taskResults) {
+            const res = task.result;
+            if (res.status === 'positive') {
+              results.positive.push(res);
+              if (res.detectionDetails?.projectId) projectIds.add(res.detectionDetails.projectId);
+            } else if (res.status === 'negative') {
+              results.negative.push(res);
+            } else {
+              results.failed.push(res);
+            }
+
+            // build progress object
+            const processedSoFar = results.positive.length + results.negative.length + results.failed.length;
             const progress = {
-              processedUrls: urlIndex,
-              totalUrls: urls.length,
-              percentage: Math.round((urlIndex / urls.length) * 100),
+              processedUrls: processedSoFar,
+              totalUrls: total,
+              percentage: Math.round((processedSoFar / total) * 100),
               positiveCount: results.positive.length,
               negativeCount: results.negative.length,
               failedCount: results.failed.length
             };
 
+            // call progressCallback with timeout guard
             if (progressCallback) {
               try {
-                // Add timeout to progress callback to prevent hanging
                 await Promise.race([
                   Promise.resolve(progressCallback(progress)),
-                  new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Progress callback timeout')), 5000)
-                  )
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Progress callback timeout')), PROGRESS_CALLBACK_TIMEOUT))
                 ]);
-              } catch (callbackError) {
-                console.error(`⚠️  Progress callback error (non-fatal):`, callbackError.message);
-                // Continue processing even if callback fails or times out
+              } catch (pcErr) {
+                console.warn(`⚠️ Progress callback error (non-fatal):`, pcErr.message);
               }
             }
-
-            console.log(`📊 Progress: ${progress.percentage}% (${urlIndex}/${urls.length}) - Positive: ${results.positive.length}, Negative: ${results.negative.length}, Failed: ${results.failed.length}`);
-          } catch (progressError) {
-            console.error(`⚠️  Error updating progress (non-fatal):`, progressError.message);
-            // Continue processing even if progress update fails
           }
 
-        } catch (loopError) {
-          // Catch any unexpected errors in the loop itself
-          console.error(`❌ CRITICAL: Unexpected error in processing loop at URL ${urlIndex}/${urls.length}:`, loopError.message);
-          console.error(`Stack trace:`, loopError.stack);
-          console.log(`⏭️  Continuing with next URL despite error...`);
-          
-          // Add to failed results
-          results.failed.push({
-            url: urlEntry?.url || 'unknown',
-            companyName: urlEntry?.companyName || 'N/A',
-            status: 'failed',
-            detectionDetails: {
-              projectId: null,
-              experiments: [],
-              experimentCount: 0,
-              activeCount: 0,
-              detectedExplicitly: false,
-              captchaDetected: false,
-              error: `Unexpected loop error: ${loopError.message}`
-            },
-            scrapedAt: new Date(),
-            error: `Unexpected loop error: ${loopError.message}`
-          });
-          
-          // Continue to next URL
-          continue;
-        }
-      }
-
-      console.log(`\n${'─'.repeat(80)}`);
-      console.log(`💾 Saving results to database...`);
-      console.log(`${'─'.repeat(80)}`);
+        } catch (batchErr) {
+          console.error(`❌ Error processing batch ${b + 1}:`, batchErr.message);
+          // If the batch failed catastrophically, mark all batch urls as failed
+          for (let j = startIdx; j < endIdx; j++) {
+            const urlEntry = urls[j];
+            results.failed.push(this._makeFailedResult(urlEntry, `Batch error: ${batchErr.message}`));
+          }
+        } finally {
+          // Close browser for batch with timeout and forced kill fallback
+          if (browser) {
+            try {
+              await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Browser close timeout')), BROWSER_CLOSE_TIMEOUT))
+              ]);
+              console.log(`🔒 Browser closed for batch ${b + 1}`);
+            } catch (closeErr) {
+              console.warn(`⚠️ Browser close failed for batch ${b + 1}:`, closeErr.message);
+              // Try force-kill if possible
+              try {
+                if (browser.process && typeof browser.process === 'function') {
+                  const proc = browser.process();
+                  if (proc && proc.pid) {
+                    try { process.kill(proc.pid, 'SIGKILL'); } catch (kerr) { /* best-effort */ }
+                  }
+                }
+              } catch (killErr) {
+                console.warn(`⚠️ Could not force-kill browser for batch ${b + 1}:`, killErr.message);
+              }
+            }
+          }
+        } // end finally for batch
+      } // end batches loop
 
       // Save results in batch with error handling
       try {
@@ -306,11 +271,9 @@ class ABTastyValidationService {
         console.log(`✅ Validation documents saved successfully`);
       } catch (dbError) {
         console.error(`❌ Error saving validation documents:`, dbError.message);
-        console.error(`Stack trace:`, dbError.stack);
-        // Continue - don't fail entire process if document save fails
       }
 
-      // Update validation result with final summary
+      // Final updates
       const durationMs = Date.now() - startTime;
       const detectionRate = urls.length > 0 ? (results.positive.length / urls.length) * 100 : 0;
 
@@ -335,7 +298,7 @@ class ABTastyValidationService {
         }
       });
 
-      // Update dataset status
+      // Update dataset
       await Dataset.findByIdAndUpdate(datasetId, {
         'abTastyValidation.status': 'completed',
         'abTastyValidation.summary': {
@@ -410,7 +373,7 @@ class ABTastyValidationService {
       console.log(`🏁 ABTASTY VALIDATION FINALLY BLOCK EXECUTING`);
       console.log(`Timestamp: ${new Date().toISOString()}`);
       console.log(`${'='.repeat(80)}\n`);
-      
+
       // Restore original unhandled rejection handlers
       try {
         process.removeAllListeners('unhandledRejection');
@@ -421,73 +384,56 @@ class ABTastyValidationService {
         }
         console.log(`✅ Unhandled rejection handlers restored`);
       } catch (handlerError) {
-        console.error(`⚠️  Error restoring unhandled rejection handlers:`, handlerError.message);
+        console.error(`⚠️ Error restoring unhandled rejection handlers:`, handlerError.message);
       }
-      
+
       console.log(`✅ ABTASTY VALIDATION FINALLY BLOCK COMPLETED\n`);
     }
   }
 
   /**
-   * Launch browser and create a page with timeout protection (no retry logic)
-   * Uses direct newPage() like Optimizely/Adobe Validation to avoid BROWSER_STUCK_RESTART_REQUIRED errors
+   * Launch browser with safe args via helper.launchBrowser
    */
-  async getBrowserAndPage() {
+  async _launchBrowserWithArgs() {
     const protocolTimeout = Number(process.env.PROTOCOL_TIMEOUT || 120000);
-    const pageCreationTimeout = Number(process.env.PAGE_CREATION_TIMEOUT) || 30000; // 30s default
-    let browser = null;
-    let page = null;
+    // Add safe Chromium args
+    return launchBrowser({
+      protocolTimeout,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
+    });
+  }
 
-    try {
-      console.log(`[getBrowserAndPage] Launching browser (protocolTimeout=${protocolTimeout}ms, pageTimeout=${pageCreationTimeout}ms)`);
-      browser = await launchBrowser({ protocolTimeout });
-      
-      // Create page with timeout protection (no retry logic - just fail fast)
-      // This prevents BROWSER_STUCK_RESTART_REQUIRED errors that occur with createPage() helper
-      try {
-        page = await Promise.race([
-          browser.newPage(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Page creation timeout after 30s')), pageCreationTimeout)
-          )
-        ]);
-        
-        // Configure page (same as Optimizely/Adobe Validation)
-        await page.setViewport({ width: 1920, height: 1080 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        await page.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
-        const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 40000);
-        page.setDefaultNavigationTimeout(navigationTimeout);
-        page.setDefaultTimeout(navigationTimeout);
-        
-        console.log(`[getBrowserAndPage] Browser and page created successfully`);
-        return { browser, page };
-      } catch (pageError) {
-        console.error(`[getBrowserAndPage] Failed to create page: ${pageError.message}`);
-        // If page creation fails, close browser and throw
-        if (browser) {
-          try {
-            await browser.close();
-          } catch (closeError) {
-            console.warn(`[getBrowserAndPage] Error closing browser after page creation failure: ${closeError.message}`);
-          }
-        }
-        throw new Error(`Page creation failed: ${pageError.message}`);
-      }
-    } catch (error) {
-      console.error(`[getBrowserAndPage] Failed to launch browser and page: ${error.message}`);
-      // Best-effort cleanup
-      if (browser) {
-        try {
-          await browser.close();
-        } catch (_) {}
-      }
-      throw error;
-    }
+  /**
+   * Helper to build a failed result object
+   */
+  _makeFailedResult(urlEntry, errorMessage) {
+    return {
+      url: urlEntry.url,
+      companyName: urlEntry.companyName || null,
+      status: 'failed',
+      detectionDetails: {
+        projectId: null,
+        experiments: [],
+        experimentCount: 0,
+        activeCount: 0,
+        detectedExplicitly: false,
+        captchaDetected: false,
+        cookieType: 'unknown',
+        error: errorMessage || 'Unknown error'
+      },
+      scrapedAt: new Date(),
+      error: errorMessage || 'Unknown error'
+    };
   }
 
   /**
    * Validate a single URL for ABTasty presence
+   * (keeps your previous implementation unchanged)
    */
   async validateUrl(page, urlEntry) {
     const { url, companyName } = urlEntry;
@@ -511,8 +457,8 @@ class ABTastyValidationService {
 
     try {
       console.log(`🔍 Navigating to: ${url}`);
-      
-      // Navigate with timeout (with error handling to ensure validateUrl never throws)
+
+      // Navigate with timeout (with error handling)
       let response = null;
       try {
         const navigationPromise = page.goto(url, {
@@ -522,9 +468,7 @@ class ABTastyValidationService {
 
         response = await Promise.race([
           navigationPromise,
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Navigation timeout')), 30000)
-          )
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Navigation timeout')), 30000))
         ]);
 
         console.log(`✓ Page loaded (status: ${response?.status() || 'unknown'})`);
@@ -533,62 +477,46 @@ class ABTastyValidationService {
         result.status = 'failed';
         result.error = `Navigation failed: ${navError.message}`;
         result.detectionDetails.error = `Navigation failed: ${navError.message}`;
-        return result; // Return failed result instead of throwing
+        return result;
       }
 
       // Wait for page to settle
-      try {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } catch (delayError) {
-        // Ignore delay errors - non-fatal
-      }
+      try { await new Promise(resolve => setTimeout(resolve, 2000)); } catch (e) {}
 
-      // Check for captcha (with error handling to ensure validateUrl never throws)
+      // Check for captcha
       console.log(`🔍 Checking for captcha...`);
       let captchaResult = { detected: false };
       try {
         captchaResult = await detectCaptcha(page);
       } catch (captchaError) {
-        console.warn(`⚠️  Captcha detection error (non-fatal): ${captchaError.message}`);
-        // Continue - assume no captcha if detection fails
+        console.warn(`⚠️ Captcha detection error (non-fatal): ${captchaError.message}`);
       }
-      const captchaDetected = typeof captchaResult === 'object'
-        ? !!captchaResult.detected
-        : !!captchaResult;
+      const captchaDetected = typeof captchaResult === 'object' ? !!captchaResult.detected : !!captchaResult;
       result.detectionDetails.captchaDetected = captchaDetected;
       console.log('captchaDetected', captchaDetected, captchaResult?.reason ? `reason: ${captchaResult.reason}` : '');
       if (captchaDetected) {
-        console.log(`⚠️  Captcha detected`);
+        console.log(`⚠️ Captcha detected`);
         result.status = 'failed';
         result.error = captchaResult?.reason || 'Captcha detected';
         result.detectionDetails.error = captchaResult?.reason || 'Captcha detected';
-        // Add small delay to ensure page state is stable before returning
-        try {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } catch (delayError) {
-          // Ignore delay errors
-        }
+        try { await new Promise(resolve => setTimeout(resolve, 500)); } catch (e) {}
         return result;
       }
 
-      // Accept cookie consent (with error handling to ensure validateUrl never throws)
+      // Accept cookie consent
       console.log(`🍪 Handling cookie consent...`);
-      try {
-        await handleCookieConsent(page);
-      } catch (cookieError) {
-        console.warn(`⚠️  Cookie consent handling error (non-fatal): ${cookieError.message}`);
-        // Continue - assume cookies handled if operation fails
+      try { await handleCookieConsent(page); } catch (cookieError) {
+        console.warn(`⚠️ Cookie consent handling error (non-fatal): ${cookieError.message}`);
       }
-      await new Promise(resolve => setTimeout(resolve, 3500));
-      
-      // Detect ABTasty (with error handling to ensure validateUrl never throws)
+      try { await new Promise(resolve => setTimeout(resolve, 3500)); } catch (e) {}
+
+      // Detect ABTasty
       console.log(`🔍 Detecting ABTasty...`);
       let abTastyDetection = { detected: false };
       try {
         abTastyDetection = await this.detectABTasty(page);
       } catch (detectionError) {
         console.error(`❌ ABTasty detection error: ${detectionError.message}`);
-        // Set error in result but don't throw - return failed result instead
         result.status = 'failed';
         result.error = `Detection error: ${detectionError.message}`;
         result.detectionDetails.error = `Detection error: ${detectionError.message}`;
@@ -621,7 +549,6 @@ class ABTastyValidationService {
       result.error = error.message;
       result.detectionDetails.error = error.message;
     } finally {
-      // Ensure we always return a result, even if there were errors
       console.log(`✓ validateUrl completed for ${url} with status: ${result.status}`);
     }
 
@@ -629,26 +556,19 @@ class ABTastyValidationService {
   }
 
   /**
-   * Detect ABTasty presence and extract projectId using window.ABTasty.accountData.accountSettings.id
+   * Detect ABTasty presence and extract projectId (keeps previous implementation)
    */
   async detectABTasty(page) {
     try {
       const detection = await page.evaluate(() => {
-        // Check if ABTasty exists
         if (!window.ABTasty || !window.ABTasty.accountData || !window.ABTasty.accountData.accountSettings) {
           return { detected: false };
         }
-
         try {
-          // Get project ID from window.ABTasty.accountData.accountSettings.id
           const projectId = window.ABTasty.accountData.accountSettings.id || null;
-          
-          // Try to get experiments if available
           let experiments = [];
           let experimentCount = 0;
           let activeCount = 0;
-
-          // Check if experiments data is available in ABTasty object
           if (window.ABTasty.experiments && typeof window.ABTasty.experiments === 'object') {
             const experimentsObj = window.ABTasty.experiments;
             Object.entries(experimentsObj).forEach(([id, exp]) => {
@@ -662,7 +582,6 @@ class ABTastyValidationService {
             experimentCount = experiments.length;
             activeCount = experiments.filter(e => e.isActive).length;
           }
-
           return {
             detected: true,
             projectId: projectId,
@@ -670,21 +589,17 @@ class ABTastyValidationService {
             experimentCount: experimentCount,
             activeCount: activeCount
           };
-
         } catch (e) {
           console.error('Error extracting ABTasty data:', e);
           return { detected: false };
         }
       });
-
       return detection;
-
     } catch (error) {
       console.error('Error in detectABTasty:', error.message);
       return { detected: false };
     }
   }
-
 }
 
 module.exports = new ABTastyValidationService();
