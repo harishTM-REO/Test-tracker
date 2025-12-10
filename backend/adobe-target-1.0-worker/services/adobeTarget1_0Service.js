@@ -6,7 +6,6 @@ const AdobeTargetValidationDocument = require(path.join(__dirname, '../../models
 const OptimizelyValidationResult = require(path.join(__dirname, '../../models/OptimizelyValidationResult'));
 const OptimizelyValidationDocument = require(path.join(__dirname, '../../models/OptimizelyValidationDocument'));
 const Dataset = require(path.join(__dirname, '../../models/Dataset'));
-const PQueue = require('p-queue').default;
 const AdobeScraperService = require(path.join(__dirname, '../../services/adobeScraperService'));
 const OptimizelyValidationService = require(path.join(__dirname, './optimizelyValidationService'));
 const browserPool = require(path.join(__dirname, '../../services/browserPoolService'));
@@ -24,6 +23,16 @@ const {
   ensureDBConnection,
   monitorDBHealth
 } = require(path.join(__dirname, '../../services/utils/batchProcessingHelpers'));
+
+// Lazy-load ESM-only p-queue for CommonJS compatibility
+let PQueue;
+async function loadPQueue() {
+  if (!PQueue) {
+    const mod = await import('p-queue');
+    PQueue = mod.default || mod;
+  }
+  return PQueue;
+}
 
 // Import Puppeteer for browser launching
 const chromium = require('@sparticuz/chromium');
@@ -1828,7 +1837,8 @@ class AdobeTarget1_0Service {
     console.log('═'.repeat(70));
 
     const CONCURRENCY = Number(process.env.PQUEUE_CONCURRENCY) || 2;
-    const queue = new PQueue({ concurrency: CONCURRENCY });
+    const QueueCtor = await loadPQueue();
+    const queue = new QueueCtor({ concurrency: CONCURRENCY });
 
     const tasks = urls.map((entry, idx) => queue.add(async () => {
       const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
