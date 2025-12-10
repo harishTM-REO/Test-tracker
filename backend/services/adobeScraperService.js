@@ -409,9 +409,12 @@ class AdobeScraperService {
 
     async detectAdobeTargetPresenceUsingPage(page) {
         const adobeTargetData = await page.evaluate(() => {
-            console.log('the main condition->', window.adobe || window.adobe.target);
+            const hasAdobe = !!window.adobe;
+            const hasTarget = !!(window.adobe && window.adobe.target);
+            console.log('the main condition->', { hasAdobe, hasTarget });
+
             try {
-                if (!window.adobe || !window.adobe.target) {
+                if (!hasAdobe || !hasTarget) {
                     return {
                         detected: false,
                         version: null,
@@ -420,7 +423,8 @@ class AdobeScraperService {
                     };
                 }
 
-                const version = parseInt(window.adobe.target['VERSION']);
+                const versionValue = window.adobe.target?.VERSION || window.adobe.target?.['VERSION'];
+                const version = parseInt(versionValue) || null;
                 console.log('Adobe Target VERSION:', version);
 
                 if (version === 1) {
@@ -924,8 +928,14 @@ class AdobeScraperService {
                                 return null;
                             }
 
+                        if (!window.adobe.target) {
+                            console.log('Adobe object exists but target is undefined');
+                            return null;
+                        }
+
                             try {
-                                const version = parseInt(window.adobe.target['VERSION']);
+                            const versionValue = window.adobe.target?.VERSION || window.adobe.target?.['VERSION'];
+                            const version = parseInt(versionValue) || null;
                                 console.log('Adobe Target VERSION:', version);
 
                                 if (version === 1) {

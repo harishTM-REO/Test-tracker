@@ -1857,7 +1857,21 @@ class AdobeTarget1_0Service {
       try {
         // Reachability check
         console.log('   ⏱️  Checking if URL is reachable...');
-        const isReachable = await isUrlReachable(targetUrl);
+        let isReachable = false;
+        try {
+          isReachable = await isUrlReachable(targetUrl);
+        } catch (reachErr) {
+          console.warn(`   ⚠️ Reachability check error: ${reachErr.message}`);
+          return {
+            index: idx,
+            result: {
+              success: false,
+              url: targetUrl,
+              companyName: normalizedEntry.companyName || null,
+              error: `Reachability check failed: ${reachErr.message}`
+            }
+          };
+        }
         if (!isReachable) {
           console.log('   ❌ URL is not reachable - skipping browser launch');
           return {
@@ -2040,7 +2054,20 @@ class AdobeTarget1_0Service {
         
         // Check URL reachability BEFORE creating page (saves resources)
         console.log('   ⏱️  Checking if URL is reachable...');
-        const isReachable = await isUrlReachable(targetUrl);
+        let isReachable = false;
+        try {
+          isReachable = await isUrlReachable(targetUrl);
+        } catch (reachErr) {
+          console.warn(`   ⚠️ Reachability check error: ${reachErr.message}`);
+          results.push({
+            success: false,
+            url: targetUrl,
+            companyName: normalizedEntry.companyName || null,
+            error: `Reachability check failed: ${reachErr.message}`
+          });
+          console.log('   ⚠️  FAILED - URL reachability check errored');
+          continue;
+        }
         
         if (!isReachable) {
           console.log('   ❌ URL is not reachable - skipping page creation');
