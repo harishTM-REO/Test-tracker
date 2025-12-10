@@ -23,7 +23,6 @@ class ABTastyValidationService {
     let validationResult = null;
 
     // Configs (env overrides)
-    // Use single-page-at-a-time with a single shared browser to reduce resource pressure
     const CONCURRENCY = Number(process.env.PQUEUE_CONCURRENCY) || 1;
     const BATCH_SIZE = Number(process.env.BROWSER_RESTART_EVERY) || 100;
     const PAGE_CREATION_TIMEOUT = Number(process.env.PAGE_CREATION_TIMEOUT) || 45000;
@@ -83,7 +82,7 @@ class ABTastyValidationService {
           browser = await this._launchBrowserWithArgs();
           console.log(`   🌐 Browser launched for batch ${b + 1}`);
 
-          // create queue for this batch (single-page concurrency)
+          // create queue for this batch
           const queue = new PQueue({ concurrency: CONCURRENCY });
 
           // task function for each URL entry

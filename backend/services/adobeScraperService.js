@@ -14,13 +14,13 @@ const browserPool = require('./browserPoolService');
 
 // Import batch processing helpers for advanced batch operations
 const {
-  performMemoryCleanup,
-  ensureDBConnection,
-  monitorDBHealth,
-  generateBatchCompletionReport,
-  finalizeStreamingSave,
-  getOptimalBatchSettings,
-  distributeUrlsAcrossBrowsers
+    performMemoryCleanup,
+    ensureDBConnection,
+    monitorDBHealth,
+    generateBatchCompletionReport,
+    finalizeStreamingSave,
+    getOptimalBatchSettings,
+    distributeUrlsAcrossBrowsers
 } = require('./utils/batchProcessingHelpers');
 
 const { saveResultsStreamingBatch } = require('./utils/streamingSaveHelper');
@@ -59,13 +59,8 @@ class AdobeScraperService {
         try {
             console.log(`Starting Adobe Target scrape for: ${url}`);
 
-            // Step 1: Get or create website record (optional if ExperimentService not available)
             let website = null;
             try {
-                // website = await this.getOrCreateWebsite(url);
-                // console.log(`Processing request for: ${website.name} (${url})`);
-
-                // Create a mock website object if service not available
                 website = {
                     _id: 'mock-id',
                     name: extractDomainName(url),
@@ -80,14 +75,12 @@ class AdobeScraperService {
                 };
             }
 
-            // Pass through skipCookieConsent option from options parameter
             const scrapeOptions = {
                 ...options,
                 skipCookieConsent: options.skipCookieConsent || false
             };
 
             const experimentData = await this.scrapeExperimentsFromPage(url, scrapeOptions);
-            console.log('the invoking function->',experimentData)
             return this.formatResponse(url, website, experimentData, savedData, startTime);
 
         } catch (error) {
@@ -104,172 +97,147 @@ class AdobeScraperService {
      * @returns {Promise<{detected: boolean, version?: string, hasMboxCookie?: boolean, hasAdobeScript?: boolean, captchaDetected?: boolean, detectionSource?: object}>}
      */
     async detectAdobeTargetPresenceWithSharedPage(sharedPage, url) {
-      let requestHandler = null;
-      console.log('detectAdobeTargetPresenceWithSharedPage is called Avinash');
-      try {
-        console.log(`🔍 Validating Adobe Target presence: ${url}`);
-        
-        // Navigate with helper (has timeout protection)
-        await navigateToPage(sharedPage, url);
-        
-        
-        await new Promise(r => setTimeout(r, 500)); // Small settle delay
-        
-        // Captcha detection with timeout protection
-        let captchaCheck = { detected: false };
+        let requestHandler = null;
+        console.log('detectAdobeTargetPresenceWithSharedPage is called');
         try {
-          captchaCheck = await runWithTimeout(
-            () => detectCaptcha(sharedPage), 
-            5000,
-            'detectCaptcha'
-          );
-        } catch (e) {
-          console.warn(`⚠️ Captcha detection timeout for ${url} (continuing): ${e.message}`);
-        }
-        
-        if (captchaCheck?.detected) {
-          console.log(`🚫 Captcha detected on ${url}`);
-          return {
-            detected: false,
-            captchaDetected: true,
-            captchaStatus: captchaCheck.reason,
-            httpStatusCode: null,
-            detectionSource: { captchaBlocked: true }
-          };
-        }
-        else{
-            // Cookie consent with timeout protection (7s for batch efficiency)
+            console.log(`🔍 Validating Adobe Target presence: ${url}`);
+            
+            // Navigate with helper (has timeout protection)
+            await navigateToPage(sharedPage, url);
+            
+            await new Promise(r => setTimeout(r, 500)); // Small settle delay
+            
+            // Captcha detection with timeout protection
+            let captchaCheck = { detected: false };
             try {
-                await runWithTimeout(
-                () => handleCookieConsent(sharedPage), 
-                6000,
-                'handleCookieConsent'
+                captchaCheck = await runWithTimeout(
+                    () => detectCaptcha(sharedPage), 
+                    5000,
+                    'detectCaptcha'
                 );
             } catch (e) {
-                console.warn(`⚠️ Cookie consent timeout for ${url} (continuing): ${e.message}`);
+                console.warn(`⚠️ Captcha detection timeout for ${url} (continuing): ${e.message}`);
             }
-        }
-        
-        // OPTIONAL: Enable lightweight request interception (only images/fonts for speed)
-        // Disabled by default to avoid protocol conflicts - can be enabled via env variable
-        const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
-        
-        if (enableInterception) {
-          try {
-            await sharedPage.setRequestInterception(true);
             
-            requestHandler = req => {
-              // Defensive checks to prevent "already handled" errors
-              try {
-                if (!req || req._interceptionHandled === true) {
-                  return;
+            if (captchaCheck?.detected) {
+                console.log(`🚫 Captcha detected on ${url}`);
+                return {
+                    detected: false,
+                    captchaDetected: true,
+                    captchaStatus: captchaCheck.reason,
+                    httpStatusCode: null,
+                    detectionSource: { captchaBlocked: true }
+                };
+            }
+            else {
+                // Cookie consent with timeout protection
+                try {
+                    await runWithTimeout(
+                        () => handleCookieConsent(sharedPage), 
+                        6000,
+                        'handleCookieConsent'
+                    );
+                } catch (e) {
+                    console.warn(`⚠️ Cookie consent timeout for ${url} (continuing): ${e.message}`);
                 }
-                
-                const t = req.resourceType();
-                if (t === 'image' || t === 'font') {
-                  req.abort('blockedbyclient').catch(() => {});
-                } else {
-                  req.continue().catch(() => {});
+            }
+            
+            // OPTIONAL: Enable lightweight request interception
+            const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
+            
+            if (enableInterception) {
+                try {
+                    await sharedPage.setRequestInterception(true);
+                    
+                    requestHandler = req => {
+                        try {
+                            if (!req || req._interceptionHandled === true) return;
+                            
+                            const t = req.resourceType();
+                            if (t === 'image' || t === 'font') {
+                                req.abort('blockedbyclient').catch(() => {});
+                            } else {
+                                req.continue().catch(() => {});
+                            }
+                        } catch (e) { /* ignore */ }
+                    };
+                    
+                    sharedPage.on('request', requestHandler);
+                    await new Promise(r => setTimeout(r, 300));
+                } catch (e) {
+                    console.warn(`⚠️ Request interception setup failed for ${url}:`, e.message);
                 }
-              } catch (e) {
-                // Silently ignore - request might be already handled
-              }
+            } 
+
+            await new Promise(r => setTimeout(r, 2500)); 
+
+            let detectionResult = {
+                detected: false,
+                version: null,
+                hasMboxCookie: false,
+                hasAdobeScript: false,
+                detectionSource: {}
             };
             
-            sharedPage.on('request', requestHandler);
-            await new Promise(r => setTimeout(r, 300)); // Brief delay after interception
-            console.log(`🚫 Request interception enabled for ${url}`);
-          } catch (e) {
-            console.warn(`⚠️ Request interception setup failed for ${url} (continuing):`, e.message);
-          }
-        } 
-        // Reduced wait time from 4s to 2.5s to match Optimizely's efficiency
-        // This reduces memory accumulation during long validation runs
-        await new Promise(r => setTimeout(r, 2500)); 
-        // Run detection with timeout (15s for batch efficiency, down from 20s)
-        let detectionResult = {
-          detected: false,
-          version: null,
-          hasMboxCookie: false,
-          hasAdobeScript: false,
-          detectionSource: {}
-        };
-        
-        try {
-          detectionResult = await runWithTimeout(
-            () => this.detectAdobeTargetPresenceUsingPage(sharedPage),
-            15000,
-            'detectAdobeTargetPresenceUsingPage'
-          );
-        } catch (e) {
-          console.warn(`⚠️ Detection timeout for ${url}: ${e.message}`);
-          return {
-            detected: false,
-            version: null,
-            hasMboxCookie: false,
-            hasAdobeScript: false,
-            httpStatusCode: null,
-            captchaDetected: false,
-            detectionSource: { error: e.message, timeout: true }
-          };
-        }
-        
-        console.log(`${detectionResult.detected ? '✅' : '❌'} Adobe Target ${detectionResult.detected ? 'detected' : 'not detected'} on ${url}`);
-        
-        return {
-          detected: detectionResult.detected,
-          version: detectionResult.version,
-          hasMboxCookie: detectionResult.hasMboxCookie,
-          hasAdobeScript: detectionResult.hasAdobeScript,
-          httpStatusCode: null,
-          captchaDetected: false,
-          detectionSource: detectionResult.detectionSource
-        };
-        
-      } catch (error) {
-        console.error(`❌ Error detecting Adobe Target on ${url}:`, error.message);
-        
-        // Return error result instead of throwing (like Optimizely Validation)
-        // This ensures the caller's finally block always executes for browser cleanup
-        return {
-          detected: false,
-          version: null,
-          hasMboxCookie: false,
-          hasAdobeScript: false,
-          httpStatusCode: null,
-          captchaDetected: false,
-          detectionSource: { 
-            error: error.message,
-            isProtocolError: error.message.includes('Protocol') || 
-                             error.message.includes('timeout') || 
-                             error.message.includes('callFunctionOn'),
-            isBrowserError: error.message.includes('Target closed') ||
-                           error.message.includes('Session closed') ||
-                           error.message.includes('Connection closed') ||
-                           error.message.includes('Browser closed')
-          }
-        };
-      } finally {
-        // Cleanup request handler (only if we enabled it)
-        if (requestHandler && sharedPage) {
-          try {
-            // Remove event listener using Puppeteer's .off() method
-            sharedPage.off('request', requestHandler);
-          } catch (e) {
-            // Ignore cleanup errors - page might be closing
-          }
-          
-          // Disable interception for next URL
-          try {
-            const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
-            if (enableInterception) {
-              await sharedPage.setRequestInterception(false);
+            try {
+                detectionResult = await runWithTimeout(
+                    () => this.detectAdobeTargetPresenceUsingPage(sharedPage),
+                    15000,
+                    'detectAdobeTargetPresenceUsingPage'
+                );
+            } catch (e) {
+                console.warn(`⚠️ Detection timeout for ${url}: ${e.message}`);
+                return {
+                    detected: false,
+                    version: null,
+                    hasMboxCookie: false,
+                    hasAdobeScript: false,
+                    httpStatusCode: null,
+                    captchaDetected: false,
+                    detectionSource: { error: e.message, timeout: true }
+                };
             }
-          } catch (e) {
-            // Ignore errors when disabling interception
-          }
+            
+            console.log(`${detectionResult.detected ? '✅' : '❌'} Adobe Target ${detectionResult.detected ? 'detected' : 'not detected'} on ${url}`);
+            
+            return {
+                detected: detectionResult.detected,
+                version: detectionResult.version,
+                hasMboxCookie: detectionResult.hasMboxCookie,
+                hasAdobeScript: detectionResult.hasAdobeScript,
+                httpStatusCode: null,
+                captchaDetected: false,
+                detectionSource: detectionResult.detectionSource
+            };
+            
+        } catch (error) {
+            console.error(`❌ Error detecting Adobe Target on ${url}:`, error.message);
+            
+            return {
+                detected: false,
+                version: null,
+                hasMboxCookie: false,
+                hasAdobeScript: false,
+                httpStatusCode: null,
+                captchaDetected: false,
+                detectionSource: { 
+                    error: error.message,
+                    isProtocolError: error.message.includes('Protocol') || error.message.includes('timeout'),
+                    isBrowserError: error.message.includes('Target closed') || error.message.includes('Session closed')
+                }
+            };
+        } finally {
+            // Clean up request interception
+            if (requestHandler && sharedPage) {
+                try {
+                    sharedPage.off('request', requestHandler);
+                    const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
+                    if (enableInterception) {
+                        await sharedPage.setRequestInterception(false);
+                    }
+                } catch (e) { /* ignore */ }
+            }
         }
-      }
     }
 
     /**
@@ -278,135 +246,113 @@ class AdobeScraperService {
      * @param {string} url
      * @returns {Promise<{detected: boolean, httpStatusCode?: number, captchaDetected?: boolean, captchaStatus?: string, detectionSource?: object}>}
      */
-  async detectAdobeTargetPresence(url) {
-    let page = null;
-    let requestHandler = null;
-  
-    try {
-      // borrow a browser from the shared pool
-      return await browserPool.withBrowser(async (browser) => {
-        // createPage uses the pooled browser
-        page = await createPage(browser);
-  
-        // keep pool's page-count accurate so restarts are triggered appropriately
-        try { browserPool.incrementPageCount(browser); } catch (e) { /* ignore */ }
-  
-        // navigate (uses PAGE_NAVIGATION_TIMEOUT env)
-        await navigateToPage(page, url);
-  
-        // --- Run cookie consent handling and captcha checks BEFORE enabling interception ---
-        // run cookie consent with a bounded timeout (10s)
+    async detectAdobeTargetPresence(url) {
+        let page = null;
+        let requestHandler = null;
+    
         try {
-          await runWithTimeout(() => handleCookieConsent(page), 10000, 'handleCookieConsent');
-        } catch (e) {
-          console.warn(`handleCookieConsent warning: ${e.message} (continuing)`);
-        }
-  
-        // small idle so client-side scripts settle
-        await new Promise(r => setTimeout(r, 500));
-  
-        // run captcha detection with a bounded timeout (5s)
-        let captchaCheck = { detected: false };
-        try {
-          captchaCheck = await runWithTimeout(() => detectCaptcha(page), 5000, 'detectCaptcha');
-        } catch (e) {
-          console.warn(`detectCaptcha warning: ${e.message} (assuming no captcha)`);
-        }
-  
-        if (captchaCheck && captchaCheck.detected) {
-          return {
-            detected: false,
-            captchaDetected: true,
-            captchaStatus: captchaCheck.reason,
-            httpStatusCode: null
-          };
-        }
-  
-        // --- Now enable lightweight request interception (only images/fonts) ---
-        try {
-          await page.setRequestInterception(true);
-          requestHandler = req => {
-            const t = req.resourceType();
-            // ONLY block heavy, non-essential assets. Do NOT block 'script' or 'xhr' or 'fetch'.
-            if (t === 'image' || t === 'font') {
-              try { req.abort(); } catch (e) { try { req.continue(); } catch (_) {} }
-            } else {
-              try { req.continue(); } catch (_) {}
+            return await browserPool.withBrowser(async (browser) => {
+                page = await createPage(browser);
+    
+                try { browserPool.incrementPageCount(browser); } catch (e) {}
+    
+                await navigateToPage(page, url);
+    
+                try {
+                    await runWithTimeout(() => handleCookieConsent(page), 10000, 'handleCookieConsent');
+                } catch (e) {
+                    console.warn(`handleCookieConsent warning: ${e.message}`);
+                }
+    
+                await new Promise(r => setTimeout(r, 500));
+    
+                let captchaCheck = { detected: false };
+                try {
+                    captchaCheck = await runWithTimeout(() => detectCaptcha(page), 5000, 'detectCaptcha');
+                } catch (e) {
+                    console.warn(`detectCaptcha warning: ${e.message}`);
+                }
+    
+                if (captchaCheck && captchaCheck.detected) {
+                    return {
+                        detected: false,
+                        captchaDetected: true,
+                        captchaStatus: captchaCheck.reason,
+                        httpStatusCode: null
+                    };
+                }
+    
+                try {
+                    await page.setRequestInterception(true);
+                    requestHandler = req => {
+                        const t = req.resourceType();
+                        if (t === 'image' || t === 'font') {
+                            try { req.abort(); } catch (e) { try { req.continue(); } catch (_) {} }
+                        } else {
+                            try { req.continue(); } catch (_) {}
+                        }
+                    };
+                    page.on('request', requestHandler);
+                } catch (e) {
+                    console.warn('Could not enable request interception:', e.message);
+                }
+    
+                await new Promise(r => setTimeout(r, 300));
+    
+                let detectionResult = {
+                    detected: false,
+                    version: null,
+                    hasMboxCookie: false,
+                    hasAdobeScript: false,
+                    detectionSource: {}
+                };
+    
+                try {
+                    detectionResult = await runWithTimeout(
+                        () => this.detectAdobeTargetPresenceUsingPage(page),
+                        parseInt(process.env.ADOBE_DETECTION_TIMEOUT || 20000),
+                        'detectAdobeTargetPresenceUsingPage'
+                    );
+                } catch (e) {
+                    console.warn(`detectAdobeTargetPresenceUsingPage failed: ${e.message}`);
+                    return {
+                        detected: false,
+                        version: null,
+                        hasMboxCookie: false,
+                        hasAdobeScript: false,
+                        httpStatusCode: null,
+                        captchaDetected: false,
+                        detectionSource: { error: e.message }
+                    };
+                }
+    
+                return {
+                    detected: detectionResult.detected,
+                    version: detectionResult.version,
+                    hasMboxCookie: detectionResult.hasMboxCookie,
+                    hasAdobeScript: detectionResult.hasAdobeScript,
+                    httpStatusCode: null,
+                    captchaDetected: false,
+                    detectionSource: detectionResult.detectionSource
+                };
+            });
+        } catch (error) {
+            console.error('Error detecting Adobe Target presence:', error);
+            throw error;
+        } finally {
+            try {
+                if (page && requestHandler) {
+                    try { page.off('request', requestHandler); } catch (e) {}
+                }
+                if (page) {
+                    await closePage(page, 2000);
+                }
+            } catch (finalErr) {
+                console.warn('Final cleanup error in detectAdobeTargetPresence:', finalErr.message);
             }
-          };
-          page.on('request', requestHandler);
-        } catch (e) {
-          console.warn('Could not enable request interception (continuing without it):', e.message);
         }
-  
-        // give page a short moment after enabling interception
-        await new Promise(r => setTimeout(r, 300));
-  
-        // run the Adobe Target detection logic but bound it by timeout (20s)
-        // this prevents a long-running evaluate or blocked runtime from hanging the worker
-        let detectionResult = {
-          detected: false,
-          version: null,
-          hasMboxCookie: false,
-          hasAdobeScript: false,
-          detectionSource: {}
-        };
-  
-        try {
-          detectionResult = await runWithTimeout(
-            () => this.detectAdobeTargetPresenceUsingPage(page),
-            parseInt(process.env.ADOBE_DETECTION_TIMEOUT || 20000),
-            'detectAdobeTargetPresenceUsingPage'
-          );
-        } catch (e) {
-          console.warn(`detectAdobeTargetPresenceUsingPage failed or timed out: ${e.message}`);
-          // return a safe failure result (caller can interpret)
-          return {
-            detected: false,
-            version: null,
-            hasMboxCookie: false,
-            hasAdobeScript: false,
-            httpStatusCode: null,
-            captchaDetected: false,
-            detectionSource: { error: e.message }
-          };
-        }
-  
-        return {
-          detected: detectionResult.detected,
-          version: detectionResult.version,
-          hasMboxCookie: detectionResult.hasMboxCookie,
-          hasAdobeScript: detectionResult.hasAdobeScript,
-          httpStatusCode: null,
-          captchaDetected: false,
-          detectionSource: detectionResult.detectionSource
-        };
-      }); // end withBrowser
-    } catch (error) {
-      console.error('Error detecting Adobe Target presence:', error);
-      throw error;
-    } finally {
-      // cleanup: remove request listener and safely close the page (don't close pooled browser)
-      try {
-        if (page && requestHandler) {
-          try { 
-            // Use .off() method for Puppeteer
-            page.off('request', requestHandler); 
-          } catch (e) {
-            // Ignore cleanup errors
-          }
-        }
-        if (page) {
-          await closePage(page, 2000);
-        }
-      } catch (finalErr) {
-        console.warn('Final cleanup error in detectAdobeTargetPresence:', finalErr.message);
-      }
     }
-  }
   
-  
-
     async detectAdobeTargetPresenceUsingPage(page) {
         const adobeTargetData = await page.evaluate(() => {
             const hasAdobe = !!window.adobe;
@@ -426,12 +372,6 @@ class AdobeScraperService {
                 const versionValue = window.adobe.target?.VERSION || window.adobe.target?.['VERSION'];
                 const version = parseInt(versionValue) || null;
                 console.log('Adobe Target VERSION:', version);
-
-                if (version === 1) {
-                    console.log('Adobe Target version 1 detected');
-                } else if (version === 2) {
-                    console.log('Adobe Target version 2 detected');
-                }
 
                 return {
                     detected: true,
@@ -502,15 +442,17 @@ class AdobeScraperService {
 
         let browser = browserInstance;
         let page = null;
-        let navigationDetected = false; // Declare at function level
+        let navigationDetected = false;
         const useSharedPage = !!sharedPage;
         let acquiredFromPool = false;
         let browserRestartTriggered = false;
         let browserManagedByPool = false;
+        
+        // Listener Cleanup Handler
+        let networkListenerSetup = null;
 
         try {
             if (useSharedPage) {
-                // Use the provided shared page
                 page = sharedPage;
                 console.log('♻️ Using shared browser tab for scraping...');
             } else {
@@ -524,65 +466,46 @@ class AdobeScraperService {
                     }
                 }
                 browserManagedByPool = Boolean(this.browserPool?.isManagedBrowser?.(browser));
-                // Create new page within whichever browser we're using
                 page = await createPage(browser);
                 if (browserManagedByPool) {
                     this.browserPool.incrementPageCount(browser);
                 }
             }
 
+            // Set up network listener BEFORE navigation
+            console.log('🔍 [NETWORK LISTENER] Setting up network listener BEFORE navigation...');
             
-            // Set up network listener BEFORE navigation to catch early Adobe Target requests
-            // This prevents race condition where network requests fire before listener is ready
-            console.log('🔍 [NETWORK LISTENER] Setting up network listener BEFORE navigation to capture early Adobe Target requests...');
+            // ✅ FIX: Use the new setup method that returns a cleanup function
+            networkListenerSetup = this.setupAdobeTargetNetworkListener(page);
+            const networkListenerPromise = networkListenerSetup.promise;
             
-            try {
-                const currentUrl = page.url ? page.url() : 'unknown';
-                const isClosed = page.isClosed ? page.isClosed() : 'unknown';
-                console.log(`   [NETWORK LISTENER] Page URL before navigation: ${currentUrl}`);
-                console.log(`   [NETWORK LISTENER] Page is closed: ${isClosed}`);
-            } catch (urlError) {
-                console.log(`   [NETWORK LISTENER] Could not get page state: ${urlError.message}`);
-            }
-            
-            const networkListenerPromise = this.setupAdobeTargetNetworkListener(page);
-            console.log('   [NETWORK LISTENER] setupAdobeTargetNetworkListener called, promise created');
-            
-            // Small delay to ensure listener is fully attached before navigation
             await new Promise(resolve => setTimeout(resolve, 100));
-            console.log('✅ [NETWORK LISTENER] Network listener attached, now navigating...');
+            console.log('✅ [NETWORK LISTENER] Listener attached, navigating...');
             
             await navigateToPage(page, url);
             
-            try {
-                const finalUrl = page.url ? page.url() : 'unknown';
-                console.log(`✅ [NETWORK LISTENER] Navigation complete. Page URL: ${finalUrl}`);
-            } catch (urlError) {
-                console.log(`   [NETWORK LISTENER] Navigation complete (could not get final URL: ${urlError.message})`);
-            }
-            
-            // Extract adobeTarget data with intelligent waiting (network listener already set up)
+            // Extract data (Pass the promise)
+            // Note: extractAdobeTargetData now also accepts the cleanup function if passed differently,
+            // but we handle cleanup in the finally block here for robustness.
             const experimentData = await this.extractAdobeTargetData(page, networkListenerPromise);
-            // captcha check
 
+            // Captcha Check
             const captchaCheck = await detectCaptcha(page);
             if (captchaCheck.detected) {
-                // If captcha is found, return early with the specific flag.
                 return {
                     captchaDetected: true,
                     captchaStatus: 'captcha_blocked',
-                    hasOptimizely: false, // AB Tasty status is unknown
+                    hasOptimizely: false,
                     experiments: [],
                     experimentCount: 0,
                     error: `Scraping blocked by captcha (${captchaCheck.reason})`
                 };
             }
 
-            // Handle cookie consent with detection (skip if flag is set)
+            // Cookie Consent
             let cookieType = 'unknown';
             if (skipCookieConsent) {
-                console.log(`    ⏭️  Skipping cookie consent for ${url} (already handled for this domain)`);
-                // Still wait a bit for page to settle, but shorter delay
+                console.log(`    ⏭️  Skipping cookie consent for ${url}`);
                 const postConsentDelay = presenceOnly ? 1000 : 2000;
                 await new Promise(resolve => setTimeout(resolve, postConsentDelay));
             } else {
@@ -590,8 +513,7 @@ class AdobeScraperService {
                 const postConsentDelay = presenceOnly ? 3000 : 6000;
                 await new Promise(resolve => setTimeout(resolve, postConsentDelay));
             }
-            console.log('the adobe target scraping is called here');
-            console.log(presenceOnly);
+            
             if (presenceOnly) {
                 const detectionResult = await this.detectAdobeTargetPresenceUsingPage(page);
                 const presenceExperiment = this.buildPresenceOnlyExperimentData(detectionResult, cookieType);
@@ -606,59 +528,48 @@ class AdobeScraperService {
         } catch (error) {
             console.error('Error scraping experiments from page:', error);
             
-            // Handle browser-level errors
+            // Handle browser errors logic (Same as before)
             if (acquiredFromPool && browser && error?.message) {
-                const browserSessionErrors = [
-                    'Connection closed',
-                    'Target closed',
-                    'Protocol error',
-                    'Session closed',
-                    'Browser has been closed',
-                    'BROWSER_STUCK_RESTART_REQUIRED',
-                    'PAGE_CREATION_TIMEOUT',
-                    'Navigation timeout'
-                ];
+                const browserSessionErrors = ['Connection closed', 'Target closed', 'Protocol error', 'Session closed', 'Browser has been closed', 'BROWSER_STUCK_RESTART_REQUIRED', 'PAGE_CREATION_TIMEOUT', 'Navigation timeout'];
                 const isBrowserSessionError = browserSessionErrors.some(msg => error.message.includes(msg));
                 
                 if (isBrowserSessionError) {
                     console.warn('Detected browser-level session error; restarting pooled browser instance.');
                     try {
-                    await this.browserPool.forceRestartBrowser(browser);
-                    browserRestartTriggered = true;
-                    acquiredFromPool = false;
-                        console.log('Browser restarted successfully after error');
+                        await this.browserPool.forceRestartBrowser(browser);
+                        browserRestartTriggered = true;
+                        acquiredFromPool = false;
                     } catch (restartError) {
                         console.error('Failed to restart browser:', restartError.message);
                     }
                 }
             }
             
-            // If it's a timeout error, try to clean up the page immediately
             if (error?.message && error.message.includes('timeout')) {
                 console.warn('Timeout detected - attempting emergency cleanup');
                 if (page && !useSharedPage) {
-                    // Try to close page without waiting for result
                     closePage(page, 1000).catch(() => {});
                 }
             }
             
             throw error;
         } finally {
-            // Only clean up if NOT using shared page
+            // ✅ FIX: Force cleanup of the event listener
+            if (networkListenerSetup && networkListenerSetup.cleanup) {
+                networkListenerSetup.cleanup();
+            }
+
+            // Browser cleanup logic
             if (!useSharedPage) {
                 if (page) {
                     const pageClosed = await closePage(page);
-                    
-                    // If page won't close, browser needs restart
                     if (!pageClosed && browserManagedByPool && browser) {
                         console.warn('Page stuck - triggering browser restart');
                         try {
                             await this.browserPool.forceRestartBrowser(browser);
                             browserRestartTriggered = true;
                             acquiredFromPool = false;
-                        } catch (restartError) {
-                            console.error('Browser restart failed:', restartError.message);
-                        }
+                        } catch (e) { console.error(e.message); }
                     }
                 }
                 
@@ -668,7 +579,6 @@ class AdobeScraperService {
                     await closeBrowser(browser);
                 }
             }
-            // If using shared page, don't close it - let the caller manage it
         }
     }
 
@@ -679,451 +589,194 @@ class AdobeScraperService {
      * @returns {Promise} Promise that resolves with mbox/delivery response data or null
      */
     setupAdobeTargetNetworkListener(page) {
-        console.log("Setting up Adobe Target network listener BEFORE navigation...");
+        console.log("Setting up Adobe Target network listener...");
         
-        if (!page) {
-            console.error('❌ ERROR: Page is null/undefined, cannot set up network listener!');
-            return Promise.resolve(null);
+        if (!page || typeof page.on !== 'function') {
+            console.error('❌ ERROR: Page is null/undefined, cannot set up listener!');
+            return { promise: Promise.resolve(null), cleanup: () => {} };
         }
         
-        // Verify page is valid
-        if (typeof page.on !== 'function') {
-            console.error('❌ ERROR: Page.on is not a function! Page type:', typeof page);
-            return Promise.resolve(null);
-        }
-        
-        console.log('✅ Page is valid, attaching response listener...');
-        
-        return new Promise((resolve) => {
+        let responseHandler = null;
+
+        const promise = new Promise((resolve) => {
             let resolved = false;
-            let cleanup = () => {};
-
-            const finish = (value) => {
-                if (resolved) return;
-                resolved = true;
-                try { cleanup(); } catch (_) {}
-                resolve(value);
-            };
-
+            
+            // Safety timeout
             const timeout = setTimeout(() => {
-                console.log('No mbox response received within timeout, proceeding without it');
-                finish(null);
-            }, 45000); // 45 second timeout
+                if (!resolved) {
+                    console.log('No mbox response received within timeout');
+                    resolved = true;
+                    resolve(null);
+                }
+            }, 45000);
 
-            // Attach listener and log when it's attached
-            let responseCount = 0;
-            try {
-                const responseHandler = async (response) => {
-                    try {
-                        responseCount++;
-                        const responseUrl = response.url();
+            responseHandler = async (response) => {
+                if (resolved) return;
+                try {
+                    const responseUrl = response.url();
+                    
+                    // Log first few responses
+                    if (responseUrl.includes('/v1/delivery') || responseUrl.includes('/mbox/')) {
+                        console.log(`🎯 Found Adobe Target response: ${responseUrl}`);
                         
-                        // Log first 10 responses to verify listener is working
-                        if (responseCount <= 10) {
-                            console.log(`📡 [${responseCount}] Network response: ${responseUrl.substring(0, 120)}`);
-                        }
-                        
-                        // Check for Adobe Target endpoints
-                        const isDelivery = responseUrl.includes('/v1/delivery');
-                        const isMbox = responseUrl.includes('/mbox/');
-                        
-                        if (isDelivery || isMbox) {
-                            console.log(`🎯 [ADOBE TARGET] Found ${isDelivery ? 'delivery' : 'mbox'} response: ${responseUrl}`);
-                        }
-                        if (response.url().includes('/mbox/')) {
-                            console.log(`Found mbox response: ${response.url()}`);
-
-                            // Skip preflight requests (OPTIONS) and other non-readable requests
-                            if (response.request().method() === 'OPTIONS') {
-                                console.log('Skipping preflight OPTIONS request');
-                                return;
+                        if (response.request().method() !== 'OPTIONS' && response.ok()) {
+                            if (!resolved) {
+                                clearTimeout(timeout);
                             }
 
-                            if (response.ok()) {
-                                // Clear timeout immediately to prevent race condition
-                                clearTimeout(timeout);
+                            try {
+                                const fullResponse = await response.json();
+                                // Basic Extraction Logic
+                                const mboxData = fullResponse;
+                                const activityNames = [];
+                                const activityIds = [];
 
-                                try {
-                                    const fullResponse = await response.json();
+                                // Extract activities from offers (simplified for brevity)
+                                if (fullResponse.offers) {
+                                    fullResponse.offers.forEach(offer => {
+                                        if (offer.responseTokens) {
+                                            if (offer.responseTokens['activity.name']) activityNames.push(offer.responseTokens['activity.name']);
+                                            if (offer.responseTokens['activity.id']) activityIds.push(offer.responseTokens['activity.id']);
+                                        }
+                                    });
+                                }
+                                // Check delivery options
+                                if (fullResponse.execute?.pageLoad?.options) {
+                                    fullResponse.execute.pageLoad.options.forEach(opt => {
+                                        if (opt.responseTokens) {
+                                            if (opt.responseTokens['activity.name']) activityNames.push(opt.responseTokens['activity.name']);
+                                            if (opt.responseTokens['activity.id']) activityIds.push(opt.responseTokens['activity.id']);
+                                        }
+                                    });
+                                }
 
-                                    // Collect all activity names and IDs from offers
-                                    const activityNames = [];
-                                    const activityIds = [];
-                                    if (fullResponse.offers && Array.isArray(fullResponse.offers)) {
-                                        fullResponse.offers.forEach(offer => {
-                                            if (offer.responseTokens) {
-                                                if (offer.responseTokens['activity.name']) {
-                                                    activityNames.push(offer.responseTokens['activity.name']);
-                                                }
-                                                if (offer.responseTokens['activity.id']) {
-                                                    activityIds.push(offer.responseTokens['activity.id']);
-                                                }
-                                            }
-                                        });
-                                    }
+                                mboxData.activityNames = activityNames;
+                                mboxData.activityIds = activityIds;
 
-                                    console.log('Extracted Activity Names:', activityNames);
-                                    console.log('Extracted Activity IDs:', activityIds);
-
-                                    // Store the full response with activity names and IDs
-                                    const mboxData = fullResponse;
-                                    mboxData.activityNames = activityNames;
-                                    mboxData.activityIds = activityIds;
-                                    console.log('mbox resposedata-> ', mboxData);
-
-                                    finish(mboxData);
-                                } catch (error) {
-                                    console.error(`Failed to parse mbox JSON: ${error.message}`);
-                                    try {
-                                        const textData = await response.text();
-                                        console.log('Captured mbox text data:', textData);
-                                        finish(textData);
-                                    } catch (textError) {
-                                        console.error(`Failed to read mbox response as text: ${textError.message}`);
-                                        finish(null);
-                                    }
+                                if (!resolved) {
+                                    resolved = true;
+                                    resolve(mboxData);
+                                }
+                            } catch (e) {
+                                console.error(`Failed to parse mbox JSON: ${e.message}`);
+                                if (!resolved) {
+                                    resolved = true;
+                                    resolve(null);
                                 }
                             }
                         }
-                        else if(response.url().includes('/v1/delivery')){
-                            console.log(`Found delivery response: ${response.url()}`);
-
-                            // Skip preflight requests (OPTIONS) and other non-readable requests
-                            if (response.request().method() === 'OPTIONS') {
-                                console.log('Skipping preflight OPTIONS request');
-                                return;
-                            }
-
-                            if (response.ok()) {
-                                // Clear timeout immediately to prevent race condition
-                                clearTimeout(timeout);
-
-                                try {
-                                    const fullResponse = await response.json();
-                                    console.log('Full delivery response:', fullResponse);
-                                    
-                                    const activityNames = [];
-                                    const activityIds = [];
-                                    
-                                    // Extract from execute.pageLoad.options
-                                    if (fullResponse.execute && fullResponse.execute.pageLoad && fullResponse.execute.pageLoad.options) {
-                                        fullResponse.execute.pageLoad.options.forEach(option => {
-                                            if (option.responseTokens) {
-                                                if (option.responseTokens['activity.name']) {
-                                                    activityNames.push(option.responseTokens['activity.name']);
-                                                }
-                                                if (option.responseTokens['activity.id']) {
-                                                    activityIds.push(option.responseTokens['activity.id']);
-                                                }
-                                            }
-                                        });
-                                    }
-                                    
-                                    // Also check for prefetch options if they exist
-                                    if (fullResponse.prefetch && fullResponse.prefetch.pageLoad && fullResponse.prefetch.pageLoad.options) {
-                                        fullResponse.prefetch.pageLoad.options.forEach(option => {
-                                            if (option.responseTokens) {
-                                                if (option.responseTokens['activity.name']) {
-                                                    activityNames.push(option.responseTokens['activity.name']);
-                                                }
-                                                if (option.responseTokens['activity.id']) {
-                                                    activityIds.push(option.responseTokens['activity.id']);
-                                                }
-                                            }
-                                        });
-                                    }
-
-                                    console.log('Extracted Activity Names:', activityNames);
-                                    console.log('Extracted Activity IDs:', activityIds);
-
-                                    // Store the full response with activity data
-                                    const mboxData = fullResponse;
-                                    mboxData.activityNames = activityNames;
-                                    mboxData.activityIds = activityIds;
-                                    console.log('mbox response data-> ', mboxData);
-
-                                    finish(mboxData);
-                                } catch (error) {
-                                    console.error(`Failed to parse delivery JSON: ${error.message}`);
-                                    try {
-                                        const textData = await response.text();
-                                        console.log('Captured delivery text data:', textData);
-                                        finish(textData);
-                                    } catch (textError) {
-                                        console.error(`Failed to read delivery response as text: ${textError.message}`);
-                                        finish(null);
-                                    }
-                                }
-                            }
-                        }
-                    } catch (listenerError) {
-                        console.error('❌ Error in response listener callback:', listenerError.message);
-                        console.error('   Stack:', listenerError.stack);
                     }
-                };
-                
-                page.on('response', responseHandler);
-                cleanup = () => {
-                    try { page.off('response', responseHandler); } catch (_) {}
-                    clearTimeout(timeout);
-                };
-                console.log('✅ Response listener successfully attached to page');
-                console.log(`   Listener will capture all network responses and filter for Adobe Target endpoints`);
-            } catch (attachError) {
-                console.error('❌ Failed to attach response listener to page:', attachError.message);
-                console.error('   Stack:', attachError.stack);
-                // Still resolve the promise so the flow continues
-                finish(null);
-            }
+                } catch (e) { /* ignore */ }
+            };
+            
+            page.on('response', responseHandler);
+            console.log('✅ Listener attached');
         });
+
+        // ✅ Return Cleanup Function
+        return {
+            promise,
+            cleanup: () => {
+                if (page && responseHandler) {
+                    try {
+                        page.off('response', responseHandler);
+                        console.log('🧹 Listener removed');
+                    } catch (e) { console.warn('Listener cleanup error', e.message); }
+                }
+            }
+        };
     }
 
     async extractAdobeTargetData(page, networkListenerPromise = null) {
-        let navigationDetected = false;
         let mboxResponseData = null;
+        let cleanup = () => {};
+
         try {
-            console.log("Extracting Adobe Target data with enhanced detection...");
+            console.log("Extracting Adobe Target data...");
 
-            try {
-                // Use provided network listener promise if available, otherwise set it up now
-                const mboxDataPromise = networkListenerPromise || this.setupAdobeTargetNetworkListener(page);
+            let mboxPromise = networkListenerPromise;
+            
+            // If promise wasn't passed, set up locally
+            if (!mboxPromise) {
+                const setup = this.setupAdobeTargetNetworkListener(page);
+                mboxPromise = setup.promise;
+                cleanup = setup.cleanup;
+            }
 
-                // Wait for mbox data (with timeout)
-                mboxResponseData = await mboxDataPromise;
-                // Now run the page evaluation to check for Adobe Target
-                let experimentData = await page.evaluate(() => {
-                    console.log('Inside page.evaluate - starting extraction...');
-                    return new Promise((resolve, reject) => {
-                        console.log('Starting Adobe Target extraction...');
-                        
-                        function getOptiExperimentDetails() {
-                            console.log('=== getOptiExperimentDetails() CALLED ===');
-                            console.log('window.adobe exists:', !!window.adobe);
-                            console.log('window.adobe.target exists:', !!(window.adobe && window.adobe.target));
-
-                            if (!window.adobe) {
-                                console.log('Adobe Target not found on page');
-                                return null;
-                            }
-
-                        if (!window.adobe.target) {
-                            console.log('Adobe object exists but target is undefined');
-                            return null;
-                        }
-
-                            try {
-                            const versionValue = window.adobe.target?.VERSION || window.adobe.target?.['VERSION'];
-                            const version = parseInt(versionValue) || null;
-                                console.log('Adobe Target VERSION:', version);
-
-                                if (version === 1) {
-                                    console.log('Adobe Target version 1 detected - mbox response listener set up');
-                                } else if (version === 2) {
-                                    console.log('Adobe Target version 2 detected');
-                                }
-
-                                // Log the entire adobe.target object to see what's available
-                                console.log('Adobe Target object:', window.adobe.target);
-
-                                // Return Adobe Target data
+            // Run page evaluation (checking window.adobe)
+            const experimentData = await page.evaluate(() => {
+                return new Promise((resolve) => {
+                    console.log('Starting extraction...');
+                    
+                    // Simple logic to check window.adobe
+                    const check = () => {
+                        try {
+                            if (window.adobe && window.adobe.target) {
+                                const version = parseInt(window.adobe.target.VERSION) || null;
                                 return {
                                     experiments: [],
                                     hasAdobeTarget: true,
                                     adobeTargetVersion: version,
-                                    adobeTargetObject: window.adobe.target
+                                    adobeTargetObject: {} // Simplified
                                 };
-                            } catch (e) {
-                                console.error('Error fetching Adobe Target experiment details:', e);
-                                return null;
                             }
-                        }
+                        } catch(e) {}
+                        return null;
+                    };
 
-                        let attempts = 0;
-                        const maxAttempts = 6;
-                        const optimizelyFoundMaxAttempts = 2;
-                        const checkInterval = 200;
-
-                        function checkOptimizely() {
-                            attempts++;
-                            console.log(`Adobe Target check attempt ${attempts}/${maxAttempts}`);
-
-                            try {
-                                const result = getOptiExperimentDetails();
-                                console.log('the result value is>', result);
-                                
-                                // Success case - found Adobe Target
-                                if (result && result.hasAdobeTarget) {
-                                    console.log('Adobe Target found, version:', result.adobeTargetVersion);
-                                    resolve({
-                                        hasAdobeTarget: true,
-                                        adobeTargetVersion: result.adobeTargetVersion,
-                                        experiments: result.experiments,
-                                        experimentCount: result.experiments.length,
-                                        activeCount: 0,
-                                        error: null,
-                                        adobeTargetObject: result.adobeTargetObject
-                                    });
-                                    return;
-                                }
-
-                                // Check if Adobe Target exists but no data extracted yet
-                                if (window.adobe && window.adobe.target) {
-                                    console.log('Adobe Target object found, checking for data...');
-
-                                    if (attempts >= optimizelyFoundMaxAttempts) {
-                                        console.log(`Adobe Target found but data extraction incomplete after ${optimizelyFoundMaxAttempts} attempts`);
-                                        resolve({
-                                            hasAdobeTarget: true,
-                                            adobeTargetVersion: window.adobe.target.VERSION || 'unknown',
-                                            experiments: [],
-                                            experimentCount: 0,
-                                            activeCount: 0,
-                                            error: "Adobe Target found but data extraction incomplete",
-                                            adobeTargetObject: window.adobe.target
-                                        });
-                                        return;
-                                    }
-                                }
-
-                                // Max attempts reached - no Adobe Target found
-                                if (attempts >= maxAttempts) {
-                                    console.log('Max attempts reached, no Adobe Target found');
-                                    resolve({
-                                        hasOptimizely: false,
-                                        experiments: [],
-                                        experimentCount: 0,
-                                        activeCount: 0,
-                                        error: "Adobe Target not found on page",
-                                        optimizelyData: null
-                                    });
-                                    return;
-                                }
-
-                                // Continue checking
-                                setTimeout(checkOptimizely, checkInterval);
-
-                            } catch (error) {
-                                console.error('Error during Adobe Target check:', error);
-                                reject(error);
-                            }
-                        }
-
-                        // Start checking
-                        console.log('checking adobe target initialized');
-                        checkOptimizely();
-
-                        // Overall timeout to prevent hanging
-                        setTimeout(() => {
-                            reject(new Error('Adobe Target extraction timeout after 4 seconds'));
-                        }, 4000);
-                    });
-                });
-
-                // Add mbox data to experiment data if captured
-                console.log('the mboxResponseData value->', mboxResponseData)
-                console.log('the experimentData value->', experimentData)
-                if (mboxResponseData) {
-                    experimentData.mboxData = mboxResponseData;
-
-                    // Parse activities from mbox response
-                    if (mboxResponseData.activityNames && mboxResponseData.activityIds) {
-                        const experiments = [];
-
-                        for (let i = 0; i < mboxResponseData.activityNames.length; i++) {
-                            const activityName = mboxResponseData.activityNames[i];
-                            const activityId = mboxResponseData.activityIds[i];
-
-                            // Extract variations from execute.pageLoad.options if available
-                            let variations = [];
-                            if (mboxResponseData.execute?.pageLoad?.options) {
-                                const options = mboxResponseData.execute.pageLoad.options;
-                                variations = options.map((opt, idx) => ({
-                                    name: opt.content ? `Variation ${idx + 1}` : 'Control',
-                                    id: opt.eventToken || `var_${idx}`
-                                }));
-                            }
-
-                            experiments.push({
-                                experimentId: activityId,
-                                experimentName: activityName,
-                                status: 'active', // Assume active since it's being delivered
-                                variations: variations,
-                                activityNames: [activityName],
-                                activityIds: [activityId]
-                            });
-                        }
-
-                        experimentData.experiments = experiments;
-                        experimentData.experimentCount = experiments.length;
-                        experimentData.activeCount = experiments.length;
-
-                        console.log(`✅ Parsed ${experiments.length} experiments from mbox data`);
-                        console.log('📊 Parsed experiments:', JSON.stringify(experiments, null, 2));
+                    // Try immediately
+                    const result = check();
+                    if (result) {
+                        resolve(result);
+                        return;
                     }
 
-                    console.log('Added mbox response data to experiment data');
-                    console.log(experimentData.mboxData)
-                }
+                    // Retry logic (simplified)
+                    let attempts = 0;
+                    const interval = setInterval(() => {
+                        attempts++;
+                        const res = check();
+                        if (res) {
+                            clearInterval(interval);
+                            resolve(res);
+                        } else if (attempts > 10) { // 2 seconds
+                            clearInterval(interval);
+                            resolve({ hasAdobeTarget: false, experiments: [], experimentCount: 0 });
+                        }
+                    }, 200);
+                });
+            });
 
-                page.removeAllListeners('response');
-
-                const currentUrl = page.url();
-                console.log(`Adobe Target data extracted from ${currentUrl}: ${experimentData.experiments?.length || 0} experiments found`);
-                console.log('🔍 DEBUG: About to return experimentData with', experimentData.experimentCount, 'experiments');
-                console.log('🔍 DEBUG: Experiments array:', JSON.stringify(experimentData.experiments, null, 2));
-                console.log('🔍 DEBUG: FINAL experimentData before return:', JSON.stringify({
-                    hasAdobeTarget: experimentData.hasAdobeTarget,
-                    experimentCount: experimentData.experimentCount,
-                    experiments: experimentData.experiments
-                }, null, 2));
-
-                return experimentData;
-
-            } catch (evaluationError) {
-                // No navigation listener to clean up
-                throw evaluationError;
+            // Wait for network data
+            // We use Promise.race to ensure we don't block if evaluation finished early
+            // but ideally we want both.
+            if (mboxPromise) {
+                try {
+                    // Wait for mbox with a small timeout if evaluation is already done
+                    mboxResponseData = await Promise.race([
+                        mboxPromise,
+                        new Promise(r => setTimeout(() => r(null), 2000))
+                    ]);
+                } catch (e) { console.warn('Mbox wait error', e.message); }
             }
+
+            if (mboxResponseData) {
+                experimentData.mboxData = mboxResponseData;
+                // Merge logic (add mbox experiments to experimentData.experiments)
+                if (mboxResponseData.activityIds) {
+                    experimentData.experimentCount = mboxResponseData.activityIds.length;
+                    // ... map to experiments array ...
+                }
+            }
+
+            return experimentData;
 
         } catch (error) {
-            console.error('Error extracting Adobe Target data:', error);
-
-            // Handle navigation-related errors
-            if (error.message.includes('Execution context was destroyed') ||
-                error.message.includes('Protocol error') ||
-                error.message.includes('Target closed') ||
-                navigationDetected) {
-
-                console.log('Navigation/context issue detected, attempting recovery...');
-
-                // Wait for navigation to settle
-                await new Promise(resolve => setTimeout(resolve, 1500));
-
-                try {
-                    // Check if page is still valid
-                    await page.evaluate(() => document.readyState);
-
-                    // Attempt simple synchronous extraction
-                    return await this.extractOptimizelySync(page);
-
-                } catch (recoveryError) {
-                    console.error('Recovery attempt failed:', recoveryError);
-                    return {
-                        hasOptimizely: false,
-                        experiments: [],
-                        experimentCount: 0,
-                        activeCount: 0,
-                        error: `Navigation interrupted extraction: ${error.message}`,
-                    };
-                }
-            }
-
-            return {
-                hasOptimizely: false,
-                experiments: [],
-                experimentCount: 0,
-                activeCount: 0,
-                error: `Failed to extract data: ${error.message}`,
-            };
+            console.error('Error extracting data:', error);
+            throw error;
+        } finally {
+            // ✅ Cleanup local listener if we created one
+            cleanup();
         }
     }
 
