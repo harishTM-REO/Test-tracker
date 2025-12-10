@@ -259,6 +259,7 @@ class AdobeScraperService {
 
     /**
      * Lightweight detector to quickly determine if Adobe Target is present on a page
+     * ✅ FIX: Re-throws fatal browser errors so the Pool knows to restart the browser
      */
     async detectAdobeTargetPresence(url) {
         let page = null;
@@ -269,33 +270,26 @@ class AdobeScraperService {
                 page = await createPage(browser);
     
                 try { browserPool.incrementPageCount(browser); } catch (e) {}
-    
-                // Pre-flight: avoid navigation when TLS/cert errors are detected
+
+                // Pre-flight check
                 try {
                     const preflightCheck = await httpCheck(url, 4000);
                     const certIssue = preflightCheck.error && preflightCheck.error.toLowerCase().includes('cert');
-                    if (!preflightCheck.isValid && certIssue) {
-                        console.warn(`⚠️  Pre-flight certificate issue for ${url}: ${preflightCheck.error}`);
-                        return {
+                    if (!preflightCheck.isValid && (certIssue || !preflightCheck.status)) {
+                         console.warn(`⚠️ Pre-flight issue for ${url}: ${preflightCheck.error}`);
+                         return {
                             detected: false,
                             version: null,
                             hasMboxCookie: false,
                             hasAdobeScript: false,
-                            httpStatusCode: preflightCheck.status || null,
-                            captchaDetected: false,
-                            detectionSource: {
-                                error: 'certificate_error',
-                                details: preflightCheck.error,
-                                preflightCheck: true
-                            }
+                            detectionSource: { error: preflightCheck.error || 'preflight_failed' }
                         };
                     }
-                } catch (e) {
-                    console.warn(`⚠️  Reachability pre-check failed for ${url}: ${e.message}`);
-                }
-
+                } catch(e) { /* ignore */ }
+    
                 await navigateToPage(page, url);
     
+                // Cookie Consent
                 try {
                     await runWithTimeout(() => handleCookieConsent(page), 10000, 'handleCookieConsent');
                 } catch (e) {
@@ -304,11 +298,14 @@ class AdobeScraperService {
     
                 await new Promise(r => setTimeout(r, 500));
     
+                // Captcha
                 let captchaCheck = { detected: false };
                 try {
                     captchaCheck = await runWithTimeout(() => detectCaptcha(page), 5000, 'detectCaptcha');
                 } catch (e) {
                     console.warn(`detectCaptcha warning: ${e.message}`);
+                    // 🚨 CHECK FOR FATAL ERROR IN CAPTCHA
+                    if (e.message.includes('Protocol error') || e.message.includes('closed')) throw e;
                 }
     
                 if (captchaCheck && captchaCheck.detected) {
@@ -320,6 +317,7 @@ class AdobeScraperService {
                     };
                 }
     
+                // Request Interception
                 try {
                     await page.setRequestInterception(true);
                     requestHandler = req => {
@@ -333,6 +331,10 @@ class AdobeScraperService {
                     page.on('request', requestHandler);
                 } catch (e) {
                     console.warn('Could not enable request interception:', e.message);
+                    // 🚨 CRITICAL: If this fails, the browser is likely dead. Throw!
+                    if (e.message.includes('Protocol') || e.message.includes('timed out')) {
+                        throw new Error(`Browser Critical Failure (Interception): ${e.message}`);
+                    }
                 }
     
                 await new Promise(r => setTimeout(r, 300));
@@ -353,6 +355,16 @@ class AdobeScraperService {
                     );
                 } catch (e) {
                     console.warn(`detectAdobeTargetPresenceUsingPage failed: ${e.message}`);
+                    
+                    // 🚨 CRITICAL: Check if this timeout was caused by a dead browser
+                    const fatalErrors = [
+                        'Protocol error', 'Target closed', 'Session closed', 
+                        'Runtime.callFunctionOn', 'context was destroyed'
+                    ];
+                    if (fatalErrors.some(err => e.message.includes(err))) {
+                        throw e; // Re-throw to trigger Pool Restart
+                    }
+
                     return {
                         detected: false,
                         version: null,
@@ -375,8 +387,20 @@ class AdobeScraperService {
                 };
             });
         } catch (error) {
-            console.error('Error detecting Adobe Target presence:', error);
-            throw error;
+            console.error('Error detecting Adobe Target presence:', error.message);
+            
+            // Re-throw if it's a browser error so the caller knows it failed hard
+            const isFatal = error.message.includes('Browser') || 
+                            error.message.includes('Protocol') || 
+                            error.message.includes('closed');
+            
+            if (isFatal) throw error;
+
+            // Otherwise return safe error object
+            return {
+                 detected: false,
+                 detectionSource: { error: error.message }
+            };
         } finally {
             try {
                 if (page && requestHandler) {
