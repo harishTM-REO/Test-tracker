@@ -327,38 +327,58 @@ class BrowserPoolService {
     }, 0);
   }
 
+  /**
+   * Execute a function with a browser from the pool
+   * Automatically acquires and releases browser
+   * ✅ FIX: Ensures browser is released back to pool even if task fails
+   */
   async withBrowser(fn) {
     const browser = await this.acquireBrowser();
-    let releasedNormally = false;
+    let shouldRelease = true; // Default: put it back when done
+
     try {
+      // run user function (passes browser)
       const result = await fn(browser);
-      releasedNormally = true;
       return result;
     } catch (err) {
+      // Check if the error indicates the browser is broken
       const stuckBrowserErrors = [
         'BROWSER_STUCK_RESTART_REQUIRED',
         'BROWSER_NOT_CONNECTED',
         'Navigation timeout',
-        'PAGE_CREATION_TIMEOUT'
+        'PAGE_CREATION_TIMEOUT',
+        'Target closed',
+        'Session closed',
+        'Protocol error'
       ];
       const isStuckBrowser = err && err.message && stuckBrowserErrors.some(msg => err.message.includes(msg));
       
       if (isStuckBrowser) {
         console.error(`[withBrowser] Detected stuck browser -> forcing restart: ${err.message}`);
+        shouldRelease = false; // Don't release old browser, we are killing it
         try { 
           await this.forceRestartBrowser(browser); 
           console.log('[withBrowser] Browser restart completed');
         } catch (e) { 
           console.error('forceRestartBrowser failed:', e.message); 
         }
+        // propagate original error
         throw err;
       }
+      
+      // If it's just a navigation error (DNS, 404), the browser is fine.
+      // We should release it back to the pool.
       throw err;
     } finally {
-      if (releasedNormally) {
-        try { this.releaseBrowser(browser); } catch (e) { console.error('releaseBrowser error:', e.message); }
-      } else {
-        this.busyBrowsers.delete(browser);
+      // ✅ FIX: Release browser if it wasn't killed/restarted
+      if (shouldRelease) {
+        try { 
+            this.releaseBrowser(browser); 
+        } catch (e) { 
+            console.error('releaseBrowser error:', e.message); 
+            // Fallback safety
+            this.busyBrowsers.delete(browser);
+        }
       }
     }
   }
