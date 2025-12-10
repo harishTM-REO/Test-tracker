@@ -19,19 +19,6 @@ class ABTastyValidationService {
     console.log(`Total URLs: ${urls.length}`);
     console.log(`${'='.repeat(80)}\n`);
 
-    // Unhandled rejection handling (best-effort)
-    let originalUnhandledRejection = [];
-    try {
-      originalUnhandledRejection = process.listeners('unhandledRejection');
-      process.removeAllListeners('unhandledRejection');
-      process.on('unhandledRejection', (reason) => {
-        console.error(`\n❌ UNHANDLED PROMISE REJECTION DETECTED:`, reason);
-        // don't exit; continue with error handling
-      });
-    } catch (e) {
-      console.warn('⚠️ Could not set up unhandledRejection handler:', e.message);
-    }
-
     const startTime = Date.now();
     let validationResult = null;
 
@@ -78,19 +65,23 @@ class ABTastyValidationService {
       const results = { positive: [], negative: [], failed: [] };
       const projectIds = new Set();
 
-      // Process URLs in batches, reusing a single shared browser for the whole run
+      // Process URLs in batches
       const total = urls.length;
       const batches = Math.ceil(total / BATCH_SIZE);
-      const browser = await this._launchBrowserWithArgs();
-      console.log(`🌐 Launched shared browser for all batches (total URLs: ${total})`);
 
-      try {
-        for (let b = 0; b < batches; b++) {
-          const startIdx = b * BATCH_SIZE;
-          const endIdx = Math.min(startIdx + BATCH_SIZE, total);
-          const batchUrls = urls.slice(startIdx, endIdx);
+      // Loop through batches
+      for (let b = 0; b < batches; b++) {
+        const startIdx = b * BATCH_SIZE;
+        const endIdx = Math.min(startIdx + BATCH_SIZE, total);
+        const batchUrls = urls.slice(startIdx, endIdx);
 
-          console.log(`\n📦 STARTING BATCH ${b + 1}/${batches} (URLs ${startIdx + 1}-${endIdx})`);
+        console.log(`\n📦 STARTING BATCH ${b + 1}/${batches} (URLs ${startIdx + 1}-${endIdx})`);
+
+        // 1. Launch Browser HERE (Inside the loop for restarts)
+        let browser = null;
+        try {
+          browser = await this._launchBrowserWithArgs();
+          console.log(`   🌐 Browser launched for batch ${b + 1}`);
 
           // create queue for this batch (single-page concurrency)
           const queue = new PQueue({ concurrency: CONCURRENCY });
@@ -104,17 +95,17 @@ class ABTastyValidationService {
 
               // First, check reachability BEFORE creating page
               try {
-                console.log(`⏱️ Checking if URL is reachable (#${seqIndex})...`);
+                console.log(`   ⏱️ Checking if URL is reachable (#${seqIndex})...`);
                 const reachable = await isUrlReachable(urlEntry.url);
                 if (!reachable) {
-                  console.log(`❌ URL not reachable (#${seqIndex}) - skipping`);
+                  console.log(`   ❌ URL not reachable (#${seqIndex}) - skipping`);
                   return {
                     index: globalIndex,
                     result: this._makeFailedResult(urlEntry, 'URL is not reachable or timed out')
                   };
                 }
               } catch (reachErr) {
-                console.warn(`⚠️ Reachability check error (#${seqIndex}): ${reachErr.message}`);
+                console.warn(`   ⚠️ Reachability check error (#${seqIndex}): ${reachErr.message}`);
                 // proceed to attempt with page if reachability check errored (optimistic)
               }
 
@@ -136,7 +127,7 @@ class ABTastyValidationService {
                   page.setDefaultTimeout(navigationTimeout);
                 } catch (_) {}
 
-                // Run validateUrl with a 60s fallback (same as before)
+                // Run validateUrl with a 60s fallback
                 let result;
                 try {
                   result = await Promise.race([
@@ -161,13 +152,7 @@ class ABTastyValidationService {
                       new Promise((_, reject) => setTimeout(() => reject(new Error('Page close timeout')), 5000))
                     ]);
                   } catch (closeErr) {
-                    console.warn(`⚠️ Page close failed for #${seqIndex}:`, closeErr.message);
-                    // best-effort: try to continue
-                    try {
-                      if (page.browser && typeof page.browser === 'function') {
-                        // noop - safeguard
-                      }
-                    } catch (_) {}
+                    console.warn(`   ⚠️ Page close failed for #${seqIndex}:`, closeErr.message);
                   }
                 }
                 // small pause to ease resource usage between tasks
@@ -185,7 +170,7 @@ class ABTastyValidationService {
           // Sort by original index (to preserve order)
           taskResults.sort((a, b) => a.index - b.index);
 
-          // Collect results and update progress after each result to keep user informed
+          // Collect results and update progress
           for (const task of taskResults) {
             const res = task.result;
             if (res.status === 'positive') {
@@ -216,7 +201,7 @@ class ABTastyValidationService {
                   new Promise((_, reject) => setTimeout(() => reject(new Error('Progress callback timeout')), PROGRESS_CALLBACK_TIMEOUT))
                 ]);
               } catch (pcErr) {
-                console.warn(`⚠️ Progress callback error (non-fatal):`, pcErr.message);
+                console.warn(`   ⚠️ Progress callback error (non-fatal):`, pcErr.message);
               }
             }
           }
@@ -228,32 +213,32 @@ class ABTastyValidationService {
             const urlEntry = urls[j];
             results.failed.push(this._makeFailedResult(urlEntry, `Batch error: ${batchErr.message}`));
           }
-        }
-      } finally {
-        // Close shared browser after all batches
-        try {
-          await Promise.race([
-            browser.close(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Browser close timeout')), BROWSER_CLOSE_TIMEOUT))
-          ]);
-          console.log(`🔒 Shared browser closed after all batches`);
-        } catch (closeErr) {
-          console.warn(`⚠️ Shared browser close failed:`, closeErr.message);
-          // Try force-kill if possible
-          try {
-            if (browser.process && typeof browser.process === 'function') {
-              const proc = browser.process();
-              if (proc && proc.pid) {
-                try { process.kill(proc.pid, 'SIGKILL'); } catch (kerr) { /* best-effort */ }
-              }
+        } finally {
+          // 2. Close Browser HERE (at end of batch)
+          if (browser) {
+            try {
+              await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Browser close timeout')), BROWSER_CLOSE_TIMEOUT))
+              ]);
+              console.log(`   🔒 Shared browser closed for batch ${b + 1}`);
+            } catch (closeErr) {
+              console.warn(`   ⚠️ Shared browser close failed:`, closeErr.message);
+              // Try force-kill if possible
+              try {
+                if (browser.process && typeof browser.process === 'function') {
+                  const proc = browser.process();
+                  if (proc && proc.pid) {
+                    process.kill(proc.pid, 'SIGKILL');
+                  }
+                }
+              } catch (kerr) { /* best-effort */ }
             }
-          } catch (killErr) {
-            console.warn(`⚠️ Could not force-kill shared browser:`, killErr.message);
           }
         }
-      } // end shared browser finally
+      } // end batch loop
 
-      // Save results in batch with error handling
+      // Save results
       try {
         const batchNumber = 1;
         await ABTastyValidationDocument.create({
@@ -370,26 +355,6 @@ class ABTastyValidationService {
       }
 
       throw error;
-    } finally {
-      console.log(`\n${'='.repeat(80)}`);
-      console.log(`🏁 ABTASTY VALIDATION FINALLY BLOCK EXECUTING`);
-      console.log(`Timestamp: ${new Date().toISOString()}`);
-      console.log(`${'='.repeat(80)}\n`);
-
-      // Restore original unhandled rejection handlers
-      try {
-        process.removeAllListeners('unhandledRejection');
-        if (originalUnhandledRejection && originalUnhandledRejection.length > 0) {
-          originalUnhandledRejection.forEach(handler => {
-            process.on('unhandledRejection', handler);
-          });
-        }
-        console.log(`✅ Unhandled rejection handlers restored`);
-      } catch (handlerError) {
-        console.error(`⚠️ Error restoring unhandled rejection handlers:`, handlerError.message);
-      }
-
-      console.log(`✅ ABTASTY VALIDATION FINALLY BLOCK COMPLETED\n`);
     }
   }
 
@@ -435,7 +400,6 @@ class ABTastyValidationService {
 
   /**
    * Validate a single URL for ABTasty presence
-   * (keeps your previous implementation unchanged)
    */
   async validateUrl(page, urlEntry) {
     const { url, companyName } = urlEntry;
@@ -458,7 +422,7 @@ class ABTastyValidationService {
     };
 
     try {
-      console.log(`🔍 Navigating to: ${url}`);
+      console.log(`   🔍 Navigating to: ${url}`);
 
       // Navigate with timeout (with error handling)
       let response = null;
@@ -473,9 +437,9 @@ class ABTastyValidationService {
           new Promise((_, reject) => setTimeout(() => reject(new Error('Navigation timeout')), 30000))
         ]);
 
-        console.log(`✓ Page loaded (status: ${response?.status() || 'unknown'})`);
+        console.log(`   ✓ Page loaded (status: ${response?.status() || 'unknown'})`);
       } catch (navError) {
-        console.error(`❌ Navigation error: ${navError.message}`);
+        console.error(`   ❌ Navigation error: ${navError.message}`);
         result.status = 'failed';
         result.error = `Navigation failed: ${navError.message}`;
         result.detectionDetails.error = `Navigation failed: ${navError.message}`;
@@ -486,18 +450,18 @@ class ABTastyValidationService {
       try { await new Promise(resolve => setTimeout(resolve, 2000)); } catch (e) {}
 
       // Check for captcha
-      console.log(`🔍 Checking for captcha...`);
+      console.log(`   🔍 Checking for captcha...`);
       let captchaResult = { detected: false };
       try {
         captchaResult = await detectCaptcha(page);
       } catch (captchaError) {
-        console.warn(`⚠️ Captcha detection error (non-fatal): ${captchaError.message}`);
+        console.warn(`   ⚠️ Captcha detection error (non-fatal): ${captchaError.message}`);
       }
       const captchaDetected = typeof captchaResult === 'object' ? !!captchaResult.detected : !!captchaResult;
       result.detectionDetails.captchaDetected = captchaDetected;
-      console.log('captchaDetected', captchaDetected, captchaResult?.reason ? `reason: ${captchaResult.reason}` : '');
+      
       if (captchaDetected) {
-        console.log(`⚠️ Captcha detected`);
+        console.log(`   ⚠️ Captcha detected`);
         result.status = 'failed';
         result.error = captchaResult?.reason || 'Captcha detected';
         result.detectionDetails.error = captchaResult?.reason || 'Captcha detected';
@@ -506,19 +470,26 @@ class ABTastyValidationService {
       }
 
       // Accept cookie consent
-      console.log(`🍪 Handling cookie consent...`);
+      console.log(`   🍪 Handling cookie consent...`);
       try { await handleCookieConsent(page); } catch (cookieError) {
-        console.warn(`⚠️ Cookie consent handling error (non-fatal): ${cookieError.message}`);
+        console.warn(`   ⚠️ Cookie consent handling error (non-fatal): ${cookieError.message}`);
       }
-      try { await new Promise(resolve => setTimeout(resolve, 3500)); } catch (e) {}
 
-      // Detect ABTasty
-      console.log(`🔍 Detecting ABTasty...`);
+      // Detect ABTasty - Optimized Waiting
+      console.log(`   🔍 Detecting ABTasty...`);
+      
+      // Wait for window.ABTasty to appear (max 3.5s)
+      try {
+        await page.waitForFunction(() => typeof window.ABTasty !== 'undefined', { timeout: 3500, polling: 200 });
+      } catch (e) {
+        // Timeout means likely not found, but we let detectABTasty confirm
+      }
+
       let abTastyDetection = { detected: false };
       try {
         abTastyDetection = await this.detectABTasty(page);
       } catch (detectionError) {
-        console.error(`❌ ABTasty detection error: ${detectionError.message}`);
+        console.error(`   ❌ ABTasty detection error: ${detectionError.message}`);
         result.status = 'failed';
         result.error = `Detection error: ${detectionError.message}`;
         result.detectionDetails.error = `Detection error: ${detectionError.message}`;
@@ -537,28 +508,27 @@ class ABTastyValidationService {
           cookieType: 'accepted',
           error: null
         };
-        console.log(`✅ ABTasty detected - ProjectID: ${abTastyDetection.projectId || 'N/A'}`);
+        console.log(`   ✅ ABTasty detected - ProjectID: ${abTastyDetection.projectId || 'N/A'}`);
       } else {
         result.status = 'negative';
         result.detectionDetails.error = 'ABTasty not detected';
-        console.log(`❌ ABTasty not detected`);
+        console.log(`   ❌ ABTasty not detected`);
       }
 
     } catch (error) {
-      console.error(`❌ Error validating ${url}:`, error.message);
-      console.error(`Stack trace:`, error.stack);
+      console.error(`   ❌ Error validating ${url}:`, error.message);
       result.status = 'failed';
       result.error = error.message;
       result.detectionDetails.error = error.message;
     } finally {
-      console.log(`✓ validateUrl completed for ${url} with status: ${result.status}`);
+      console.log(`   ✓ completed for ${url}: ${result.status}`);
     }
 
     return result;
   }
 
   /**
-   * Detect ABTasty presence and extract projectId (keeps previous implementation)
+   * Detect ABTasty presence and extract projectId
    */
   async detectABTasty(page) {
     try {
