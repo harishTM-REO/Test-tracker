@@ -22,19 +22,17 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 
-WORKDIR /app
-
-# Copy specific package.json
-COPY backend/abtasty-validations/package*.json ./backend/abtasty-validations/
-
-# Install specific deps
+# Build context = backend/abtasty-validations
 WORKDIR /app/backend/abtasty-validations
+
+# Copy only package files first
+COPY package*.json ./
+
+# Install deps
 RUN npm ci --omit=dev --ignore-scripts
 
-# Copy ALL backend code (so utils are available)
-WORKDIR /app
-COPY backend ./backend
+# Copy the remaining source code
+COPY . .
 
-# Start specific worker
-WORKDIR /app/backend/abtasty-validations
+# Start worker
 CMD ["npm", "start"]
