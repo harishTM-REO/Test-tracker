@@ -1,8 +1,7 @@
-# Use a lightweight Node.js image
+# Use Bookworm for Modern Chromium (v120+)
 FROM node:20-bookworm-slim
 
-# 1. Install Chromium and required Linux libraries manually
-# This guarantees the browser exists at /usr/bin/chromium
+# 1. Install Chromium & Libraries
 RUN apt-get update && apt-get install -y \
     chromium \
     libnss3 \
@@ -21,23 +20,28 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Set Environment Variables explicitly
+# 2. Set Env Vars
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 
-# 3. Setup App Directory
+# 3. Prepare Directory Structure
 WORKDIR /app
 
-# 4. Install Dependencies
-# Copy package files first for better caching
-COPY package*.json ./
-# Run install (and ignore the postinstall script if it still exists)
+# 4. Copy Dependencies & Install
+# Note: We copy to the specific folder structure so relative requires work
+COPY backend/adobe-target-1.0-worker/package*.json ./backend/adobe-target-1.0-worker/
+
+# Switch to worker folder to install ITS dependencies
+WORKDIR /app/backend/adobe-target-1.0-worker
 RUN npm ci --omit=dev --ignore-scripts
 
-# 5. Copy the rest of your code
-COPY . .
+# 5. Copy Source Code
+# We go back to /app and copy the ENTIRE backend folder
+# This ensures 'backend/utils' and 'backend/adobe-target-1.0-worker' are both present
+WORKDIR /app
+COPY backend ./backend
 
-# 6. Start the server
+# 6. Start the Worker
+WORKDIR /app/backend/adobe-target-1.0-worker
 CMD ["npm", "start"]
-
