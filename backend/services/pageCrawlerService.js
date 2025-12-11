@@ -139,12 +139,13 @@ class PageCrawlerService {
         const { maxPages = 10, depth = 3 } = options;
         let browser = null;
 
+        let page = null;
         try {
             console.log(`🔍 Starting crawl for: ${url} (maxPages: ${maxPages}, depth: ${depth})`);
 
             // Launch browser
             browser = await launchBrowser();
-            const page = await createPage(browser);
+            page = await createPage(browser);
 
             // Navigate to base URL and handle cookies
             console.log(`🍪 Navigating to base URL: ${url}`);
@@ -315,6 +316,15 @@ class PageCrawlerService {
             console.error('Error in crawlSingleSite:', error);
             throw error;
         } finally {
+            // ✅ CRITICAL FIX: Close page before closing browser
+            if (page) {
+                try {
+                    const { closePage } = require('../utils/helper');
+                    await closePage(page);
+                } catch (e) {
+                    console.warn('Error closing page:', e.message);
+                }
+            }
             if (browser) {
                 await closeBrowser(browser);
             }

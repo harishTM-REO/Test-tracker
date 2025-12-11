@@ -270,6 +270,7 @@ class UrlCollectorService {
    */
   async fetchPageWithPuppeteer(url, timeout = 30000) {
     let browser = null;
+    let page = null;
     try {
       console.log(`🌐 Fetching page with Puppeteer: ${url}`);
 
@@ -277,7 +278,7 @@ class UrlCollectorService {
       browser = await launchBrowser();
 
       // Create new page
-      const page = await createPage(browser);
+      page = await createPage(browser);
 
       // Navigate to URL with robust error handling
       await navigateToPage(page, url);
@@ -307,6 +308,15 @@ class UrlCollectorService {
       console.error(`❌ Error fetching page with Puppeteer for ${url}:`, error.message);
       throw error;
     } finally {
+      // ✅ CRITICAL FIX: Close page before closing browser
+      if (page) {
+        try {
+          const { closePage } = require('../utils/helper');
+          await closePage(page);
+        } catch (e) {
+          console.warn('Error closing page:', e.message);
+        }
+      }
       // Always close browser
       if (browser) {
         await closeBrowser(browser);

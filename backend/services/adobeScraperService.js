@@ -262,132 +262,151 @@ class AdobeScraperService {
      * ✅ FIX: Re-throws fatal browser errors so the Pool knows to restart the browser
      */
     async detectAdobeTargetPresence(url) {
-        let page = null;
-        let requestHandler = null;
-    
         try {
             return await browserPool.withBrowser(async (browser) => {
-                page = await createPage(browser);
+                let page = null;
+                let requestHandler = null;
     
-                try { browserPool.incrementPageCount(browser); } catch (e) {}
-
-                // Pre-flight check
                 try {
-                    const preflightCheck = await httpCheck(url, 4000);
-                    const certIssue = preflightCheck.error && preflightCheck.error.toLowerCase().includes('cert');
-                    if (!preflightCheck.isValid && (certIssue || !preflightCheck.status)) {
-                         console.warn(`⚠️ Pre-flight issue for ${url}: ${preflightCheck.error}`);
-                         return {
+                    page = await createPage(browser);
+    
+                    try { browserPool.incrementPageCount(browser); } catch (e) {}
+
+                    // Pre-flight check
+                    try {
+                        const preflightCheck = await httpCheck(url, 4000);
+                        const certIssue = preflightCheck.error && preflightCheck.error.toLowerCase().includes('cert');
+                        if (!preflightCheck.isValid && (certIssue || !preflightCheck.status)) {
+                             console.warn(`⚠️ Pre-flight issue for ${url}: ${preflightCheck.error}`);
+                             return {
+                                detected: false,
+                                version: null,
+                                hasMboxCookie: false,
+                                hasAdobeScript: false,
+                                detectionSource: { error: preflightCheck.error || 'preflight_failed' }
+                            };
+                        }
+                    } catch(e) { /* ignore */ }
+        
+                    await navigateToPage(page, url);
+        
+                    // Cookie Consent
+                    try {
+                        await runWithTimeout(() => handleCookieConsent(page), 10000, 'handleCookieConsent');
+                    } catch (e) {
+                        console.warn(`handleCookieConsent warning: ${e.message}`);
+                    }
+        
+                    await new Promise(r => setTimeout(r, 500));
+        
+                    // Captcha
+                    let captchaCheck = { detected: false };
+                    try {
+                        captchaCheck = await runWithTimeout(() => detectCaptcha(page), 5000, 'detectCaptcha');
+                    } catch (e) {
+                        console.warn(`detectCaptcha warning: ${e.message}`);
+                        // 🚨 CHECK FOR FATAL ERROR IN CAPTCHA
+                        if (e.message.includes('Protocol error') || e.message.includes('closed')) throw e;
+                    }
+        
+                    if (captchaCheck && captchaCheck.detected) {
+                        return {
                             detected: false,
-                            version: null,
-                            hasMboxCookie: false,
-                            hasAdobeScript: false,
-                            detectionSource: { error: preflightCheck.error || 'preflight_failed' }
+                            captchaDetected: true,
+                            captchaStatus: captchaCheck.reason,
+                            httpStatusCode: null
                         };
                     }
-                } catch(e) { /* ignore */ }
-    
-                await navigateToPage(page, url);
-    
-                // Cookie Consent
-                try {
-                    await runWithTimeout(() => handleCookieConsent(page), 10000, 'handleCookieConsent');
-                } catch (e) {
-                    console.warn(`handleCookieConsent warning: ${e.message}`);
-                }
-    
-                await new Promise(r => setTimeout(r, 500));
-    
-                // Captcha
-                let captchaCheck = { detected: false };
-                try {
-                    captchaCheck = await runWithTimeout(() => detectCaptcha(page), 5000, 'detectCaptcha');
-                } catch (e) {
-                    console.warn(`detectCaptcha warning: ${e.message}`);
-                    // 🚨 CHECK FOR FATAL ERROR IN CAPTCHA
-                    if (e.message.includes('Protocol error') || e.message.includes('closed')) throw e;
-                }
-    
-                if (captchaCheck && captchaCheck.detected) {
-                    return {
-                        detected: false,
-                        captchaDetected: true,
-                        captchaStatus: captchaCheck.reason,
-                        httpStatusCode: null
-                    };
-                }
-    
-                // Request Interception
-                try {
-                    await page.setRequestInterception(true);
-                    requestHandler = req => {
-                        const t = req.resourceType();
-                        if (t === 'image' || t === 'font') {
-                            try { req.abort(); } catch (e) { try { req.continue(); } catch (_) {} }
-                        } else {
-                            try { req.continue(); } catch (_) {}
+        
+                    // Request Interception
+                    try {
+                        await page.setRequestInterception(true);
+                        requestHandler = req => {
+                            const t = req.resourceType();
+                            if (t === 'image' || t === 'font') {
+                                try { req.abort(); } catch (e) { try { req.continue(); } catch (_) {} }
+                            } else {
+                                try { req.continue(); } catch (_) {}
+                            }
+                        };
+                        page.on('request', requestHandler);
+                    } catch (e) {
+                        console.warn('Could not enable request interception:', e.message);
+                        // 🚨 CRITICAL: If this fails, the browser is likely dead. Throw!
+                        if (e.message.includes('Protocol') || e.message.includes('timed out')) {
+                            throw new Error(`Browser Critical Failure (Interception): ${e.message}`);
                         }
-                    };
-                    page.on('request', requestHandler);
-                } catch (e) {
-                    console.warn('Could not enable request interception:', e.message);
-                    // 🚨 CRITICAL: If this fails, the browser is likely dead. Throw!
-                    if (e.message.includes('Protocol') || e.message.includes('timed out')) {
-                        throw new Error(`Browser Critical Failure (Interception): ${e.message}`);
                     }
-                }
-    
-                await new Promise(r => setTimeout(r, 300));
-    
-                let detectionResult = {
-                    detected: false,
-                    version: null,
-                    hasMboxCookie: false,
-                    hasAdobeScript: false,
-                    detectionSource: {}
-                };
-    
-                try {
-                    detectionResult = await runWithTimeout(
-                        () => this.detectAdobeTargetPresenceUsingPage(page),
-                        parseInt(process.env.ADOBE_DETECTION_TIMEOUT || 20000),
-                        'detectAdobeTargetPresenceUsingPage'
-                    );
-                } catch (e) {
-                    console.warn(`detectAdobeTargetPresenceUsingPage failed: ${e.message}`);
-                    
-                    // 🚨 CRITICAL: Check if this timeout was caused by a dead browser
-                    const fatalErrors = [
-                        'Protocol error', 'Target closed', 'Session closed', 
-                        'Runtime.callFunctionOn', 'context was destroyed'
-                    ];
-                    if (fatalErrors.some(err => e.message.includes(err))) {
-                        throw e; // Re-throw to trigger Pool Restart
-                    }
-
-                    return {
+        
+                    await new Promise(r => setTimeout(r, 300));
+        
+                    let detectionResult = {
                         detected: false,
                         version: null,
                         hasMboxCookie: false,
                         hasAdobeScript: false,
+                        detectionSource: {}
+                    };
+        
+                    try {
+                        detectionResult = await runWithTimeout(
+                            () => this.detectAdobeTargetPresenceUsingPage(page),
+                            parseInt(process.env.ADOBE_DETECTION_TIMEOUT || 20000),
+                            'detectAdobeTargetPresenceUsingPage'
+                        );
+                    } catch (e) {
+                        console.warn(`detectAdobeTargetPresenceUsingPage failed: ${e.message}`);
+                        
+                        // 🚨 CRITICAL: Check if this timeout was caused by a dead browser
+                        const fatalErrors = [
+                            'Protocol error', 'Target closed', 'Session closed', 
+                            'Runtime.callFunctionOn', 'context was destroyed'
+                        ];
+                        if (fatalErrors.some(err => e.message.includes(err))) {
+                            throw e; // Re-throw to trigger Pool Restart
+                        }
+
+                        return {
+                            detected: false,
+                            version: null,
+                            hasMboxCookie: false,
+                            hasAdobeScript: false,
+                            httpStatusCode: null,
+                            captchaDetected: false,
+                            detectionSource: { error: e.message }
+                        };
+                    }
+        
+                    // ✅ ✅ ✅ FIXED: ADDED MISSING LOG HERE
+                    console.log(`${detectionResult.detected ? '✅' : '❌'} Adobe Target ${detectionResult.detected ? 'detected' : 'not detected'} on ${url}`);
+
+                    return {
+                        detected: detectionResult.detected,
+                        version: detectionResult.version,
+                        hasMboxCookie: detectionResult.hasMboxCookie,
+                        hasAdobeScript: detectionResult.hasAdobeScript,
                         httpStatusCode: null,
                         captchaDetected: false,
-                        detectionSource: { error: e.message }
+                        detectionSource: detectionResult.detectionSource
                     };
+                } finally {
+                    // ✅ CRITICAL FIX: Close page INSIDE the withBrowser callback
+                    // This ensures the page is closed before the browser is released back to the pool
+                    try {
+                        if (page && requestHandler) {
+                            try { 
+                                page.off('request', requestHandler); 
+                            } catch (e) {
+                                console.warn('Error removing request handler:', e.message);
+                            }
+                        }
+                        if (page) {
+                            await closePage(page, 2000);
+                        }
+                    } catch (finalErr) {
+                        console.warn('Error closing page in detectAdobeTargetPresence:', finalErr.message);
+                    }
                 }
-    
-                // ✅ ✅ ✅ FIXED: ADDED MISSING LOG HERE
-                console.log(`${detectionResult.detected ? '✅' : '❌'} Adobe Target ${detectionResult.detected ? 'detected' : 'not detected'} on ${url}`);
-
-                return {
-                    detected: detectionResult.detected,
-                    version: detectionResult.version,
-                    hasMboxCookie: detectionResult.hasMboxCookie,
-                    hasAdobeScript: detectionResult.hasAdobeScript,
-                    httpStatusCode: null,
-                    captchaDetected: false,
-                    detectionSource: detectionResult.detectionSource
-                };
             });
         } catch (error) {
             console.error('Error detecting Adobe Target presence:', error.message);
@@ -404,17 +423,6 @@ class AdobeScraperService {
                  detected: false,
                  detectionSource: { error: error.message }
             };
-        } finally {
-            try {
-                if (page && requestHandler) {
-                    try { page.off('request', requestHandler); } catch (e) {}
-                }
-                if (page) {
-                    await closePage(page, 2000);
-                }
-            } catch (finalErr) {
-                console.warn('Final cleanup error in detectAdobeTargetPresence:', finalErr.message);
-            }
         }
     }
   
@@ -1894,6 +1902,14 @@ class AdobeScraperService {
                 error: error.message
             };
         } finally {
+            // ✅ CRITICAL FIX: Close page before closing browser
+            if (page) {
+                try {
+                    await closePage(page);
+                } catch (e) {
+                    console.warn('Error closing page:', e.message);
+                }
+            }
             if (browser) {
                 await closeBrowser(browser);
             }
@@ -2454,6 +2470,14 @@ class AdobeScraperService {
             console.error('Error in crawlEcommercePages:', error);
             throw error;
         } finally {
+            // ✅ CRITICAL FIX: Close page before closing browser
+            if (page) {
+                try {
+                    await closePage(page);
+                } catch (e) {
+                    console.warn('Error closing page:', e.message);
+                }
+            }
             // Clean up browser
             if (browser) {
                 await closeBrowser(browser);

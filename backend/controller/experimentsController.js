@@ -966,6 +966,16 @@ async function performExperimentDetection(datasetId, crawledPages) {
       await dataset.save();
     }
   } finally {
+    // ✅ CRITICAL FIX: Close page before closing browser
+    if (page) {
+      try {
+        const { closePage } = require('../utils/helper');
+        await closePage(page);
+        console.log('🔒 Closed shared page');
+      } catch (cleanupError) {
+        console.error('Error closing page:', cleanupError.message);
+      }
+    }
     // Always cleanup the shared browser
     if (browser) {
       try {

@@ -147,80 +147,98 @@ class OptimizelyValidationService {
             // Launch fresh browser for this URL
             console.log(`🌐 Launching fresh browser...`);
             browser = await this.launchBrowser();
-            const page = await browser.newPage();
-
-            // Configure page
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-            await page.setViewport({ width: 1920, height: 1080 });
-
-            // Validate URL with timeout to prevent hanging
-            const result = await Promise.race([
-              this.validateUrl(page, urlEntry),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('validateUrl timeout after 60 seconds')), 60000)
-              )
-            ]);
+            let page = null;
             
-            // Categorize result
-            if (result.status === 'positive') {
-              results.positive.push(result);
-              if (result.detectionDetails.projectId) {
-                projectIds.add(result.detectionDetails.projectId);
-              }
-              console.log(`✅ POSITIVE - Optimizely detected (ProjectID: ${result.detectionDetails.projectId || 'N/A'})`);
-            } else if (result.status === 'negative') {
-              results.negative.push(result);
-              console.log(`❌ NEGATIVE - No Optimizely detected`);
-            } else {
-              results.failed.push(result);
-              console.log(`⚠️  FAILED - ${result.error}`);
-            }
+            try {
+              page = await browser.newPage();
 
-          } catch (error) {
-            console.error(`❌ Error processing ${urlEntry.url}:`, error.message);
-            console.error(`Stack trace:`, error.stack);
-            results.failed.push({
-              url: urlEntry.url,
-              companyName: urlEntry.companyName,
-              status: 'failed',
-              detectionDetails: {
-                projectId: null,
-                experiments: [],
-                experimentCount: 0,
-                activeCount: 0,
-                detectedExplicitly: false,
-                captchaDetected: false,
+              // Configure page
+              await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+              await page.setViewport({ width: 1920, height: 1080 });
+
+              // Validate URL with timeout to prevent hanging
+              const result = await Promise.race([
+                this.validateUrl(page, urlEntry),
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('validateUrl timeout after 60 seconds')), 60000)
+                )
+              ]);
+              
+              // Categorize result
+              if (result.status === 'positive') {
+                results.positive.push(result);
+                if (result.detectionDetails.projectId) {
+                  projectIds.add(result.detectionDetails.projectId);
+                }
+                console.log(`✅ POSITIVE - Optimizely detected (ProjectID: ${result.detectionDetails.projectId || 'N/A'})`);
+              } else if (result.status === 'negative') {
+                results.negative.push(result);
+                console.log(`❌ NEGATIVE - No Optimizely detected`);
+              } else {
+                results.failed.push(result);
+                console.log(`⚠️  FAILED - ${result.error}`);
+              }
+            } catch (error) {
+              console.error(`❌ Error processing ${urlEntry.url}:`, error.message);
+              console.error(`Stack trace:`, error.stack);
+              results.failed.push({
+                url: urlEntry.url,
+                companyName: urlEntry.companyName,
+                status: 'failed',
+                detectionDetails: {
+                  projectId: null,
+                  experiments: [],
+                  experimentCount: 0,
+                  activeCount: 0,
+                  detectedExplicitly: false,
+                  captchaDetected: false,
+                  error: error.message
+                },
+                scrapedAt: new Date(),
                 error: error.message
-              },
-              scrapedAt: new Date(),
-              error: error.message
-            });
-          } finally {
-            // Always close browser with timeout to prevent hanging
-            console.log(`🔒 Closing browser...`);
-            if (browser) {
-              try {
-                // Add timeout to browser.close() to prevent hanging
-                await Promise.race([
-                  browser.close(),
-                  new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Browser close timeout')), 10000)
-                  )
-                ]);
-                console.log(`🔒 Browser closed successfully`);
-              } catch (e) {
-                console.error(`⚠️  Error closing browser (non-fatal):`, e.message);
-                // Try to force close if normal close fails
+              });
+            } finally {
+              // ✅ CRITICAL FIX: Close page before closing browser
+              if (page) {
                 try {
-                  if (browser.process && browser.process()) {
-                    browser.process().kill('SIGKILL');
+                  console.log(`🔒 Closing page...`);
+                  await Promise.race([
+                    page.close(),
+                    new Promise((_, reject) => 
+                      setTimeout(() => reject(new Error('Page close timeout')), 5000)
+                    )
+                  ]);
+                  console.log(`🔒 Page closed successfully`);
+                } catch (e) {
+                  console.warn(`⚠️  Error closing page (non-fatal):`, e.message);
+                }
+              }
+              
+              // Always close browser with timeout to prevent hanging
+              console.log(`🔒 Closing browser...`);
+              if (browser) {
+                try {
+                  // Add timeout to browser.close() to prevent hanging
+                  await Promise.race([
+                    browser.close(),
+                    new Promise((_, reject) => 
+                      setTimeout(() => reject(new Error('Browser close timeout')), 10000)
+                    )
+                  ]);
+                  console.log(`🔒 Browser closed successfully`);
+                } catch (e) {
+                  console.error(`⚠️  Error closing browser (non-fatal):`, e.message);
+                  // Try to force close if normal close fails
+                  try {
+                    if (browser.process && browser.process()) {
+                      browser.process().kill('SIGKILL');
+                    }
+                  } catch (killError) {
+                    console.error(`⚠️  Could not force kill browser process:`, killError.message);
                   }
-                } catch (killError) {
-                  console.error(`⚠️  Could not force kill browser process:`, killError.message);
                 }
               }
             }
-          }
 
           // Progress update with error handling and timeout
           try {
