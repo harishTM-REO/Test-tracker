@@ -3,7 +3,7 @@ const ABTastyValidationResult = require('../../models/ABTastyValidationResult');
 const ABTastyValidationDocument = require('../../models/ABTastyValidationDocument');
 const Dataset = require('../../models/Dataset');
 const { isUrlReachable } = require('../../utils/urlValidator');
-const { handleCookieConsent, detectCaptcha, createPage, closePage } = require('../../utils/helper');
+const { handleCookieConsent, detectCaptcha, navigateToPage, createPage, closePage } = require('../../utils/helper');
 // const browserPool = require('../../adobe-targetscraping/services/browserPoolService'); // ✅ Import Browser Pool
 const browserPool = require('../../services/browserPoolService');
 class ABTastyValidationService {
