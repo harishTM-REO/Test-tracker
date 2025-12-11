@@ -1,7 +1,7 @@
 [phases]
 [phases.setup]
 apt_pkgs = [
-    "chromium",                # <--- CRITICAL: You must include this!
+    "chromium",                
     "gconf-service",
     "libasound2",
     "libatk1.0-0",

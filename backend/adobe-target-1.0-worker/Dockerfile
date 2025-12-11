@@ -25,23 +25,22 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 
-# 3. Prepare Directory Structure
+# 3. Setup App Directory
 WORKDIR /app
 
-# 4. Copy Dependencies & Install
-# Note: We copy to the specific folder structure so relative requires work
+# 4. Copy Worker Dependencies
 COPY backend/adobe-target-1.0-worker/package*.json ./backend/adobe-target-1.0-worker/
 
-# Switch to worker folder to install ITS dependencies
+# 5. Install Dependencies
 WORKDIR /app/backend/adobe-target-1.0-worker
 RUN npm ci --omit=dev --ignore-scripts
 
-# 5. Copy Source Code
-# We go back to /app and copy the ENTIRE backend folder
-# This ensures 'backend/utils' and 'backend/adobe-target-1.0-worker' are both present
+# 6. Copy Source Code
+# This requires build context to be the REPO ROOT
 WORKDIR /app
-COPY backend ./backend
+COPY backend/utils ./backend/utils
+COPY backend/adobe-target-1.0-worker ./backend/adobe-target-1.0-worker
 
-# 6. Start the Worker
+# 7. Start
 WORKDIR /app/backend/adobe-target-1.0-worker
 CMD ["npm", "start"]
