@@ -22,19 +22,12 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 
-WORKDIR /app
-
-# Copy specific package.json
-COPY backend/scraper-worker/package*.json ./backend/scraper-worker/
-
-# Install specific deps
+# Build context = backend/scraper-worker
 WORKDIR /app/backend/scraper-worker
+
+COPY package*.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
-# Copy ALL backend code
-WORKDIR /app
-COPY backend ./backend
+COPY . .
 
-# Start specific worker
-WORKDIR /app/backend/scraper-worker
 CMD ["npm", "start"]
