@@ -29,7 +29,7 @@ COPY backend/adobe-target-1.0-worker/package*.json ./backend/adobe-target-1.0-wo
 
 # 5. Install Dependencies
 WORKDIR /app/backend/adobe-target-1.0-worker
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm install --omit=dev --ignore-scripts
 
 # 6. Copy Source Code
 # Go back to /app to copy the full backend folder (Includes 'utils'!)
