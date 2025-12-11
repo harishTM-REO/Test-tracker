@@ -1,17 +1,31 @@
-// utils/helpers.js
-const fs = require('fs').promises;
+const fs = require('fs'); // Standard fs for Sync operations
+const fsPromises = require('fs').promises;
+const chromium = require('@sparticuz/chromium');
 const path = require('path');
 let puppeteer;
-const chromium = require('@sparticuz/chromium');
 try {
-    puppeteer = require('puppeteer');
+    // Try to load the stealth version first
+    const puppeteerExtra = require('puppeteer-extra');
+    const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+    const stealth = StealthPlugin();
+    
+    // Fix Protocol Error on older Chromium
+    stealth.enabledEvasions.delete('iframe.contentWindow');
+    stealth.enabledEvasions.delete('media.codecs');
+    
+    puppeteerExtra.use(stealth);
+    puppeteer = puppeteerExtra;
 } catch (e) {
-    puppeteer = require('puppeteer-core');
+    console.warn('Puppeteer Extra/Stealth failed, falling back to core:', e.message);
+    try {
+        puppeteer = require('puppeteer');
+    } catch (e2) {
+        puppeteer = require('puppeteer-core');
+    }
 }
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Format file size
 const formatFileSize = (bytes) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -20,33 +34,30 @@ const formatFileSize = (bytes) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-// Ensure directory exists
+// Use fsPromises for async operations
 const ensureDirectoryExists = async (dirPath) => {
     try {
-        await fs.access(dirPath);
+        await fsPromises.access(dirPath);
     } catch (error) {
-        await fs.mkdir(dirPath, {recursive: true});
+        await fsPromises.mkdir(dirPath, {recursive: true});
     }
 };
 
-// Delete file safely
 const deleteFileSafely = async (filePath) => {
     try {
-        await fs.access(filePath);
-        await fs.unlink(filePath);
+        await fsPromises.access(filePath);
+        await fsPromises.unlink(filePath);
         return true;
     } catch (error) {
         console.warn(`Could not delete file ${filePath}:`, error.message);
         return false;
     }
-};
 
-// Sanitize filename
+};
 const sanitizeFilename = (filename) => {
     return filename.replace(/[^a-zA-Z0-9.-]/g, '_');
 };
 
-// Generate unique filename
 const generateUniqueFilename = (originalName) => {
     const timestamp = Date.now();
     const random = Math.round(Math.random() * 1E9);
@@ -54,16 +65,13 @@ const generateUniqueFilename = (originalName) => {
     return `${timestamp}-${random}-${sanitized}`;
 };
 
-// Paginate results
 const paginate = (query, page = 1, limit = 20) => {
     const skip = (page - 1) * limit;
     return query.skip(skip).limit(limit);
 };
 
-// Build search query
 const buildSearchQuery = (searchTerm, fields = []) => {
     if (!searchTerm || !fields.length) return {};
-
     const regex = new RegExp(searchTerm, 'i');
     return {
         $or: fields.map(field => ({[field]: regex}))
@@ -77,7 +85,6 @@ const extractDomainName = (url) => {
     } catch (error) {
         return 'unknown-domain';
     }
-
 }
 
 const extractDomain = (url) => {
@@ -89,99 +96,119 @@ const extractDomain = (url) => {
     }
 }
 
+// 3. Robust Sync Check (Uses standard fs)
+const pathExistsSync = (targetPath) => {
+    try {
+        return fsPromises.existsSync(targetPath);
+    } catch (_) {
+        return false;
+    }
+};
+
 /**
- * Launch browser with your optimized settings and HTTP/2 error handling
- * @param {Object} fallbackOptions - Optional fallback options for retry attempts
- * @returns {Object} Puppeteer browser instance
+ * 1. Helper to find the correct browser path
  */
-const launchBrowser = async (fallbackOptions = {}) => {
-    const maxRetries = parseInt(process.env.BROWSER_LAUNCH_MAX_RETRIES) || 2;
-    let lastError;
+const resolvePuppeteerExecutablePath = async () => {
+    // A. Railway / Docker (System Browser)
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+        return process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+    
+    // Check standard Linux paths
+    if (pathExistsSync('/usr/bin/chromium')) {
+        return '/usr/bin/chromium';
+    }
+    if (pathExistsSync('/usr/bin/google-chrome')) {
+        return '/usr/bin/google-chrome';
+    }
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    // B. AWS Lambda
+    if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
         try {
-            console.log(`Launching browser (attempt ${attempt}/${maxRetries})`);
-
-            const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
-            let browserOptions = {
-                headless: true,
-                ignoreHTTPSErrors: true,
-                protocolTimeout: process.env.NODE_ENV === "production" ? 300000 : 60000,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-gpu',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--no-first-run',
-                    '--no-zygote',
-                    '--disable-background-timer-throttling',
-                    '--disable-backgrounding-occluded-windows',
-                    '--disable-renderer-backgrounding',
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-web-security',
-                    '--allow-running-insecure-content',
-                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    '--disable-http2',
-                    '--disable-features=VizServiceDisplay',
-                    '--force-device-scale-factor=1',
-                    '--disable-extensions',
-                    '--disable-plugins',
-                    '--js-flags="--max-old-space-size=128"', 
-                    '--disable-features=site-per-process',
-                    '--renderer-process-limit=1',
-                    '--disable-software-rasterizer',
-                    '--disable-background-networking',
-                    '--disable-hang-monitor',
-                    '--disable-ipc-flooding-protection',
-                    '--disable-background-timer-throttling',
-                    '--disable-renderer-backgrounding',
-                    '--force-color-profile=srgb', 
-                    ...(attempt > 1 ? [
-                        '--disable-features=TranslateUI',
-                        '--disable-ipc-flooding-protection',
-                        '--disable-renderer-backgrounding',
-                        '--disable-backgrounding-occluded-windows',
-                        '--disable-features=Translate'
-                    ] : [])
-                ],
-                ...fallbackOptions
-            };
-
-            if (!isLocal) {
-                browserOptions.executablePath = await chromium.executablePath();
-                browserOptions.headless = chromium.headless;
-            }
-
-            const browser = await puppeteer.launch(browserOptions);
-            console.log('Browser launched successfully');
-            return browser;
-        } catch (error) {
-            lastError = error;
-            console.error(`Browser launch attempt ${attempt} failed:`, error.message);
-
-            if (attempt < maxRetries) {
-                console.log('Retrying browser launch with fallback options...');
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
+            return await chromium.executablePath();
+        } catch (err) {
+            console.warn('chromium.executablePath() failed', err.message);
         }
     }
 
-    console.error('All browser launch attempts failed');
-    throw new Error(`Failed to launch browser after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`);
+    // C. Local Development
+    return process.env.LOCAL_CHROME_PATH || 
+           'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'; 
+};
+
+/**
+ * 2. Helper to build launch options
+ */
+const buildPuppeteerLaunchOptions = async (overrides = {}) => {
+    const executablePath = overrides.executablePath || await resolvePuppeteerExecutablePath();
+    
+    const baseArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-accelerated-2d-canvas',
+        '--mute-audio',
+        '--no-first-run',
+        '--no-zygote',
+        '--window-size=1366,768',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-features=VizServiceDisplay',
+        '--allow-running-insecure-content',
+        '--disable-web-security'
+    ];
+
+    const { args: overrideArgs = [], headless, ignoreHTTPSErrors, ...restOverrides } = overrides;
+
+    return {
+        executablePath,
+        headless: headless !== undefined ? headless : 'new',
+        ignoreHTTPSErrors: ignoreHTTPSErrors !== undefined ? ignoreHTTPSErrors : true,
+        args: [...baseArgs, ...overrideArgs],
+        ...restOverrides,
+    };
+};
+
+/**
+ * 3. Main Launch Function
+ */
+async function launchBrowser() {
+    try {
+        const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+        let browserOptions = await buildPuppeteerLaunchOptions({
+            args: [
+                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 
+            ],
+        });
+
+        if (isLambda) {
+             console.log('Detected AWS Lambda: Injecting Sparticuz args');
+             browserOptions.args = [...(chromium.args || []), ...browserOptions.args];
+             browserOptions.headless = chromium.headless;
+        }
+
+        const browser = await puppeteer.launch(browserOptions);
+        console.log(`Browser launched successfully (Path: ${browserOptions.executablePath})`);
+        return browser;
+
+    } catch (error) {
+        console.error('Error launching browser:', error);
+        throw new Error(`Failed to launch browser: ${error.message}`);
+    }
 }
 
-// utils/helper.js
+/**
+ * 4. Page Creation Helper
+ */
 const createPage = async (browser, opts = {}) => {
-  // Detect constrained environments (Railway, production without high resources)
   const isRailway = process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID;
   const isProduction = process.env.NODE_ENV === 'production';
   const isConstrained = isRailway || (isProduction && !process.env.HIGH_RESOURCE_MODE);
   
-  // Use longer timeouts in constrained environments
-  const defaultTimeout = isConstrained ? 45000 : 30000; // Railway: 45s, Local: 30s
-  const defaultRetries = isConstrained ? 3 : 2; // Railway: 3 retries, Local: 2
-  
+  const defaultTimeout = isConstrained ? 45000 : 30000;
+  const defaultRetries = isConstrained ? 3 : 2;
   const maxRetries = parseInt(process.env.PAGE_CREATION_RETRIES || opts.retries || defaultRetries);
   const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || opts.timeout || defaultTimeout;
   const backoffBase = parseInt(process.env.PAGE_CREATION_BACKOFF_MS) || opts.backoffMs || 500;
@@ -190,7 +217,6 @@ const createPage = async (browser, opts = {}) => {
     let timeoutId;
     let page;
     try {
-      // Quick browser health check
       if (!browser || (browser.isConnected && !browser.isConnected())) {
         throw new Error('BROWSER_NOT_CONNECTED');
       }
@@ -210,159 +236,62 @@ const createPage = async (browser, opts = {}) => {
       const result = await Promise.race([pagePromise, timeoutPromise]);
       clearTimeout(timeoutId);
       await new Promise(r => setTimeout(r, 200));
-      // Configure page (sensible defaults)
-      await result.setViewport({ width: 1080, height: 1024 });
-      await result.setUserAgent(
-        opts.userAgent ||
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36'
-      );
+      
+      await result.setViewport({ width: 1366, height: 768 });
+      await result.setUserAgent(opts.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36');
       await result.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' });
 
-      // Navigation timeouts - use environment variable or default to 60 seconds
-      const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 40000);
+      const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 45000);
       result.setDefaultNavigationTimeout(navigationTimeout);
       result.setDefaultTimeout(navigationTimeout);
-
-      // Intercept requests to speed up page creation
-    //   await result.setRequestInterception(true);
-    //   result.on('request', req => {
-    //     const t = req.resourceType();
-    //     if (['image', 'font', 'stylesheet', 'media'].includes(t)) req.abort();
-    //     else req.continue();
-    //   });
 
       console.log('[createPage] Page successfully created & configured');
       return result;
 
     } catch (error) {
       clearTimeout(timeoutId);
-      // Close any half-created page
-      if (page) {
-        try { await page.close(); } catch (_) {}
-      }
+      if (page) { try { await page.close(); } catch (_) {} }
 
       console.error(`[createPage] attempt ${attempt + 1} failed:`, error.message || error);
 
-      // If timeout, try retrying a few times before marking browser stuck
-      if (error.message === 'PAGE_CREATION_TIMEOUT') {
-        if (attempt < maxRetries) {
-          const wait = backoffBase * (attempt + 1);
-          console.log(`[createPage] timeout -> retrying after ${wait}ms`);
-          await sleep(wait);
-          continue;
-        } else {
-          // last attempt failed with timeout — signal higher layer to restart browser
-          throw new Error('BROWSER_STUCK_RESTART_REQUIRED');
-        }
-      }
-
-      // For other fatal errors (like BROWSER_NOT_CONNECTED), don't retry more than once
       if (attempt < maxRetries) {
         const wait = backoffBase * (attempt + 1);
+        console.log(`[createPage] timeout -> retrying after ${wait}ms`);
         await sleep(wait);
         continue;
       }
+      if (error.message === 'PAGE_CREATION_TIMEOUT') throw new Error('BROWSER_STUCK_RESTART_REQUIRED');
       throw error;
     }
   }
 };
 
-
 /**
- * Navigate to URL and wait for page load with comprehensive error handling
- * @param {Object} page - Puppeteer page instance
- * @param {string} url - URL to navigate to
+ * 5. Navigation Helper
  */
 const navigateToPage = async (page, url) => {
     const maxRetries = parseInt(process.env.NAVIGATION_MAX_RETRIES) || 1;
-    const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 40000);
+    const navigationTimeout = Number(process.env.PAGE_NAVIGATION_TIMEOUT || 45000);
     let lastError;
 
-    const normalizedUrl = await validateAndNormalizeUrl(url);
-    if (!normalizedUrl) {
-        throw new Error(`Invalid or unreachable URL: ${url}`);
-    }
+    const normalizedUrl = normalizeUrl(url); 
+    if (!normalizedUrl) throw new Error(`Invalid or unreachable URL: ${url}`);
 
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
         try {
             console.log(`Navigating to: ${normalizedUrl} (attempt ${attempt}/${maxRetries + 1})`);
-            await page.goto(normalizedUrl, {
-                waitUntil: 'domcontentloaded',
-                timeout: navigationTimeout,
-            });
+            await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
             console.log("Page loaded successfully");
             return;
         } catch (error) {
             lastError = error;
             console.error(`Navigation attempt ${attempt} failed:`, error.message);
-
-            if (error.message.includes('timeout') || error.message.includes('Navigation timeout')) {
-                console.warn(`⏱️  Navigation timeout after ${navigationTimeout}ms - skipping retries to save time`);
-                throw new Error(`Navigation timeout of ${navigationTimeout} ms exceeded`);
-            }
-
-            if (error.message.includes('ERR_NAME_NOT_RESOLVED')) {
-                console.log('DNS resolution error detected, trying alternative approaches...');
-
-                if (attempt < maxRetries) {
-                    const alternativeUrl = await tryAlternativeUrl(normalizedUrl, attempt);
-                    if (alternativeUrl && alternativeUrl !== normalizedUrl) {
-                        console.log(`Trying alternative URL: ${alternativeUrl}`);
-                        try {
-                            await page.goto(alternativeUrl, {
-                                waitUntil: 'domcontentloaded',
-                                timeout: navigationTimeout
-                            });
-                            console.log("Page loaded successfully with alternative URL");
-                            return;
-                        } catch (altError) {
-                            console.error(`Alternative URL also failed: ${altError.message}`);
-                        }
-                    }
-
-                    await new Promise(resolve => setTimeout(resolve, 3000));
-                    continue;
-                }
-            } else if (error.message.includes('ERR_HTTP2_PROTOCOL_ERROR') ||
-                error.message.includes('Protocol error') ||
-                error.message.includes('net::ERR_HTTP2')) {
-
-                console.log('HTTP/2 protocol error detected, implementing workaround...');
-
-                if (attempt < maxRetries) {
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-
-                    try {
-                        await page.setExtraHTTPHeaders({
-                            'Connection': 'close',
-                            'Cache-Control': 'no-cache'
-                        });
-                        continue;
-                    } catch (headerError) {
-                        console.warn('Failed to set headers:', headerError.message);
-                    }
-                }
-            } else if (error.message.includes('ERR_CONNECTION_REFUSED') ||
-                error.message.includes('ERR_CONNECTION_TIMED_OUT') ||
-                error.message.includes('ERR_NETWORK_CHANGED')) {
-
-                console.log('Network connectivity error detected, retrying...');
-
-                if (attempt < maxRetries) {
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-                    continue;
-                }
-            } else {
-                if (attempt >= maxRetries) break;
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
+            if (error.message.includes('timeout')) throw new Error(`Navigation timeout of ${navigationTimeout} ms exceeded`);
+            if (attempt <= maxRetries) await new Promise(resolve => setTimeout(resolve, 2000));
         }
     }
-
-    console.error('All navigation attempts failed');
-    throw new Error(`Failed to navigate to ${url} after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`);
+    throw new Error(`Failed to navigate to ${url}: ${lastError?.message}`);
 }
-
 /**
  * Validate and normalize URL
  * @param {string} url - URL to validate
@@ -459,57 +388,35 @@ const tryAlternativeUrl = async (url, attempt) => {
 const detectCaptcha = async (page) => {
     try {
         console.log("🕵️  Running captcha detection...");
-
-        // 1. Fast Check (Low CPU)
-        const fastSelectorCheck = await page.$(
-            '#g-recaptcha, div.g-recaptcha, [data-sitekey], #h-captcha, div.h-captcha, .cf-turnstile, .frc-captcha, #captcha-container, [class*="captcha"]'
-        );
-
+        const fastSelectorCheck = await page.$('#g-recaptcha, div.g-recaptcha, [data-sitekey], #h-captcha, div.h-captcha, .cf-turnstile, .frc-captcha, #captcha-container, [class*="captcha"]');
         if (fastSelectorCheck) {
             console.warn(`🚫 Captcha detected (Fast Check)`);
             return { detected: true, reason: 'Fast selector match' };
         }
-
-        // 2. Safe Deep Check (With Timeout)
-        // We wrap the evaluate in a race to prevent browser hangs
+        
+        // Return explicit promise to handle race
         const captchaResult = await Promise.race([
             page.evaluate(() => {
                 const iframeKeywords = ['recaptcha', 'hcaptcha', 'challenges.cloudflare.com', 'arkoselabs'];
-                
-                // Check Iframes
                 for (const iframe of document.querySelectorAll('iframe')) {
                     try {
                         const src = iframe.src || '';
-                        if (iframeKeywords.some(k => src.includes(k))) {
-                            return { detected: true, reason: `iframe src contains: ${src}` };
-                        }
+                        if (iframeKeywords.some(k => src.includes(k))) return { detected: true, reason: `iframe src contains: ${src}` };
                     } catch (e) {}
                 }
-
-                // Check Title
                 const title = document.title.toLowerCase();
-                if (title.includes('verify you are') || title.includes('security check')) {
-                    return { detected: true, reason: `Suspicious title: ${document.title}` };
-                }
-
+                if (title.includes('verify you are') || title.includes('security check')) return { detected: true, reason: `Suspicious title: ${document.title}` };
                 return { detected: false, reason: 'No indicators' };
             }),
-            // Force timeout after 2 seconds inside the evaluation step
             new Promise(resolve => setTimeout(() => resolve({ detected: false, reason: 'Detection timed out' }), 4500))
         ]);
 
-        if (captchaResult.detected) {
-            console.warn(`🚫 Captcha detected! Reason: ${captchaResult.reason}`);
-        } else {
-            console.log("✅ No captcha detected.");
-        }
-
+        if (captchaResult.detected) console.warn(`🚫 Captcha detected! Reason: ${captchaResult.reason}`);
+        else console.log("✅ No captcha detected.");
+        
         return captchaResult;
-
     } catch (error) {
-        // If the browser is truly dead, this catch block runs. 
-        // We return false to let the scraper try to proceed or fail gracefully later.
-        console.warn(`⚠️ Captcha detection skipped (Browser busy/dead): ${error.message}`);
+        console.warn(`⚠️ Captcha detection skipped: ${error.message}`);
         return { detected: false, reason: 'Browser unresponsive' };
     }
 }
@@ -735,136 +642,51 @@ const handleCookieConsent = async (page) => {
  * @param {number} timeout - Timeout in milliseconds (default 5000)
  * @returns {Promise<boolean>} True if closed successfully
  */
+
 const closePage = async (page, timeout = 5000) => {
-    if (!page) {
-        return true;
-    }
-
+    if (!page) return true;
     try {
-        // Check if page is already closed
-        if (page.isClosed && page.isClosed()) {
-            console.log('Page already closed');
-            return true;
-        }
-
-        // Try to close with timeout
-        await Promise.race([
-            page.close(),
-            new Promise((resolve) => setTimeout(resolve, timeout))
-        ]);
+        if (page.isClosed && page.isClosed()) return true;
+        await Promise.race([page.close(), new Promise((resolve) => setTimeout(resolve, timeout))]);
         console.log('Page closed successfully');
         return true;
     } catch (error) {
-        console.warn('Error closing page (first attempt):', error.message);
-        
-        // Try force close
-        try {
-            await Promise.race([
-                page.close({ runBeforeUnload: false }),
-                new Promise((resolve) => setTimeout(resolve, 2000))
-            ]);
-            console.log('Page force closed successfully');
-            return true;
-        } catch (forceError) {
-            console.error('Failed to force close page:', forceError.message);
-            return false;
-        }
+        try { if (!page.isClosed()) await page.close({ runBeforeUnload: false }); } catch (e) {}
+        return true;
     }
 };
 
-/**
- * Safely close browser instance
- * @param {Object} browser - Puppeteer browser instance
- */
-const closeBrowser = async(browser)=> {
-    try {
-        if (browser) {
-            await browser.close();
-            console.log('Browser closed successfully');
-        }
-    } catch (error) {
-        console.error('Error closing browser:', error);
-        // Don't throw error for cleanup failures
-    }
+const closeBrowser = async(browser) => {
+    try { if (browser) await browser.close(); } catch (error) { console.error('Error closing browser:', error); }
 }
 
-
-// ===== NEW SANITIZATION UTILITY FUNCTIONS =====
-
-/**
- * Normalize URL - handle missing protocols, lowercase, trim spaces
- * @param {string} url - URL to normalize
- * @returns {string} Normalized URL
- */
 const normalizeUrl = (url) => {
     try {
         if (!url || typeof url !== 'string') return null;
-
-        let normalized = url.trim().toLowerCase();
-
-        // Add protocol if missing
-        if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
-            normalized = 'https://' + normalized;
-        }
-
-        // Validate URL format
+        let normalized = url.trim();
+        if (!normalized.match(/^https?:\/\//i)) normalized = 'https://' + normalized;
         const urlObj = new URL(normalized);
-        return urlObj.toString();
-    } catch (error) {
-        console.warn(`Failed to normalize URL ${url}: ${error.message}`);
-        return null;
-    }
+        return urlObj.href;
+    } catch (error) { return null; }
 };
 
-/**
- * Extract registrable domain (handles .co.uk, .ac.in, etc.)
- * For now, using a simple approach - can be enhanced with tldjs library
- * @param {string} url - URL to extract domain from
- * @returns {string} Base domain
- */
 const extractRegistrableDomain = (url) => {
     try {
         const urlObj = new URL(url);
         let hostname = urlObj.hostname || '';
-
-        // Remove 'www.' prefix if present
-        if (hostname.startsWith('www.')) {
-            hostname = hostname.substring(4);
-        }
-
+        if (hostname.startsWith('www.')) hostname = hostname.substring(4);
         return hostname.toLowerCase();
-    } catch (error) {
-        console.warn(`Failed to extract domain from ${url}: ${error.message}`);
-        return null;
-    }
+    } catch (error) { return null; }
 };
 
-/**
- * Deduplicate URLs based on registrable domain
- * @param {Array} urls - Array of URLs to deduplicate
- * @returns {Object} { unique: [...], duplicates: [...] }
- */
 const deduplicateUrls = (urls) => {
-    const seen = new Map();
+    const seen = new Set();
     const unique = [];
     const duplicates = [];
-
     urls.forEach(url => {
-        const domain = extractRegistrableDomain(url);
-
-        if (!domain) {
-            duplicates.push(url);
-            return;
-        }
-
-        if (seen.has(domain)) {
-            duplicates.push(url);
-        } else {
-            seen.set(domain, url);
-            unique.push(url);
-        }
+        if (seen.has(url)) duplicates.push(url);
+        else { seen.add(url); unique.push(url); }
     });
-
     return { unique, duplicates };
 };
 
@@ -986,6 +808,8 @@ module.exports = {
     handleCookieConsent,
     closePage,
     closeBrowser,
+    resolvePuppeteerExecutablePath,
+    buildPuppeteerLaunchOptions,
     // New sanitization utilities
     normalizeUrl,
     extractRegistrableDomain,

@@ -3,12 +3,27 @@ const OptimizelyValidationDocument = require('../../models/OptimizelyValidationD
 const Dataset = require('../../models/Dataset');
 const { isUrlReachable } = require('../../utils/urlValidator');
 const chromium = require('@sparticuz/chromium');
+const { buildPuppeteerLaunchOptions } = require('../../utils/helper');
 
 let puppeteer;
 try {
-  puppeteer = require('puppeteer');
+    // Assign to the outer 'puppeteer' variable
+    puppeteer = require('puppeteer-extra'); 
+    const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+    const stealth = StealthPlugin();
+
+    // 🛑 CRITICAL FIX: Disable evasions that force the new Fetch API (prevents Protocol Error)
+    stealth.enabledEvasions.delete('iframe.contentWindow');
+    stealth.enabledEvasions.delete('media.codecs');
+
+    puppeteer.use(stealth);
 } catch (e) {
-  puppeteer = require('puppeteer-core');
+    console.warn('Puppeteer Extra/Stealth failed, falling back to core:', e.message);
+    try {
+        puppeteer = require('puppeteer');
+    } catch (e2) {
+        puppeteer = require('puppeteer-core');
+    }
 }
 
 class OptimizelyValidationService {
@@ -656,35 +671,36 @@ class OptimizelyValidationService {
    */
   async launchBrowser() {
     try {
-      const options = {
-        headless: 'new',
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-gpu',
-          '--window-size=1920,1080',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-web-security'
-        ],
-        defaultViewport: {
-          width: 1920,
-          height: 1080
+        // 2. Use the helper to get the robust base args
+        // Only pass overrides here
+        const browserOptions = await buildPuppeteerLaunchOptions({
+            headless: 'new',
+            ignoreHTTPSErrors: true,
+            protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
+            timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000,
+            args: [
+                // Only pass args that are specific to this service
+                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                '--disable-features=IsolateOrigins,site-per-process', 
+                '--disable-sync',
+                '--disable-default-apps'
+            ]
+        });
+
+        // 3. AWS Lambda Specific Logic
+        // Only inject Sparticuz args if we are strictly on Lambda
+        if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
+            console.log('Injecting AWS Lambda specific flags');
+            browserOptions.args = [...(chromium.args || []), ...browserOptions.args];
+            browserOptions.headless = chromium.headless;
         }
-      };
 
-      if (this.isInProduction) {
-        options.executablePath = await chromium.executablePath();
-        options.args = [...chromium.args, ...options.args];
-      }
-
-      const browser = await puppeteer.launch(options);
-      return browser;
+        console.log(`Launching browser with executable: ${browserOptions.executablePath}`);
+        return await puppeteer.launch(browserOptions);
 
     } catch (error) {
-      console.error('Error launching browser:', error);
-      throw error;
+        console.error('Failed to launch browser in AdobeTarget1_0Service:', error);
+        throw error;
     }
   }
 }

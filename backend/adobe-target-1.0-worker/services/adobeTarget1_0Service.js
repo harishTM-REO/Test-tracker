@@ -9,13 +9,13 @@ const Dataset = require(path.join(__dirname, '../../models/Dataset'));
 const AdobeScraperService = require(path.join(__dirname, '../../services/adobeScraperService'));
 const OptimizelyValidationService = require(path.join(__dirname, './optimizelyValidationService'));
 const browserPool = require(path.join(__dirname, '../../services/browserPoolService'));
-const {
+const { 
     sanitizeWorkflowResult
 } = require(path.join(__dirname, '../../utils/adobeTargetResultSanitizer'));
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
-const { createPage, closePage } = require(path.join(__dirname, '../../utils/helper'));
+const chromium = require('@sparticuz/chromium');
+const { createPage, closePage, buildPuppeteerLaunchOptions } = require(path.join(__dirname, '../../utils/helper'));
 const { isUrlReachable } = require(path.join(__dirname, '../../utils/urlValidator'));
-
 const { 
     performMemoryCleanup,
     shouldRestartBrowser,
@@ -33,13 +33,21 @@ async function loadPQueue() {
     return PQueue;
 }
 
-const chromium = require('@sparticuz/chromium');
+
 let puppeteer;
 try {
-    puppeteer = require('puppeteer-extra');
+    // Assign to the outer 'puppeteer' variable
+    puppeteer = require('puppeteer-extra'); 
     const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-    puppeteer.use(StealthPlugin());
+    const stealth = StealthPlugin();
+
+    // 🛑 CRITICAL FIX: Disable evasions that force the new Fetch API (prevents Protocol Error)
+    stealth.enabledEvasions.delete('iframe.contentWindow');
+    stealth.enabledEvasions.delete('media.codecs');
+
+    puppeteer.use(stealth);
 } catch (e) {
+    console.warn('Puppeteer Extra/Stealth failed, falling back to core:', e.message);
     try {
         puppeteer = require('puppeteer');
     } catch (e2) {
@@ -54,39 +62,38 @@ class AdobeTarget1_0Service {
     }
 
     async launchBrowser() {
-        const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
-        const browserOptions = {
-            headless: 'new',
-            ignoreHTTPSErrors: true,
-            protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
-            timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-gpu',
-                '--disable-dev-shm-usage',
-                '--window-size=1366,768',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-web-security',
-                '--allow-running-insecure-content',
-                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                '--disable-features=IsolateOrigins,site-per-process',
-                '--disable-sync',
-                '--disable-default-apps'
-            ]
-        };
-
-        if (!isLocal && process.env.NODE_ENV === 'production') {
-            browserOptions.executablePath = await chromium.executablePath();
+        try {
+            // 2. Use the helper to get the robust base args
+            // Only pass overrides here
+            const browserOptions = await buildPuppeteerLaunchOptions({
+                headless: 'new',
+                ignoreHTTPSErrors: true,
+                protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
+                timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000,
+                args: [
+                    // Only pass args that are specific to this service
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    '--disable-features=IsolateOrigins,site-per-process', 
+                    '--disable-sync',
+                    '--disable-default-apps'
+                ]
+            });
+    
+            // 3. AWS Lambda Specific Logic
+            // Only inject Sparticuz args if we are strictly on Lambda
+            if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
+                console.log('Injecting AWS Lambda specific flags');
+                browserOptions.args = [...(chromium.args || []), ...browserOptions.args];
+                browserOptions.headless = chromium.headless;
+            }
+    
+            console.log(`Launching browser with executable: ${browserOptions.executablePath}`);
+            return await puppeteer.launch(browserOptions);
+    
+        } catch (error) {
+            console.error('Failed to launch browser in AdobeTarget1_0Service:', error);
+            throw error;
         }
-
-        return await puppeteer.launch(browserOptions);
     }
 
     static async initialize() {

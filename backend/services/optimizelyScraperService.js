@@ -5,9 +5,23 @@ const chromium = require('@sparticuz/chromium');
 // Try to use regular puppeteer first (for local development), fallback to puppeteer-core
 let puppeteer;
 try {
-  puppeteer = require('puppeteer');
+    // Assign to the outer 'puppeteer' variable
+    puppeteer = require('puppeteer-extra'); 
+    const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+    const stealth = StealthPlugin();
+
+    // 🛑 CRITICAL FIX: Disable evasions that force the new Fetch API (prevents Protocol Error)
+    stealth.enabledEvasions.delete('iframe.contentWindow');
+    stealth.enabledEvasions.delete('media.codecs');
+
+    puppeteer.use(stealth);
 } catch (e) {
-  puppeteer = require('puppeteer-core');
+    console.warn('Puppeteer Extra/Stealth failed, falling back to core:', e.message);
+    try {
+        puppeteer = require('puppeteer');
+    } catch (e2) {
+        puppeteer = require('puppeteer-core');
+    }
 }
 const ExperimentService = require('./experimentService'); // Comment out if not available
 const OptimizelyResult = require('../models/OptimizelyResult');
@@ -195,82 +209,78 @@ class OptimizelyScraperService {
     let lastError;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        console.log(`Launching browser (attempt ${attempt}/${maxRetries})`);
+        try {
+            console.log(`Launching browser (attempt ${attempt}/${maxRetries})`);
 
-        // Check if we're in a serverless environment or local development
-        const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
+            // 1. Explicitly check for AWS Lambda
+            const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 
-        let browserOptions = {
-          headless: true,
-          ignoreHTTPSErrors: true,
-          // CRITICAL: protocolTimeout prevents CDP communication hangs
-          protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000, // 60 seconds for CDP communication
-          args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-gpu',
-          '--disable-dev-shm-usage',
-          // '--window-size=1366,768', // Larger viewport for better cookie detection
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
+            let browserOptions = await buildPuppeteerLaunchOptions({
+                headless: 'new',
+                ignoreHTTPSErrors: true,
+                protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
+                
+                // Pass the specific args for this service
+                args: [
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
 
-          // CRITICAL: These flags help with cookie consent detection in headless
-          '--disable-blink-features=AutomationControlled', // Hide automation detection
-          '--disable-web-security',
-          '--allow-running-insecure-content',
-          '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', // Real user agent
+                    // Cookie Consent Helpers
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-web-security',
+                    '--allow-running-insecure-content',
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 
-          // HTTP/2 protocol error fixes
-          '--disable-http2',
-          '--disable-features=VizServiceDisplay',
-          '--force-device-scale-factor=1',
-          '--disable-extensions',
-          '--disable-plugins',
+                    // ✅ REMOVED '--disable-http2' (Risk factor)
+                    
+                    '--disable-features=VizServiceDisplay',
+                    '--force-device-scale-factor=1',
+                    '--disable-extensions',
+                    '--disable-plugins',
 
-          // Additional stability flags for retry attempts
-          ...(attempt > 1 ? [
-            '--disable-features=TranslateUI',
-            '--disable-ipc-flooding-protection',
-            '--disable-renderer-backgrounding',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-features=Translate'
-          ] : [])
+                    // Retry-specific args
+                    ...(attempt > 1 ? [
+                        '--disable-features=TranslateUI',
+                        '--disable-ipc-flooding-protection',
+                        '--disable-features=Translate'
+                    ] : [])
+                ],
+                ...fallbackOptions
+            });
 
-          ],
+            // 2. ONLY inject Sparticuz args if we are actually on AWS Lambda
+            // Railway will skip this and use the clean System Chromium args
+            if (isLambda) {
+                console.log('Detected AWS Lambda: Injecting Sparticuz args');
+                browserOptions.args = [...(chromium.args || []), ...browserOptions.args];
+                if (chromium.headless !== undefined) {
+                    browserOptions.headless = chromium.headless;
+                }
+            }
 
-          // Apply any fallback options
-          ...fallbackOptions
-        };
+            const browser = await puppeteer.launch(browserOptions);
 
-        // Use chromium for production/serverless, regular puppeteer for local
-        if (!isLocal) {
-          browserOptions.executablePath = await chromium.executablePath();
-          browserOptions.headless = chromium.headless;
+            console.log(`Browser launched successfully (Exec: ${browserOptions.executablePath})`);
+            return browser;
+
+        } catch (error) {
+            lastError = error;
+            console.error(`Browser launch attempt ${attempt} failed:`, error.message);
+
+            if (attempt < maxRetries) {
+                console.log('Retrying browser launch with fallback options...');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
         }
-
-        const browser = await puppeteer.launch(browserOptions);
-
-        console.log('Browser launched successfully');
-        return browser;
-      } catch (error) {
-        lastError = error;
-        console.error(`Browser launch attempt ${attempt} failed:`, error.message);
-
-        if (attempt < maxRetries) {
-          console.log('Retrying browser launch with fallback options...');
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
     }
 
     console.error('All browser launch attempts failed');
     throw new Error(`Failed to launch browser after ${maxRetries} attempts: ${lastError.message}`);
-  }
+}
 
   /**
    * Create and configure a new page with your optimizations

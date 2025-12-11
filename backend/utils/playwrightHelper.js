@@ -23,7 +23,7 @@ async function launchPlaywrightBrowser(options = {}) {
       console.log(`🚀 Launching Playwright browser (attempt ${attempt}/${maxRetries})`);
 
       const browserOptions = {
-        headless: true,
+        headless: 'new',
         ...options,
         args: [
           '--no-sandbox',

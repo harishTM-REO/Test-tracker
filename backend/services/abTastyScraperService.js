@@ -5,9 +5,23 @@ const chromium = require('@sparticuz/chromium');
 // Try to use regular puppeteer first (for local development), fallback to puppeteer-core
 let puppeteer;
 try {
-  puppeteer = require('puppeteer');
+    // Assign to the outer 'puppeteer' variable
+    puppeteer = require('puppeteer-extra'); 
+    const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+    const stealth = StealthPlugin();
+
+    // 🛑 CRITICAL FIX: Disable evasions that force the new Fetch API (prevents Protocol Error)
+    stealth.enabledEvasions.delete('iframe.contentWindow');
+    stealth.enabledEvasions.delete('media.codecs');
+
+    puppeteer.use(stealth);
 } catch (e) {
-  puppeteer = require('puppeteer-core');
+    console.warn('Puppeteer Extra/Stealth failed, falling back to core:', e.message);
+    try {
+        puppeteer = require('puppeteer');
+    } catch (e2) {
+        puppeteer = require('puppeteer-core');
+    }
 }
 // const ExperimentService = require('./experimentService'); // Comment out if not available
 const AbTastyResult = require('../models/AbTastyResult');
@@ -17,6 +31,7 @@ const urlSanitizer = require('./urlSanitizerService'); // Import URL sanitizer
 const retryLogic = require('./retryLogic'); // Import retry logic for failed URLs
 const mongoDBResilience = require('./mongoDBResilience'); // Import MongoDB resilience module
 const { isUrlReachable } = require('../utils/urlValidator'); // Import URL reachability check
+const { buildPuppeteerLaunchOptions } = require('../utils/helper');
 
 const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
 const CHECKPOINT_ENABLED = process.env.CHECKPOINT_ENABLED === 'true';
@@ -185,49 +200,38 @@ class AbTastyScraperService {
    */
   async launchBrowser() {
     try {
-      // Check if we're in a serverless environment or local development
-      const isLocal = process.env.NODE_ENV !== 'production' && !process.env.AWS_LAMBDA_FUNCTION_NAME;
-      
-      let browserOptions = {
-        headless: true,
-        ignoreHTTPSErrors: true,
-        args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--window-size=1366,768', // Larger viewport for better cookie detection
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        
-        // CRITICAL: These flags help with cookie consent detection in headless
-        '--disable-blink-features=AutomationControlled', // Hide automation detection
-        '--disable-web-security',
-        '--allow-running-insecure-content',
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', // Real user agent
-      
-        ],
-      };
+        // 2. Use the helper to get the robust base args
+        // Only pass overrides here
+        const browserOptions = await buildPuppeteerLaunchOptions({
+            headless: 'new',
+            ignoreHTTPSErrors: true,
+            protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
+            timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000,
+            args: [
+                // Only pass args that are specific to this service
+                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                '--disable-features=IsolateOrigins,site-per-process', 
+                '--disable-sync',
+                '--disable-default-apps'
+            ]
+        });
 
-      // Use chromium for production/serverless, regular puppeteer for local
-      if (!isLocal) {
-        browserOptions.executablePath = await chromium.executablePath();
-        // browserOptions.headless = chromium.headless;
-      }
+        // 3. AWS Lambda Specific Logic
+        // Only inject Sparticuz args if we are strictly on Lambda
+        if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
+            console.log('Injecting AWS Lambda specific flags');
+            browserOptions.args = [...(chromium.args || []), ...browserOptions.args];
+            browserOptions.headless = chromium.headless;
+        }
 
-      const browser = await puppeteer.launch(browserOptions);
+        console.log(`Launching browser with executable: ${browserOptions.executablePath}`);
+        return await puppeteer.launch(browserOptions);
 
-      console.log('Browser launched successfully');
-      return browser;
     } catch (error) {
-      console.error('Error launching browser:', error);
-      throw new Error(`Failed to launch browser: ${error.message}`);
+        console.error('Failed to launch browser in AdobeTarget1_0Service:', error);
+        throw error;
     }
-  }
+}
 
   /**
    * Create and configure a new page with your optimizations
