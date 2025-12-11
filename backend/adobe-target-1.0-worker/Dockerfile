@@ -34,7 +34,7 @@ RUN npm install --omit=dev --ignore-scripts
 # 6. Copy Source Code
 # Go back to /app to copy the full backend folder (Includes 'utils'!)
 WORKDIR /app
-COPY backend /backend
+COPY backend ./backend
 
 # 7. Start the Worker
 WORKDIR /app/backend/adobe-target-1.0-worker
