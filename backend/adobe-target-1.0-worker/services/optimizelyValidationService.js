@@ -198,7 +198,7 @@ class OptimizelyValidationService {
                 error: error.message
               });
             } finally {
-              // ✅ CRITICAL FIX: Close page before closing browser
+              // ✅ CRITICAL FIX: Close page (inner try-catch-finally)
               if (page) {
                 try {
                   console.log(`🔒 Closing page...`);
@@ -213,32 +213,33 @@ class OptimizelyValidationService {
                   console.warn(`⚠️  Error closing page (non-fatal):`, e.message);
                 }
               }
-              
-              // Always close browser with timeout to prevent hanging
-              console.log(`🔒 Closing browser...`);
-              if (browser) {
+            }
+          } finally {
+            // ✅ CRITICAL FIX: Close browser (outer try-finally)
+            console.log(`🔒 Closing browser...`);
+            if (browser) {
+              try {
+                // Add timeout to browser.close() to prevent hanging
+                await Promise.race([
+                  browser.close(),
+                  new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Browser close timeout')), 10000)
+                  )
+                ]);
+                console.log(`🔒 Browser closed successfully`);
+              } catch (e) {
+                console.error(`⚠️  Error closing browser (non-fatal):`, e.message);
+                // Try to force close if normal close fails
                 try {
-                  // Add timeout to browser.close() to prevent hanging
-                  await Promise.race([
-                    browser.close(),
-                    new Promise((_, reject) => 
-                      setTimeout(() => reject(new Error('Browser close timeout')), 10000)
-                    )
-                  ]);
-                  console.log(`🔒 Browser closed successfully`);
-                } catch (e) {
-                  console.error(`⚠️  Error closing browser (non-fatal):`, e.message);
-                  // Try to force close if normal close fails
-                  try {
-                    if (browser.process && browser.process()) {
-                      browser.process().kill('SIGKILL');
-                    }
-                  } catch (killError) {
-                    console.error(`⚠️  Could not force kill browser process:`, killError.message);
+                  if (browser.process && browser.process()) {
+                    browser.process().kill('SIGKILL');
                   }
+                } catch (killError) {
+                  console.error(`⚠️  Could not force kill browser process:`, killError.message);
                 }
               }
             }
+          }
 
           // Progress update with error handling and timeout
           try {
@@ -273,32 +274,32 @@ class OptimizelyValidationService {
           }
 
         } catch (loopError) {
-          // Catch any unexpected errors in the loop itself
-          console.error(`❌ CRITICAL: Unexpected error in processing loop at URL ${urlIndex}/${urls.length}:`, loopError.message);
-          console.error(`Stack trace:`, loopError.stack);
-          console.log(`⏭️  Continuing with next URL despite error...`);
-          
-          // Add to failed results
-          results.failed.push({
-            url: urlEntry?.url || 'unknown',
-            companyName: urlEntry?.companyName || 'N/A',
-            status: 'failed',
-            detectionDetails: {
-              projectId: null,
-              experiments: [],
-              experimentCount: 0,
-              activeCount: 0,
-              detectedExplicitly: false,
-              captchaDetected: false,
+            // Catch any unexpected errors in the loop itself
+            console.error(`❌ CRITICAL: Unexpected error in processing loop at URL ${urlIndex}/${urls.length}:`, loopError.message);
+            console.error(`Stack trace:`, loopError.stack);
+            console.log(`⏭️  Continuing with next URL despite error...`);
+            
+            // Add to failed results
+            results.failed.push({
+              url: urlEntry?.url || 'unknown',
+              companyName: urlEntry?.companyName || 'N/A',
+              status: 'failed',
+              detectionDetails: {
+                projectId: null,
+                experiments: [],
+                experimentCount: 0,
+                activeCount: 0,
+                detectedExplicitly: false,
+                captchaDetected: false,
+                error: `Unexpected loop error: ${loopError.message}`
+              },
+              scrapedAt: new Date(),
               error: `Unexpected loop error: ${loopError.message}`
-            },
-            scrapedAt: new Date(),
-            error: `Unexpected loop error: ${loopError.message}`
-          });
-          
-          // Continue to next URL
-          continue;
-        }
+            });
+            
+            // Continue to next URL
+            continue;
+          }
       }
 
       console.log(`\n${'─'.repeat(80)}`);
