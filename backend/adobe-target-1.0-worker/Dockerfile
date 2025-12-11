@@ -1,5 +1,5 @@
 # Use a lightweight Node.js image
-FROM node:18-bullseye-slim
+FROM node:20-bookworm-slim
 
 # 1. Install Chromium and required Linux libraries manually
 # This guarantees the browser exists at /usr/bin/chromium
