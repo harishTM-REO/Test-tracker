@@ -24,15 +24,7 @@ const {
 } = require(path.join(__dirname, '../../services/utils/batchProcessingHelpers'));
 
 // Lazy-load ESM-only p-queue
-let PQueue;
-async function loadPQueue() {
-    if (!PQueue) {
-        const mod = await import('p-queue');
-        PQueue = mod.default || mod;
-    }
-    return PQueue;
-}
-
+const PQueue = require('p-queue');
 
 let puppeteer;
 try {
@@ -416,8 +408,10 @@ class AdobeTarget1_0Service {
     // Ensure pool is ready
     await browserPool.initialize();
 
-    const QueueCtor = await loadPQueue();
-    const queue = new QueueCtor({ concurrency: concurrency });
+    const PQueueLib = require('p-queue');
+    const PQueue = PQueueLib.default || PQueueLib; 
+    
+    const queue = new PQueue({ concurrency: concurrency });
 
     // 2. Create tasks (NO manual browser launch here)
     const tasks = urls.map((entry, idx) => queue.add(async () => {
