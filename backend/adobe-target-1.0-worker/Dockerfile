@@ -1,5 +1,6 @@
 FROM node:20-bookworm-slim
 
+# Install Chromium deps
 RUN apt-get update && apt-get install -y \
     chromium \
     libnss3 \
@@ -22,20 +23,17 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 
-WORKDIR /app
-
-
-COPY backend/adobe-target-1.0-worker/package*.json ./backend/adobe-target-1.0-worker/
-
-# 5. Install Dependencies
+# Build context = adobe-target-1.0-worker
 WORKDIR /app/backend/adobe-target-1.0-worker
+
+# Copy package files for install
+COPY package*.json ./
+
+# Install deps
 RUN npm install --omit=dev --ignore-scripts
 
-# 6. Copy Source Code
-# Go back to /app to copy the full backend folder (Includes 'utils'!)
-WORKDIR /app
-COPY backend ./backend
+# Copy the rest of worker source
+COPY . .
 
-# 7. Start the Worker
-WORKDIR /app/backend/adobe-target-1.0-worker
+# Start worker
 CMD ["npm", "start"]
