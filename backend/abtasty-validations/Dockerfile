@@ -1,8 +1,5 @@
-# Use a lightweight Node.js image
 FROM node:20-bookworm-slim
 
-# 1. Install Chromium and required Linux libraries manually
-# This guarantees the browser exists at /usr/bin/chromium
 RUN apt-get update && apt-get install -y \
     chromium \
     libnss3 \
@@ -21,23 +18,23 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Set Environment Variables explicitly
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 
-# 3. Setup App Directory
 WORKDIR /app
 
-# 4. Install Dependencies
-# Copy package files first for better caching
-COPY package*.json ./
-# Run install (and ignore the postinstall script if it still exists)
+# Copy specific package.json
+COPY backend/abtasty-validations/package*.json ./backend/abtasty-validations/
+
+# Install specific deps
+WORKDIR /app/backend/abtasty-validations
 RUN npm ci --omit=dev --ignore-scripts
 
-# 5. Copy the rest of your code
-COPY . .
+# Copy ALL backend code (so utils are available)
+WORKDIR /app
+COPY backend ./backend
 
-# 6. Start the server
+# Start specific worker
+WORKDIR /app/backend/abtasty-validations
 CMD ["npm", "start"]
-

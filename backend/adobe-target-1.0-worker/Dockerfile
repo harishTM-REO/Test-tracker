@@ -1,4 +1,4 @@
-# Use Bookworm for Modern Chromium (v120+)
+# Use Bookworm for Modern Chromium (v120+) - Fixes Protocol Error
 FROM node:20-bookworm-slim
 
 # 1. Install Chromium & Libraries
@@ -29,6 +29,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 # 4. Copy Worker Dependencies
+# Note: We copy from the ROOT context path
 COPY backend/adobe-target-1.0-worker/package*.json ./backend/adobe-target-1.0-worker/
 
 # 5. Install Dependencies
@@ -36,11 +37,10 @@ WORKDIR /app/backend/adobe-target-1.0-worker
 RUN npm ci --omit=dev --ignore-scripts
 
 # 6. Copy Source Code
-# This requires build context to be the REPO ROOT
+# Go back to /app to copy the full backend folder (Includes 'utils'!)
 WORKDIR /app
-COPY backend/utils ./backend/utils
-COPY backend/adobe-target-1.0-worker ./backend/adobe-target-1.0-worker
+COPY backend ./backend
 
-# 7. Start
+# 7. Start the Worker
 WORKDIR /app/backend/adobe-target-1.0-worker
 CMD ["npm", "start"]
