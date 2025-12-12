@@ -99,7 +99,7 @@ class ABTastyValidationService {
           datasetId,
           datasetName,
           resultId: validationResult._id,
-          batchKey,
+          // batchKey,
           urls: chunk,
           concurrency: CONCURRENCY,
           flushEvery: FLUSH_EVERY,
