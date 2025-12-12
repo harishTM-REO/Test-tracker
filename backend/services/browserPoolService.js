@@ -298,8 +298,11 @@ class BrowserPoolService {
 
     if (this.needsRestart(browser)) {
       const effectiveLimit = this.getMaxPagesBeforeRestart();
-      console.log(`🔄 Browser reached page limit (${this.pageCountPerBrowser.get(browser)}/${effectiveLimit}), scheduling restart...`);
+      const currentPageCount = this.pageCountPerBrowser.get(browser);
+      console.log(`\n🔄 [releaseBrowser] Browser reached page limit (${currentPageCount}/${effectiveLimit}), scheduling restart...`);
+      console.log(`   📍 [releaseBrowser] Calling scheduleAsyncRestart() now...`);
       this.scheduleAsyncRestart(browser);
+      console.log(`   ✅ [releaseBrowser] scheduleAsyncRestart() called (will execute asynchronously)\n`);
       
       if (this.waitingQueue.length > 0) {
         const resolve = this.waitingQueue.shift();
@@ -338,28 +341,41 @@ class BrowserPoolService {
   }
 
   async scheduleAsyncRestart(browser) {
+    // ✅ ENHANCED LOGGING: Log immediately when function is called
+    const pageCount = this.pageCountPerBrowser.get(browser) || 0;
+    const effectiveLimit = this.getMaxPagesBeforeRestart();
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🔄 [scheduleAsyncRestart] CALLED - Browser page count: ${pageCount}/${effectiveLimit}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
     setTimeout(async () => {
       try {
         const browserIndex = this.browsers.indexOf(browser);
-        if (browserIndex === -1) return;
+        if (browserIndex === -1) {
+          console.warn(`⚠️  [scheduleAsyncRestart] Browser not found in pool array, skipping restart`);
+          return;
+        }
 
-        const effectiveLimit = this.getMaxPagesBeforeRestart();
-        console.log(`🔧 Closing browser ${browserIndex + 1} due to page limit (${this.pageCountPerBrowser.get(browser)}/${effectiveLimit})...`);
+        console.log(`🔧 [scheduleAsyncRestart] STEP 1: Closing browser ${browserIndex + 1} due to page limit (${this.pageCountPerBrowser.get(browser)}/${effectiveLimit})...`);
 
         // ✅ MEMORY OPTIMIZATION: Fully close browser (not just restart)
         // This ensures all browser memory is released before launching fresh browser
         try {
           // Close all pages first
+          console.log(`   📄 [scheduleAsyncRestart] STEP 2: Closing all pages...`);
           const pages = await browser.pages();
+          console.log(`   📄 [scheduleAsyncRestart] Found ${pages.length} page(s) to close`);
           for (const page of pages) {
             try {
               await page.close();
+              console.log(`   ✅ [scheduleAsyncRestart] Page closed successfully`);
             } catch (e) {
-              console.warn(`   ⚠️  Could not close page: ${e.message}`);
+              console.warn(`   ⚠️  [scheduleAsyncRestart] Could not close page: ${e.message}`);
             }
           }
           
           // Close browser completely
+          console.log(`   🔒 [scheduleAsyncRestart] STEP 3: Closing browser process...`);
           await Promise.race([
             browser.close(),
             new Promise((_, reject) => 
@@ -367,24 +383,26 @@ class BrowserPoolService {
             )
           ]);
           
-          console.log(`   ✅ Browser ${browserIndex + 1} closed completely`);
+          console.log(`   ✅ [scheduleAsyncRestart] Browser ${browserIndex + 1} closed completely`);
           
           // Wait a bit for OS to reclaim memory
+          console.log(`   ⏳ [scheduleAsyncRestart] STEP 4: Waiting 1s for OS memory reclaim...`);
           await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (e) {
-          console.warn(`   ⚠️  Error closing browser: ${e.message}`);
+          console.warn(`   ⚠️  [scheduleAsyncRestart] Error closing browser: ${e.message}`);
           // Try to force kill if normal close fails
           try {
             if (browser.process && browser.process()) {
               browser.process().kill('SIGKILL');
-              console.log(`   🔪 Force killed browser process`);
+              console.log(`   🔪 [scheduleAsyncRestart] Force killed browser process`);
             }
           } catch (killError) {
-            console.warn(`   ⚠️  Could not force kill: ${killError.message}`);
+            console.warn(`   ⚠️  [scheduleAsyncRestart] Could not force kill: ${killError.message}`);
           }
         }
 
         // Mark as null during restart to prevent usage
+        console.log(`   🗑️  [scheduleAsyncRestart] STEP 5: Cleaning up browser references...`);
         this.browsers[browserIndex] = null;
         this.pageCountPerBrowser.delete(browser);
         this.busyBrowsers.delete(browser);
@@ -393,10 +411,11 @@ class BrowserPoolService {
         const availIdx = this.availableBrowsers.indexOf(browser);
         if (availIdx > -1) {
           this.availableBrowsers.splice(availIdx, 1);
+          console.log(`   ✅ [scheduleAsyncRestart] Removed from available browsers list`);
         }
 
         // ✅ Launch completely fresh browser (like Optimizely approach)
-        console.log(`   🚀 Launching fresh browser ${browserIndex + 1}...`);
+        console.log(`   🚀 [scheduleAsyncRestart] STEP 6: Launching fresh browser ${browserIndex + 1}...`);
         const newBrowser = await this.launchBrowser(browserIndex + 1);
         this.browsers[browserIndex] = newBrowser;
         this.pageCountPerBrowser.set(newBrowser, 0);
@@ -404,20 +423,26 @@ class BrowserPoolService {
         this.stats.totalBrowserRestarts++;
         this.stats.totalBrowsersClosed = (this.stats.totalBrowsersClosed || 0) + 1;
 
-        console.log(`✅ Browser ${browserIndex + 1} replaced with fresh instance (memory cleared)`);
+        console.log(`✅ [scheduleAsyncRestart] Browser ${browserIndex + 1} replaced with fresh instance (memory cleared)`);
+        console.log(`   📊 [scheduleAsyncRestart] Stats: Restarts=${this.stats.totalBrowserRestarts}, Closed=${this.stats.totalBrowsersClosed}`);
+        console.log(`${'='.repeat(60)}\n`);
         
         // Check if anyone is waiting for this new browser
         if (this.waitingQueue.length > 0 && this.availableBrowsers.length > 0) {
+             console.log(`   📋 [scheduleAsyncRestart] STEP 7: Assigning new browser to waiting request...`);
              const resolve = this.waitingQueue.shift();
              const b = this.availableBrowsers.pop();
              this.busyBrowsers.add(b);
              if (!this.browserAcquisitionTimes) this.browserAcquisitionTimes = new WeakMap();
              this.browserAcquisitionTimes.set(b, Date.now());
              resolve(b);
+             console.log(`   ✅ [scheduleAsyncRestart] New browser assigned to waiting request`);
         }
 
       } catch (error) {
-        console.error(`❌ Failed to replace browser: ${error.message}`);
+        console.error(`\n❌ [scheduleAsyncRestart] FAILED to replace browser: ${error.message}`);
+        console.error(`   Stack: ${error.stack}`);
+        console.error(`${'='.repeat(60)}\n`);
       }
     }, 0);
   }
