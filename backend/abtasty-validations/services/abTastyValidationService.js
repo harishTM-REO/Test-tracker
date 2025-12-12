@@ -109,7 +109,7 @@ class ABTastyValidationService {
             console.log(`\n\n♻️  [MEMORY REFRESH] Triggering full browser pool restart after Batch ${b + 1} to free ${process.env.MEMORY_THRESHOLD_MB}MB.`);
             
             // 1. Shutdown the memory-leaky Chromium process
-            await browserPool.close();
+            await browserPool.closeAll();
             
             // 2. Start a fresh, clean Chromium process
             await browserPool.initialize();
