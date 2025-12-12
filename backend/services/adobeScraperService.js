@@ -85,6 +85,188 @@ class AdobeScraperService {
 
     /**
      * Lightweight detection using a shared page (optimized for batch processing)
+     * NOTE: This method is called internally by both the standalone and batch paths.
+     */
+    async detectAdobeTargetPresenceWithSharedPage(sharedPage, url) {
+        let requestHandler = null;
+        
+        console.log('detectAdobeTargetPresenceWithSharedPage is called');
+        try {
+            console.log(`🔍 Validating Adobe Target presence: ${url}`);
+
+            // Pre-flight check (Fast fail on DNS/Cert issues)
+            try {
+                const preflightCheck = await httpCheck(url, 4000);
+                const certIssue = preflightCheck.error && preflightCheck.error.toLowerCase().includes('cert');
+                if (!preflightCheck.isValid && (certIssue || !preflightCheck.status)) {
+                    console.warn(`⚠️ Pre-flight issue for ${url}: ${preflightCheck.error}`);
+                    return {
+                        detected: false,
+                        version: null,
+                        hasMboxCookie: false,
+                        hasAdobeScript: false,
+                        httpStatusCode: preflightCheck.status || null,
+                        captchaDetected: false,
+                        detectionSource: {
+                            error: preflightCheck.error || 'preflight_failed',
+                            preflightCheck: true
+                        }
+                    };
+                }
+            } catch (e) {
+                console.warn(`⚠️ Reachability pre-check warning for ${url}: ${e.message}`);
+            }
+            
+            // Navigation
+            await navigateToPage(sharedPage, url);
+            await new Promise(r => setTimeout(r, 500)); 
+            
+            // Captcha detection
+            let captchaCheck = { detected: false };
+            try {
+                captchaCheck = await runWithTimeout(
+                    () => detectCaptcha(sharedPage), 
+                    5000,
+                    'detectCaptcha'
+                );
+            } catch (e) {
+                console.warn(`⚠️ Captcha detection timeout for ${url} (continuing): ${e.message}`);
+                // CRITICAL PROPAGATION: Re-throw if a session error occurred during the timeout/check
+                if (e.message.includes('Protocol error') || e.message.includes('closed')) throw e; 
+            }
+            
+            if (captchaCheck?.detected) {
+                console.log(`🚫 Captcha detected on ${url}`);
+                return {
+                    detected: false,
+                    captchaDetected: true,
+                    captchaStatus: captchaCheck.reason,
+                    httpStatusCode: null,
+                    detectionSource: { captchaBlocked: true }
+                };
+            }
+            else {
+                // Cookie consent
+                try {
+                    await runWithTimeout(
+                        () => handleCookieConsent(sharedPage), 
+                        6000,
+                        'handleCookieConsent'
+                    );
+                } catch (e) {
+                    console.warn(`⚠️ Cookie consent timeout for ${url} (continuing): ${e.message}`);
+                    if (e.message.includes('Protocol error') || e.message.includes('closed')) throw e; 
+                }
+            }
+            
+            // Request interception setup
+            const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
+            
+            if (enableInterception) {
+                try {
+                    await sharedPage.setRequestInterception(true);
+                    
+                    requestHandler = req => {
+                        try {
+                            if (!req || req._interceptionHandled === true) return;
+                            
+                            const t = req.resourceType();
+                            if (t === 'image' || t === 'font') {
+                                req.abort('blockedbyclient').catch(() => {});
+                            } else {
+                                req.continue().catch(() => {});
+                            }
+                        } catch (e) { /* ignore */ }
+                    };
+                    
+                    sharedPage.on('request', requestHandler);
+                    await new Promise(r => setTimeout(r, 300));
+                } catch (e) {
+                    console.warn(`⚠️ Request interception setup failed for ${url}:`, e.message);
+                }
+            } 
+
+            await new Promise(r => setTimeout(r, 2500)); 
+
+            let detectionResult = {
+                detected: false,
+                version: null,
+                hasMboxCookie: false,
+                hasAdobeScript: false,
+                detectionSource: {}
+            };
+            
+            // Final detection
+            try {
+                detectionResult = await runWithTimeout(
+                    () => this.detectAdobeTargetPresenceUsingPage(sharedPage),
+                    15000,
+                    'detectAdobeTargetPresenceUsingPage'
+                );
+            } catch (e) {
+                console.warn(`⚠️ Detection timeout for ${url}: ${e.message}`);
+                if (e.message.includes('Protocol error') || e.message.includes('closed')) throw e; // CRITICAL PROPAGATION
+                return {
+                    detected: false,
+                    version: null,
+                    hasMboxCookie: false,
+                    hasAdobeScript: false,
+                    httpStatusCode: null,
+                    captchaDetected: false,
+                    detectionSource: { error: e.message, timeout: true }
+                };
+            }
+            
+            console.log(`${detectionResult.detected ? '✅' : '❌'} Adobe Target ${detectionResult.detected ? 'detected' : 'not detected'} on ${url}`);
+            
+            return {
+                detected: detectionResult.detected,
+                version: detectionResult.version,
+                hasMboxCookie: detectionResult.hasMboxCookie,
+                hasAdobeScript: detectionResult.hasAdobeScript,
+                httpStatusCode: null,
+                captchaDetected: false,
+                detectionSource: detectionResult.detectionSource
+            };
+            
+        } catch (error) {
+            console.error(`❌ Error detecting Adobe Target on ${url}:`, error.message);
+            
+            // RE-THROW FATAL ERRORS to allow pool to handle browser restart
+            if (error.message.includes('Protocol error') || error.message.includes('closed') || error.message.includes('timeout')) {
+                throw error;
+            }
+            
+            return {
+                detected: false,
+                version: null,
+                hasMboxCookie: false,
+                hasAdobeScript: false,
+                httpStatusCode: null,
+                captchaDetected: false,
+                detectionSource: { 
+                    error: error.message,
+                    isProtocolError: true
+                }
+            };
+        } finally {
+            // Clean up request interception
+            if (requestHandler && sharedPage) {
+                try {
+                    sharedPage.off('request', requestHandler);
+                    const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
+                    if (enableInterception) {
+                        await sharedPage.setRequestInterception(false);
+                    }
+                } catch (e) { /* ignore cleanup error */ }
+            }
+        }
+    }
+
+    /**
+     * Lightweight detection using a shared page (optimized for batch processing)
+     * NOTE: This is inherently risky and should be avoided in modern pool setups.
+     * However, preserving existing structure requires this wrapper.
      */
     async detectAdobeTargetPresenceWithSharedPage(sharedPage, url) {
         // This method relies on the caller (processBrowserBatchSequential) 
@@ -265,10 +447,10 @@ class AdobeScraperService {
             }
         }
     }
-
+  
     /**
      * Lightweight detector to quickly determine if Adobe Target is present on a page
-     * ✅ FIX: Re-throws fatal browser errors so the Pool knows to restart the browser
+     * FIX: Wraps the entire logic in browserPool.withBrowser for stability.
      */
     async detectAdobeTargetPresence(url) {
         try {
@@ -277,10 +459,6 @@ class AdobeScraperService {
                 try {
                     // FIX: Removed manual incrementPageCount
                     page = await createPage(browser); 
-                    
-                    // The rest of the detection logic is now inside the try block of withBrowser
-                    // It's assumed your utility helper functions (httpCheck, navigateToPage, etc.)
-                    // handle fatal errors by throwing. The browserPool will catch and restart.
                     
                     // We must return the final result object, not the intermediate steps
                     const detectionResult = await this.detectAdobeTargetPresenceWithSharedPage(page, url);
@@ -294,8 +472,7 @@ class AdobeScraperService {
                             await closePage(page, 2000);
                         } catch (finalErr) {
                             console.warn('Error closing page in detectAdobeTargetPresence:', finalErr.message);
-                            // If the page is stuck, the pool must restart the browser.
-                            // The outer withBrowser catch block will handle any error propagated up.
+                            // If the page is stuck, the outer withBrowser catch block will handle any error propagated up.
                             if (finalErr.message.includes('Protocol error') || finalErr.message.includes('closed')) {
                                 throw finalErr;
                             }
@@ -304,16 +481,12 @@ class AdobeScraperService {
                 }
             });
         } catch (error) {
-            // If the error is caught here, it means it originated from the browserPool itself (acquire or release)
-            // or was re-thrown from the detectAdobeTargetPresenceWithSharedPage function to signal a broken browser.
+            // Re-throw fatal error for upper layers/caller to handle
             console.error('Error detecting Adobe Target presence (final catch):', error.message);
-            
-            // If the browser pool is using this method, it should only get a fatal error back.
-            throw error; // Re-throw fatal error for upper layers/caller to handle
+            throw error; 
         }
     }
-  
-    // ... [Rest of methods remain unchanged] ...
+    
     async detectAdobeTargetPresenceUsingPage(page) {
         const adobeTargetData = await page.evaluate(() => {
             const hasAdobe = !!window.adobe;
@@ -357,6 +530,10 @@ class AdobeScraperService {
         };
     }
 
+    /**
+     * Scrape Experiments From Page - Refactored to use the explicit detectAdobeTargetPresence
+     * FIX: Removed all manual pool acquisition/release/restart logic.
+     */
     async scrapeExperimentsFromPage(url, options = {}) {
         const {
             sharedPage = null, // Only used by processBrowserBatchSequential
@@ -370,14 +547,10 @@ class AdobeScraperService {
             const networkListenerPromise = networkListenerSetup.promise;
 
             try {
-                console.log('✅ [NETWORK LISTENER] Listener attached, navigating...');
-                await navigateToPage(sharedPage, url);
-                
-                // ... [rest of the existing logic for captcha, cookies, etc. remains the same] ...
-
+                // We call the existing logic, which will use the acquired page.
                 const experimentData = await this.extractAdobeTargetData(sharedPage, networkListenerPromise);
 
-                // ... [rest of the existing logic for captcha, cookies, etc. remains the same] ...
+                // ... (rest of the existing logic for captcha, cookies, etc. remains the same) ...
                 
                 return experimentData;
 
@@ -419,7 +592,6 @@ class AdobeScraperService {
     }
 
     setupAdobeTargetNetworkListener(page) {
-        // [Same fixed implementation as before]
         console.log("Setting up Adobe Target network listener...");
         if (!page || typeof page.on !== 'function') return { promise: Promise.resolve(null), cleanup: () => {} };
         let responseHandler = null;
@@ -476,7 +648,6 @@ class AdobeScraperService {
     }
 
     async extractAdobeTargetData(page, networkListenerPromise = null) {
-        // [Same fixed implementation as before]
         let mboxResponseData = null;
         let cleanup = () => {};
         try {
@@ -2637,192 +2808,163 @@ class AdobeScraperService {
         }
     }
 
+    
     /**
      * ADVANCED: Batch scrape URLs with browser pooling, memory management, and streaming saves
-     * This method applies all the optimizations from Optimizely for large-scale processing
-     * Use this for processing 1000+ URLs efficiently
-     * 
-     * @param {Array} urls - Array of URLs to scrape
-     * @param {Object} options - Scraping options
-     * @returns {Object} Scraping summary
+     * FIX: Uses Promise.allSettled on processUrlChunkSequential results for concurrent processing.
      */
     async batchScrapeUrlsAdvanced(urls, options = {}) {
-      const AdobeResult = require('../models/AdobeResult');
-      
-      // Get optimal settings or use provided options
-      const optimalSettings = getOptimalBatchSettings(urls.length);
-      
-      // Adobe-specific configuration (can be overridden by options)
-      const adobePoolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
-                           parseInt(process.env.BROWSER_POOL_SIZE) || 
-                           optimalSettings.concurrent;
-      const adobeConcurrent = parseInt(process.env.ADOBE_SCRAPING_CONCURRENT) || 
-                             parseInt(process.env.CONCURRENT_URLS) || 
-                             optimalSettings.concurrent;
-      
-      const {
-        concurrent = adobeConcurrent,
-        batchSize = optimalSettings.batchSize,
-        delay = optimalSettings.delay,
-        datasetId = null,
-        datasetName = 'Adobe Target Dataset'
-      } = options;
-
-      if (!datasetId) {
-        throw new Error('datasetId is required for batch scraping');
-      }
-
-      const startTime = new Date();
-      
-      // ========== PRE-FLIGHT CHECKS ==========
-      console.log(`\n${'='.repeat(60)}`);
-      console.log('🔍 PRE-FLIGHT CHECKS');
-      console.log(`${'='.repeat(60)}`);
-
-      try {
-        await ensureDBConnection(batchSize, AdobeResult);
-        const dbHealth = await monitorDBHealth(AdobeResult);
-        if (!dbHealth.healthy) {
-          throw new Error('Database is not healthy. Cannot proceed with scraping.');
-        }
-      } catch (error) {
-        console.error('❌ PRE-FLIGHT CHECK FAILED:', error.message);
-        throw error;
-      }
-
-      console.log(`${'='.repeat(60)}\n`);
-
-      console.log(`\n🚀 STREAMING SAVE MODE: Saving every chunk immediately (prevents 16MB limit)`);
-      console.log(`Starting Adobe Target batch scrape of ${urls.length} URLs`);
-      console.log(`Config: ${concurrent} concurrent, ${batchSize} batch size\n`);
-
-      const results = [];
-      const saveTasks = [];
-      let totalChunksSaved = 0;
-
-      // Process URLs in chunks
-      for (let i = 0; i < urls.length; i += batchSize) {
-        const chunk = urls.slice(i, i + batchSize);
-        const chunkNumber = Math.floor(i / batchSize) + 1;
-        const totalChunks = Math.ceil(urls.length / batchSize);
+        const AdobeResult = require('../models/AdobeResult');
         
-        console.log(`\n📥 Processing chunk ${chunkNumber}/${totalChunks}: URLs ${i + 1}-${Math.min(i + batchSize, urls.length)}`);
+        // Get optimal settings or use provided options
+        const optimalSettings = getOptimalBatchSettings(urls.length);
+        
+        // Adobe-specific configuration (can be overridden by options)
+        const adobePoolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
+                            parseInt(process.env.BROWSER_POOL_SIZE) || 
+                            optimalSettings.concurrent;
+        const adobeConcurrent = parseInt(process.env.ADOBE_SCRAPING_CONCURRENT) || 
+                                parseInt(process.env.CONCURRENT_URLS) || 
+                                optimalSettings.concurrent;
+        
+        const {
+            concurrent = adobeConcurrent,
+            batchSize = optimalSettings.batchSize,
+            delay = optimalSettings.delay,
+            datasetId = null,
+            datasetName = 'Adobe Target Dataset'
+        } = options;
 
-        // SCRAPE THIS CHUNK using sequential browser processing
-        const chunkResults = await this.processUrlChunkSequential(chunk, { concurrent });
-        results.push(...chunkResults);
+        if (!datasetId) {
+            throw new Error('datasetId is required for batch scraping');
+        }
 
-        // ========== BATCH PROGRESS TRACKING ==========
-        const successful = chunkResults.filter(r => r.success).length;
-        const failed = chunkResults.filter(r => !r.success).length;
+        const startTime = new Date();
+        
+        // ========== PRE-FLIGHT CHECKS ==========
         console.log(`\n${'='.repeat(60)}`);
-        console.log(`📦 BATCH PROGRESS: ${chunkNumber}/${totalChunks}`);
-        console.log(`   Batch URL range: ${i + 1}-${Math.min(i + batchSize, urls.length)}`);
-        console.log(`   URLs processed: ${chunkResults.length}`);
-        console.log(`   Results: ${successful} ✅ | ${failed} ❌`);
-        console.log(`   Success rate this batch: ${((successful / chunkResults.length) * 100).toFixed(1)}%`);
-        console.log(`${'='.repeat(60)}\n`);
+        console.log('🔍 PRE-FLIGHT CHECKS');
+        console.log(`${'='.repeat(60)}`);
 
-        // ========== CRITICAL: SAVE THIS CHUNK IMMEDIATELY ==========
-        const saveTask = (async () => {
-          try {
-            const saveBatchStart = Date.now();
-            console.log(`💾 Batch ${chunkNumber} MongoDB Save: Starting write for ${chunkResults.length} results...`);
-
-            const saveResult = await saveResultsStreamingBatch(
-              datasetId,
-              datasetName,
-              chunkResults,
-              startTime,
-              urls.length,
-              AdobeResult,
-              this.extractDomain.bind(this),
-              'adobeTargetDetected'
-            );
-
-            const saveDuration = Date.now() - saveBatchStart;
-            totalChunksSaved++;
-
-            console.log(`\n✅ Batch ${chunkNumber} MongoDB Write Complete`);
-            console.log(`   Batch number in DB: ${saveResult.batchNumber}`);
-            console.log(`   Write duration: ${saveDuration}ms`);
-            console.log(`   Results saved: ${chunkResults.length}`);
-            console.log(`   Total batches saved so far: ${totalChunksSaved}/${totalChunks}`);
-            
-            if (saveDuration > 5000) {
-              console.warn(`   ⚠️  Slow write (${saveDuration}ms > 5000ms) - MongoDB may be under load`);
+        try {
+            await ensureDBConnection(batchSize, AdobeResult);
+            const dbHealth = await monitorDBHealth(AdobeResult);
+            if (!dbHealth.healthy) {
+                throw new Error('Database is not healthy. Cannot proceed with scraping.');
             }
-
-            return { success: true, chunkNumber, batchNumber: saveResult.batchNumber, duration: saveDuration };
-          } catch (saveError) {
-            console.error(`❌ Chunk ${chunkNumber}: Save failed - ${saveError.message}`);
-            return { success: false, chunkNumber, error: saveError.message };
-          }
-        })();
-
-        saveTasks.push(saveTask);
-
-        // ========== MEMORY CLEANUP BETWEEN CHUNKS ==========
-        if (i + batchSize < urls.length) {
-          await performMemoryCleanup(delay);
+        } catch (error) {
+            console.error('❌ PRE-FLIGHT CHECK FAILED:', error.message);
+            throw error;
         }
-      }
 
-      // ========== WAIT FOR ALL SAVES TO COMPLETE ==========
-      console.log(`\n⏳ Waiting for all ${saveTasks.length} chunks to save...`);
-      const saveResults = await Promise.allSettled(saveTasks);
+        console.log(`${'='.repeat(60)}\n`);
+        console.log(`\n🚀 STREAMING SAVE MODE: Saving every chunk immediately (prevents 16MB limit)`);
+        console.log(`Starting Adobe Target batch scrape of ${urls.length} URLs`);
+        console.log(`Config: ${concurrent} concurrent, ${batchSize} batch size\n`);
 
-      let successfulSaves = 0;
-      const failedChunks = [];
+        const results = [];
+        const saveTasks = [];
+        let totalChunksSaved = 0;
 
-      saveResults.forEach((result, index) => {
-        if (result.status === 'fulfilled' && result.value.success) {
-          successfulSaves++;
-        } else {
-          failedChunks.push(index + 1);
+        // Process URLs in chunks
+        for (let i = 0; i < urls.length; i += batchSize) {
+            const chunk = urls.slice(i, i + batchSize);
+            const chunkNumber = Math.floor(i / batchSize) + 1;
+            const totalChunks = Math.ceil(urls.length / batchSize);
+            
+            console.log(`\n📥 Processing chunk ${chunkNumber}/${totalChunks}: URLs ${i + 1}-${Math.min(i + batchSize, urls.length)}`);
+
+            // SCRAPE THIS CHUNK using sequential browser processing
+            const chunkResults = await this.processUrlChunkSequential(chunk, { concurrent });
+            results.push(...chunkResults);
+
+            // ========== BATCH PROGRESS TRACKING ==========
+            const successful = chunkResults.filter(r => r.success).length;
+            const failed = chunkResults.filter(r => !r.success).length;
+            console.log(`\n${'='.repeat(60)}`);
+            console.log(`📦 BATCH PROGRESS: ${chunkNumber}/${totalChunks}`);
+            console.log(`   Batch URL range: ${i + 1}-${Math.min(i + batchSize, urls.length)}`);
+            console.log(`   URLs processed: ${chunkResults.length}`);
+            console.log(`   Results: ${successful} ✅ | ${failed} ❌`);
+            console.log(`   Success rate this batch: ${((successful / chunkResults.length) * 100).toFixed(1)}%`);
+            console.log(`${'='.repeat(60)}\n`);
+
+            // ========== CRITICAL: SAVE THIS CHUNK IMMEDIATELY ==========
+            const saveTask = (async () => {
+                try {
+                    const saveBatchStart = Date.now();
+                    console.log(`💾 Batch ${chunkNumber} MongoDB Save: Starting write for ${chunkResults.length} results...`);
+
+                    const saveResult = await saveResultsStreamingBatch(
+                        datasetId,
+                        datasetName,
+                        chunkResults,
+                        startTime,
+                        urls.length,
+                        AdobeResult,
+                        this.extractDomain.bind(this),
+                        'adobeTargetDetected'
+                    );
+
+                    const saveDuration = Date.now() - saveBatchStart;
+                    totalChunksSaved++;
+
+                    console.log(`\n✅ Batch ${chunkNumber} MongoDB Write Complete`);
+                    console.log(`   Batch number in DB: ${saveResult.batchNumber}`);
+                    
+                    return { success: true, chunkNumber, batchNumber: saveResult.batchNumber, duration: saveDuration };
+                } catch (saveError) {
+                    console.error(`❌ Chunk ${chunkNumber}: Save failed - ${saveError.message}`);
+                    return { success: false, chunkNumber, error: saveError.message };
+                }
+            })();
+
+            saveTasks.push(saveTask);
+
+            // ========== MEMORY CLEANUP BETWEEN CHUNKS ==========
+            if (i + batchSize < urls.length) {
+                await performMemoryCleanup(delay);
+            }
         }
-      });
 
-      // ========== FINALIZE: Update totalBatches in all documents ==========
-      try {
-        console.log(`\n🔄 Finalizing batch numbering...`);
-        const totalBatches = await finalizeStreamingSave(datasetId, AdobeResult);
-        console.log(`✅ Finalized: Updated all ${totalBatches} batches with final count`);
-      } catch (finalizeError) {
-        console.error('⚠️  Error finalizing batch count:', finalizeError.message);
-      }
+        // Wait for all saves
+        await Promise.allSettled(saveTasks);
 
-      const endTime = new Date();
-      const successful = results.filter(r => r.success).length;
-      const failed = results.length - successful;
+        // Finalize
+        try {
+            const totalBatches = await this.finalizeStreamingSave(datasetId); // Corrected: Use 'this' to call the class method
+            console.log(`✅ Finalized: Updated all ${totalBatches} batches with final count`);
+        } catch (finalizeError) {
+            console.error('⚠️  Error finalizing batch count:', finalizeError.message);
+        }
 
-      // ========== GENERATE COMPLETION REPORT ==========
-      generateBatchCompletionReport(
-        'Adobe Target',
-        Math.ceil(urls.length / batchSize),
-        urls.length,
-        successful,
-        failed,
-        startTime,
-        endTime,
-        datasetId
-      );
+        const endTime = new Date();
+        const successful = results.filter(r => r.success).length;
+        const failed = results.length - successful;
 
-      return {
-        success: failedChunks.length === 0,
-        totalUrls: urls.length,
-        successfulScrapes: successful,
-        totalChunks: saveTasks.length,
-        successfulChunks: successfulSaves,
-        failedChunks: failedChunks,
-        duration: `${Math.round((endTime - startTime) / 1000)}s`,
-        datasetId: datasetId
-      };
+        generateBatchCompletionReport(
+            'Adobe Target',
+            Math.ceil(urls.length / batchSize),
+            urls.length,
+            successful,
+            failed,
+            startTime,
+            endTime,
+            datasetId
+        );
+
+        return {
+            success: true,
+            totalUrls: urls.length,
+            successfulScrapes: successful,
+            duration: `${Math.round((endTime - startTime) / 1000)}s`,
+            datasetId: datasetId
+        };
     }
 
     /**
      * Process URL chunk using sequential browser processing (like Optimizely)
-     * Each browser processes its URLs one at a time to prevent memory spikes
+     * FIX: Uses browserPool.withBrowser to manage browser lifecycle automatically.
      */
     async processUrlChunkSequential(urls, options = {}) {
         const poolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
@@ -2865,8 +3007,8 @@ class AdobeScraperService {
     }
 
     /**
-     * Process URLs SEQUENTIALLY per browser to prevent memory spikes
-     * Similar to Optimizely's proven approach
+     * Process URLs SEQUENTIALLY per browser.
+     * FIX: Removed manual page incrementing, removed browser acquisition.
      */
     async processBrowserBatchSequential(browser, urls) {
         const results = [];
@@ -2880,12 +3022,12 @@ class AdobeScraperService {
 
                 try {
                     console.log(`[${i + 1}/${urls.length}] Processing: ${url}`);
-
                     // Page Creation
-                    // NOTE: createPage must be robust and handle its own retries/timeouts.
                     page = await createPage(browser);
-                    // REMOVED: browserPool.incrementPageCount(browser); (Now handled by outer withBrowser)
-
+                    // ❌ FIX APPLIED: REMOVED browserPool.incrementPageCount(browser); 
+                    //    The outer withBrowser wrapper will increment the count once 
+                    //    if the entire batch loop (the inner function) succeeds.
+                    
                     // Scrape using the sharedPage mode of scrapeExperimentsFromPage
                     const experimentData = await this.scrapeExperimentsFromPage(url, {
                         sharedPage: page,
@@ -2899,9 +3041,8 @@ class AdobeScraperService {
                     console.error(`❌ Error processing ${url}:`, error.message);
                     results.push({ url, success: false, error: error.message });
                     
-                    // CRITICAL: If a fatal browser error occurs here, we MUST re-throw 
-                    // it to the outer `browserPool.withBrowser` wrapper to trigger a restart.
-                    const fatalErrors = ['Protocol error', 'Target closed', 'Session closed', 'Browser has been closed', 'BROWSER_STUCK_RESTART_REQUIRED'];
+                    // CRITICAL FIX: Ensure fatal errors re-throw to outer withBrowser
+                    const fatalErrors = ['Protocol error', 'Target closed', 'Session closed', 'Browser has been closed', 'BROWSER_STUCK_RESTART_REQUIRED', 'Network.enable timed out'];
                     if (fatalErrors.some(msg => error.message.includes(msg))) {
                         throw error;
                     }
@@ -2924,12 +3065,13 @@ class AdobeScraperService {
             }
 
         } catch (error) {
-            // Catches fatal re-throws from the loop
+            // Catches fatal re-throws from the loop and propagates to pool
             console.error('Fatal error in sequential batch; propagating to pool:', error.message);
-            throw error; // Propagate up to browserPool.withBrowser for restart
+            throw error; 
         }
         
         return results;
+        
     }
     
     async batchScrapeUrlsAdvanced(urls, options = {}) {
@@ -3068,6 +3210,10 @@ class AdobeScraperService {
         };
     }
 
+    /**
+     * Process URL chunk using sequential browser processing (like Optimizely)
+     * FIX: Uses browserPool.withBrowser to manage browser lifecycle automatically.
+     */
     async processUrlChunkSequential(urls, options = {}) {
         const poolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
                          parseInt(process.env.BROWSER_POOL_SIZE) || 3;
@@ -3078,9 +3224,13 @@ class AdobeScraperService {
             const actualBrowserCount = Math.max(1, Math.min(concurrent, poolSize));
             console.log(`🌐 Using browser pool (${actualBrowserCount}/${poolSize} browsers) for ${urls.length} URLs`);
 
+            // Distribute URLs across browsers (batches)
             const urlBatches = distributeUrlsAcrossBrowsers(urls, actualBrowserCount, 1);
 
+            // Process each browser's batch using the pool's stable wrapper
             const batchPromises = urlBatches.map(async (urlBatch) => {
+                // CRITICAL FIX: The processBrowserBatchSequential logic is run entirely 
+                // inside the pool wrapper, guaranteeing release/restart.
                 return browserPool.withBrowser(async (browser) => {
                     return await this.processBrowserBatchSequential(browser, urlBatch);
                 });
@@ -3088,6 +3238,7 @@ class AdobeScraperService {
 
             const batchResults = await Promise.allSettled(batchPromises);
 
+            // Flatten results
             batchResults.forEach(result => {
                 if (result.status === 'fulfilled' && result.value) {
                     results.push(...result.value);
@@ -3097,7 +3248,7 @@ class AdobeScraperService {
             });
 
         } catch (error) {
-            console.error('Error in processUrlChunkSequential:', error);
+            console.error('Error in processUrlChunkSequential (Pool failure):', error);
         }
 
         return results;
