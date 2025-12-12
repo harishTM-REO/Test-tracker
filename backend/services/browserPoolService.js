@@ -343,25 +343,68 @@ class BrowserPoolService {
         const browserIndex = this.browsers.indexOf(browser);
         if (browserIndex === -1) return;
 
-        console.log(`🔧 Restarting browser ${browserIndex + 1} due to page limit...`);
+        const effectiveLimit = this.getMaxPagesBeforeRestart();
+        console.log(`🔧 Closing browser ${browserIndex + 1} due to page limit (${this.pageCountPerBrowser.get(browser)}/${effectiveLimit})...`);
 
+        // ✅ MEMORY OPTIMIZATION: Fully close browser (not just restart)
+        // This ensures all browser memory is released before launching fresh browser
         try {
-          await browser.close();
+          // Close all pages first
+          const pages = await browser.pages();
+          for (const page of pages) {
+            try {
+              await page.close();
+            } catch (e) {
+              console.warn(`   ⚠️  Could not close page: ${e.message}`);
+            }
+          }
+          
+          // Close browser completely
+          await Promise.race([
+            browser.close(),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Browser close timeout')), 10000)
+            )
+          ]);
+          
+          console.log(`   ✅ Browser ${browserIndex + 1} closed completely`);
+          
+          // Wait a bit for OS to reclaim memory
+          await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (e) {
-          console.warn(`Could not close browser: ${e.message}`);
+          console.warn(`   ⚠️  Error closing browser: ${e.message}`);
+          // Try to force kill if normal close fails
+          try {
+            if (browser.process && browser.process()) {
+              browser.process().kill('SIGKILL');
+              console.log(`   🔪 Force killed browser process`);
+            }
+          } catch (killError) {
+            console.warn(`   ⚠️  Could not force kill: ${killError.message}`);
+          }
         }
 
         // Mark as null during restart to prevent usage
         this.browsers[browserIndex] = null;
+        this.pageCountPerBrowser.delete(browser);
+        this.busyBrowsers.delete(browser);
+        
+        // Remove from available browsers if it was there
+        const availIdx = this.availableBrowsers.indexOf(browser);
+        if (availIdx > -1) {
+          this.availableBrowsers.splice(availIdx, 1);
+        }
 
+        // ✅ Launch completely fresh browser (like Optimizely approach)
+        console.log(`   🚀 Launching fresh browser ${browserIndex + 1}...`);
         const newBrowser = await this.launchBrowser(browserIndex + 1);
         this.browsers[browserIndex] = newBrowser;
-        this.pageCountPerBrowser.delete(browser);
         this.pageCountPerBrowser.set(newBrowser, 0);
         this.availableBrowsers.push(newBrowser);
         this.stats.totalBrowserRestarts++;
+        this.stats.totalBrowsersClosed = (this.stats.totalBrowsersClosed || 0) + 1;
 
-        console.log(`✅ Browser ${browserIndex + 1} restarted successfully`);
+        console.log(`✅ Browser ${browserIndex + 1} replaced with fresh instance (memory cleared)`);
         
         // Check if anyone is waiting for this new browser
         if (this.waitingQueue.length > 0 && this.availableBrowsers.length > 0) {
@@ -374,7 +417,7 @@ class BrowserPoolService {
         }
 
       } catch (error) {
-        console.error(`❌ Failed to restart browser: ${error.message}`);
+        console.error(`❌ Failed to replace browser: ${error.message}`);
       }
     }, 0);
   }
@@ -628,7 +671,7 @@ class BrowserPoolService {
         return;
       }
   
-      console.log(`🔄 Force restarting browser ${browserIndex + 1} due to timeout...`);
+      console.log(`🔄 Force closing browser ${browserIndex + 1} due to timeout...`);
   
       this.busyBrowsers.delete(browser);
       // ✅ FIX: Cleaner array removal
@@ -637,22 +680,52 @@ class BrowserPoolService {
 
       if (this.browserAcquisitionTimes) this.browserAcquisitionTimes.delete(browser);
   
+      // ✅ MEMORY OPTIMIZATION: Fully close browser (close all pages first)
       try {
         if (browser) {
+          // Close all pages first
+          try {
+            const pages = await browser.pages();
+            for (const page of pages) {
+              try {
+                await page.close();
+              } catch (e) {
+                // Ignore page close errors
+              }
+            }
+          } catch (e) {
+            // Ignore if we can't get pages
+          }
+          
+          // Close browser completely
           await Promise.race([
             browser.close(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 5000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 10000))
           ]);
+          
+          // Wait for OS to reclaim memory
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
           this.stats.totalBrowsersClosed = (this.stats.totalBrowsersClosed || 0) + 1;
-          console.log(`✅ Old browser ${browserIndex + 1} closed`);
+          console.log(`✅ Old browser ${browserIndex + 1} closed completely`);
         }
       } catch (closeError) {
         console.warn(`⚠️  Could not gracefully close browser ${browserIndex + 1}: ${closeError.message}`);
+        // Try force kill
+        try {
+          if (browser.process && browser.process()) {
+            browser.process().kill('SIGKILL');
+            console.log(`   🔪 Force killed browser process`);
+          }
+        } catch (killError) {
+          // Ignore kill errors
+        }
       }
   
       this.browsers[browserIndex] = null;
       this.pageCountPerBrowser.delete(browser);
   
+      // ✅ Launch completely fresh browser
       let newBrowser;
       try {
         newBrowser = await Promise.race([
@@ -666,7 +739,7 @@ class BrowserPoolService {
         this.stats.totalBrowserRestarts++;
         this.stats.totalBrowsersCreated = (this.stats.totalBrowsersCreated || 0) + 1;
   
-        console.log(`✅ Browser ${browserIndex + 1} force-restarted successfully (pid: ${newBrowser.process?.().pid || 'n/a'})`);
+        console.log(`✅ Browser ${browserIndex + 1} replaced with fresh instance (pid: ${newBrowser.process?.().pid || 'n/a'})`);
       } catch (launchError) {
         console.error(`❌ Failed to launch new browser ${browserIndex + 1}: ${launchError.message}`);
         this.browsers[browserIndex] = null; // Ensure it stays null so health check can catch it later
