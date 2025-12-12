@@ -135,7 +135,10 @@ class AdobeTarget1_0Service {
             progressCallback(5, { message: 'Starting Adobe Target validation run' });
 
             // ========== CONFIGURATION FROM ENV ==========
-            const BATCH_SIZE = parseInt(process.env.BROWSER_RESTART_EVERY) || 25; 
+            // ✅ MEMORY OPTIMIZATION: Use smaller batch size for validation to reduce memory pressure
+            // This creates more frequent cleanup cycles (saw tooth wave pattern)
+            const BATCH_SIZE = parseInt(process.env.ADOBE_VALIDATION_BATCH_SIZE) || 
+                               parseInt(process.env.BROWSER_RESTART_EVERY) || 20; // Reduced from 25 to 20
             const CONCURRENCY = parseInt(process.env.PQUEUE_CONCURRENCY) || 1;
             
             const totalBatches = Math.max(1, Math.ceil(urls.length / BATCH_SIZE));
@@ -195,9 +198,11 @@ class AdobeTarget1_0Service {
                 }
             });
 
-            const positiveUrls = [];
-            const negativeUrls = [];
-            const failedUrls = [];
+            // ✅ MEMORY OPTIMIZATION: Use counters instead of accumulating all URLs in memory
+            // This prevents memory from growing linearly with URL count
+            let positiveCount = 0;
+            let negativeCount = 0;
+            let failedCount = 0;
             const scrapingStats = datasetDoc?.scrapingStats ? { ...datasetDoc.scrapingStats } : {
                 totalUrls: urls.length,
                 processedUrls: 0,
@@ -256,7 +261,7 @@ class AdobeTarget1_0Service {
                     
                     if (!targetUrl || targetUrl === 'INVALID_URL') {
                         const errorMsg = 'Invalid or missing URL in dataset';
-                        failedUrls.push('INVALID_URL');
+                        failedCount += 1;
                         scrapingStats.failedScans += 1;
                         scrapingStats.processedUrls += 1;
                         chunkFailures.push(this.buildValidationRecord({ url: 'INVALID_URL', companyName, status: 'failed', error: errorMsg }));
@@ -264,7 +269,7 @@ class AdobeTarget1_0Service {
                     }
 
                     if (!result.success) {
-                        failedUrls.push(targetUrl);
+                        failedCount += 1;
                         scrapingStats.failedScans += 1;
                         scrapingStats.processedUrls += 1;
                         chunkFailures.push(this.buildValidationRecord({ url: targetUrl, companyName, status: 'failed', error: result.error || 'Unknown error' }));
@@ -280,11 +285,11 @@ class AdobeTarget1_0Service {
                     const isDetected = !hasCaptcha && (explicitDetected === true || activityNames.length > 0 || activityIds.length > 0);
 
                     if (isDetected) {
-                        positiveUrls.push(targetUrl);
+                        positiveCount += 1;
                         scrapingStats.optimizelyDetected += 1;
                         chunkPositives.push(this.buildValidationRecord({ url: targetUrl, companyName, status: 'positive', adobeTargetData }));
                     } else {
-                        negativeUrls.push(targetUrl);
+                        negativeCount += 1;
                         chunkNegatives.push(this.buildValidationRecord({ url: targetUrl, companyName, status: 'negative', adobeTargetData }));
                     }
 
@@ -319,33 +324,71 @@ class AdobeTarget1_0Service {
                     failures: chunkFailures
                 });
 
-                // Memory Cleanup between batches
+                // ✅ MEMORY OPTIMIZATION: Clear chunk arrays after saving to DB
+                // This prevents memory accumulation across batches
+                chunkPositives.length = 0;
+                chunkNegatives.length = 0;
+                chunkFailures.length = 0;
+                chunkResults = null;
+
+                // ✅ AGGRESSIVE Memory Cleanup between batches
+                // This creates the "saw tooth wave" pattern: memory goes up during processing, down after cleanup
                 if (chunkNumber < totalBatches) {
-                    const batchDelay = parseInt(process.env.BATCH_DELAY) || 2000;
+                    const batchDelay = parseInt(process.env.BATCH_DELAY) || 3000; // Increased delay for better cleanup
+                    
+                    // Log memory before cleanup
+                    const memBefore = process.memoryUsage();
+                    const heapUsedMB = Math.round(memBefore.heapUsed / 1024 / 1024);
+                    const heapTotalMB = Math.round(memBefore.heapTotal / 1024 / 1024);
+                    console.log(`\n💾 Memory before cleanup: ${heapUsedMB}MB / ${heapTotalMB}MB (${Math.round((heapUsedMB / heapTotalMB) * 100)}%)`);
+                    
                     await performMemoryCleanup(batchDelay);
+                    
+                    // Log memory after cleanup
+                    const memAfter = process.memoryUsage();
+                    const heapUsedAfterMB = Math.round(memAfter.heapUsed / 1024 / 1024);
+                    const freedMB = heapUsedMB - heapUsedAfterMB;
+                    console.log(`💾 Memory after cleanup: ${heapUsedAfterMB}MB (freed ${freedMB}MB)`);
+                    
+                    // Force garbage collection if available (run with --expose-gc)
+                    if (global.gc) {
+                        console.log(`🗑️  Forcing garbage collection...`);
+                        global.gc();
+                        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for GC to complete
+                        
+                        const memAfterGC = process.memoryUsage();
+                        const heapUsedAfterGCMB = Math.round(memAfterGC.heapUsed / 1024 / 1024);
+                        const freedByGCMB = heapUsedAfterMB - heapUsedAfterGCMB;
+                        console.log(`💾 Memory after GC: ${heapUsedAfterGCMB}MB (freed ${freedByGCMB}MB total)`);
+                    }
                 }
             }
 
             // Final Stats & Cleanup
+            // ✅ MEMORY OPTIMIZATION: Use counts instead of arrays
+            // Fetch URLs from batch documents if needed for final result
             const endTime = new Date();
             const summary = {
                 totalUrls: urls.length,
-                positiveCount: positiveUrls.length,
-                negativeCount: negativeUrls.length,
-                failedCount: failedUrls.length,
-                detectionRate: urls.length > 0 ? Number(((positiveUrls.length / urls.length) * 100).toFixed(2)) : 0,
+                positiveCount: positiveCount,
+                negativeCount: negativeCount,
+                failedCount: failedCount,
+                detectionRate: urls.length > 0 ? Number(((positiveCount / urls.length) * 100).toFixed(2)) : 0,
                 startedAt: startTime,
                 completedAt: endTime,
                 durationMs: endTime - startTime
             };
 
+            // ✅ MEMORY OPTIMIZATION: Don't store all URLs in final document
+            // URLs are already saved in batch documents, we only need counts
             validationResultDoc.status = 'completed';
             validationResultDoc.completedAt = endTime;
             validationResultDoc.durationMs = summary.durationMs;
             validationResultDoc.summary = summary;
-            validationResultDoc.positiveUrls = positiveUrls;
-            validationResultDoc.negativeUrls = negativeUrls;
-            validationResultDoc.failedUrls = failedUrls;
+            // Store empty arrays - URLs are in batch documents
+            validationResultDoc.positiveUrls = [];
+            validationResultDoc.negativeUrls = [];
+            validationResultDoc.failedUrls = [];
             await validationResultDoc.save();
 
             if (datasetDoc) {

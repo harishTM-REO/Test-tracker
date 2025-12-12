@@ -457,8 +457,10 @@ class AdobeScraperService {
             return await browserPool.withBrowser(async (browser) => {
                 let page = null;
                 try {
-                    // FIX: Removed manual incrementPageCount
-                    page = await createPage(browser); 
+                    page = await createPage(browser);
+                    // ✅ MEMORY OPTIMIZATION: Increment page count for browser restart tracking
+                    // This ensures browsers restart more frequently for validation operations
+                    browserPool.incrementPageCount(browser); 
                     
                     // We must return the final result object, not the intermediate steps
                     const detectionResult = await this.detectAdobeTargetPresenceWithSharedPage(page, url);

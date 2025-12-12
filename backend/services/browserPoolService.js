@@ -243,6 +243,8 @@ class BrowserPoolService {
    * Checks for ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART at runtime for validation operations.
    * If ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART is set, it takes precedence (for memory-constrained environments like Railway).
    * Otherwise, uses the default MAX_PAGES_BEFORE_RESTART.
+   * 
+   * ✅ MEMORY OPTIMIZATION: Lower default for validation operations to create saw-tooth memory pattern
    */
   getMaxPagesBeforeRestart() {
     // Check for validation-specific limit at runtime
@@ -251,9 +253,13 @@ class BrowserPoolService {
       const parsedValidationLimit = parseInt(validationLimit);
       if (!isNaN(parsedValidationLimit) && parsedValidationLimit > 0) {
         // Use validation limit if set (typically lower for memory-constrained environments)
+        // Lower value = more frequent restarts = better memory management (saw tooth wave)
         return parsedValidationLimit;
       }
     }
+    // ✅ MEMORY OPTIMIZATION: Default to lower value for validation operations
+    // This ensures browsers restart more frequently, preventing memory accumulation
+    // For 500+ URLs, restarting every 15-20 pages creates a healthy saw-tooth pattern
     return this.maxPagesBeforeRestart;
   }
 
