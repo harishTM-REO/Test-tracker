@@ -632,63 +632,85 @@ async acquireBrowser() {
     }
   }
 
-  async forceRestartBrowser(browser) {
-    try {
+  // BrowserPoolService.js
+async forceRestartBrowser(browser) {
+  try {
       const browserIndex = this.browsers.indexOf(browser);
+      
       if (browserIndex === -1) {
-        // It might be a zombie browser instance not in our main array anymore
-        console.warn(`⚠️  Browser not found in pool index, closing orphaned instance`);
-        try { await browser.close(); } catch(e) {}
-        return;
+          // It might be a zombie browser instance not in our main array anymore
+          console.warn(`⚠️ Browser not found in pool index, closing orphaned instance`);
+          try { await browser.close(); } catch(e) {}
+          return;
       }
-  
+
       console.log(`🔄 Force restarting browser ${browserIndex + 1} due to timeout...`);
-  
+      
+      // --- 1. Clean up references ---
       this.busyBrowsers.delete(browser);
       // ✅ FIX: Cleaner array removal
       const availIdx = this.availableBrowsers.indexOf(browser);
       if (availIdx > -1) this.availableBrowsers.splice(availIdx, 1);
 
       if (this.browserAcquisitionTimes) this.browserAcquisitionTimes.delete(browser);
-  
+
+      // Get the underlying Chromium process reference BEFORE trying to close it
+      const processHandle = browser.process(); 
+
+      // --- 2. Attempt graceful close with timeout ---
       try {
-        if (browser) {
-          await Promise.race([
-            browser.close(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 5000))
-          ]);
-          this.stats.totalBrowsersClosed = (this.stats.totalBrowsersClosed || 0) + 1;
-          console.log(`✅ Old browser ${browserIndex + 1} closed`);
-        }
+          if (browser) {
+              await Promise.race([
+                  browser.close(),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 5000))
+              ]);
+              this.stats.totalBrowsersClosed = (this.stats.totalBrowsersClosed || 0) + 1;
+              console.log(`✅ Old browser ${browserIndex + 1} closed gracefully`);
+          }
       } catch (closeError) {
-        console.warn(`⚠️  Could not gracefully close browser ${browserIndex + 1}: ${closeError.message}`);
+          console.warn(`⚠️ Could not gracefully close browser ${browserIndex + 1}: ${closeError.message}. Attempting hard kill...`);
+          
+          // --- 3. AGGRESSIVE FALLBACK (New Change) ---
+          try {
+              if (processHandle && processHandle.pid) {
+                  processHandle.kill('SIGKILL');
+                  console.log(`✅ Process ${processHandle.pid} force-killed via SIGKILL.`);
+                  this.stats.totalBrowsersClosed = (this.stats.totalBrowsersClosed || 0) + 1;
+              } else {
+                  console.warn(`❌ Could not find process handle for hard kill.`);
+              }
+          } catch (killError) {
+              console.warn(`❌ Failed to SIGKILL process: ${killError.message}`);
+          }
       }
-  
+      
+      // --- 4. Prepare for new launch ---
       this.browsers[browserIndex] = null;
       this.pageCountPerBrowser.delete(browser);
-  
+
+      // --- 5. Launch new browser ---
       let newBrowser;
       try {
-        newBrowser = await Promise.race([
-          this.launchBrowser(browserIndex + 1),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Launch timeout after 15s')), 15000))
-        ]);
-  
-        this.browsers[browserIndex] = newBrowser;
-        this.pageCountPerBrowser.set(newBrowser, 0);
-        this.availableBrowsers.push(newBrowser);
-        this.stats.totalBrowserRestarts++;
-        this.stats.totalBrowsersCreated = (this.stats.totalBrowsersCreated || 0) + 1;
-  
-        console.log(`✅ Browser ${browserIndex + 1} force-restarted successfully (pid: ${newBrowser.process?.().pid || 'n/a'})`);
+          newBrowser = await Promise.race([
+              this.launchBrowser(browserIndex + 1),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Launch timeout after 15s')), 15000))
+          ]);
+
+          this.browsers[browserIndex] = newBrowser;
+          this.pageCountPerBrowser.set(newBrowser, 0);
+          this.availableBrowsers.push(newBrowser);
+          this.stats.totalBrowserRestarts++;
+          this.stats.totalBrowsersCreated = (this.stats.totalBrowsersCreated || 0) + 1;
+
+          console.log(`✅ Browser ${browserIndex + 1} force-restarted successfully (pid: ${newBrowser.process?.().pid || 'n/a'})`);
       } catch (launchError) {
-        console.error(`❌ Failed to launch new browser ${browserIndex + 1}: ${launchError.message}`);
-        this.browsers[browserIndex] = null; // Ensure it stays null so health check can catch it later
+          console.error(`❌ Failed to launch new browser ${browserIndex + 1}: ${launchError.message}`);
+          this.browsers[browserIndex] = null; // Ensure it stays null so health check can catch it later
       }
-    } catch (error) {
+  } catch (error) {
       console.error(`❌ Unexpected error in forceRestartBrowser: ${error.message}`);
-    }
   }
+}
   
 }
 

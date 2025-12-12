@@ -158,6 +158,13 @@ const buildPuppeteerLaunchOptions = async (overrides = {}) => {
         '--allow-running-insecure-content',
         '--disable-web-security',
         '--single-process', // Can improve stability, sometimes slightly increases memory
+        // ✅ New Memory/Resource Reduction Args:
+        '--disable-setuid-sandbox',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-breakpad',
+        '--disable-logging',
+        '--enable-features=NetworkService,NetworkServiceInProcess' // Forces networking into main process (less overhead)
     ];
 
     const { args: overrideArgs = [], headless, ignoreHTTPSErrors, ...restOverrides } = overrides;

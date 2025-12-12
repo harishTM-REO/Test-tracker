@@ -197,72 +197,54 @@ class ABTastyValidationService {
    * Uses streaming queue pattern to avoid building one giant array of tasks.
    */
   async processValidationChunk(urls, options = {}) {
+    // 1. Initialize the single results collector and the queue
+    const results = [];
     const queue = new PQueue({ concurrency: options.concurrency || 2 });
 
-    // add tasks streaming style
-    for (let idx = 0; idx < urls.length; idx++) {
-      const urlEntry = urls[idx];
-      queue.add(async () => {
-        const url = urlEntry.url;
-        console.log(`\n🔸 [${idx + 1}/${urls.length}] Validating ${url}`);
+    // 2. Map all URLs to a single task array, adding each task to the queue
+    const tasks = urls.map((urlEntry, idx) => {
+        return queue.add(async () => {
+            const url = urlEntry.url;
+            console.log(`\n🔸 [${idx + 1}/${urls.length}] Validating ${url}`);
 
-        try {
-          // Reachability check
-          try {
-            await isUrlReachable(url);
-          } catch (e) {
-            console.log(`   ❌ URL unreachable: ${url}`);
-            return this._makeFailedResult(urlEntry, 'URL unreachable');
-          }
+            let result;
+            try {
+                // Reachability check (lightweight)
+                try {
+                    await isUrlReachable(url);
+                } catch (e) {
+                    console.log(`   ❌ URL unreachable: ${url}`);
+                    result = this._makeFailedResult(urlEntry, 'URL unreachable');
+                    results.push(result);
+                    return result; 
+                }
 
-          // Validate with pool
-          return await this.validateUrlWithPool(url, urlEntry);
+                // Validate with pool (The single, heavy scraping operation)
+                result = await this.validateUrlWithPool(url, urlEntry);
+                results.push(result);
+                return result; 
 
-        } catch (error) {
-          console.error(`   ❌ Task failed for ${url}: ${error.message}`);
-          return this._makeFailedResult(urlEntry, error.message);
-        }
-      });
-    }
+            } catch (error) {
+                console.error(`   ❌ Task failed for ${url}: ${error.message}`);
+                result = this._makeFailedResult(urlEntry, error.message);
+                results.push(result);
+                return result; 
+            }
+        });
+    });
 
-    // Wait for all added tasks to finish
-    await queue.onIdle();
+    // 3. Wait for ALL tasks in the queue to complete.
+    // Promise.all is robust for waiting on all PQueue-added tasks.
+    await Promise.all(tasks);
 
-    // PQueue doesn't return results of tasks. Instead, to collect results we slightly restructure:
-    // We'll implement a simple result-collector by wrapping validateUrlWithPool to push into an array.
-    // For simplicity here, let's rerun tasks but collecting results in an array (small batches only).
-    // However: to remain memory-friendly we already executed tasks and they returned but not collected.
-    // So instead, we implement a small collector pattern above. To keep this file self-contained
-    // and straightforward, below is a simplified approach:
-    // Recreate a collector: (NOTE: this uses a separate queue to collect results synchronously)
-    const results = [];
-    const collector = new PQueue({ concurrency: options.concurrency || 2 });
-
-    for (let idx = 0; idx < urls.length; idx++) {
-      const urlEntry = urls[idx];
-      collector.add(async () => {
-        try {
-          // run reachability + validate again but collect result
-          try { await isUrlReachable(urlEntry.url); } catch (e) {
-            results.push(this._makeFailedResult(urlEntry, 'URL unreachable'));
-            return;
-          }
-          const res = await this.validateUrlWithPool(urlEntry.url, urlEntry);
-          results.push(res);
-        } catch (err) {
-          results.push(this._makeFailedResult(urlEntry, err.message));
-        }
-      });
-    }
-
-    await collector.onIdle();
-
-    // Dereference queues
+    // 4. Cleanup and Return
+    // Use queue.clear() (optional but good practice)
     try { queue.clear(); } catch (e) {}
-    try { collector.clear(); } catch (e) {}
 
+    // No need for a second loop or a 'collector' queue.
+    // The 'results' array contains all final objects from the single execution run.
     return results;
-  }
+}
 
   /**
    * Wrapper to run validation inside a pooled browser
