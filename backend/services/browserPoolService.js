@@ -49,7 +49,19 @@ class BrowserPoolService {
       totalPoolRefreshes: 0
     };
 
-    console.log(`🌐 BrowserPoolService initialized with pool size: ${poolSize}, max pages before restart: ${this.maxPagesBeforeRestart}`);
+    const validationLimit = process.env.ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART;
+    if (validationLimit !== undefined && validationLimit !== '') {
+      const parsedValidationLimit = parseInt(validationLimit);
+      const effectiveLimit = (!isNaN(parsedValidationLimit) && parsedValidationLimit > 0) 
+        ? parsedValidationLimit 
+        : this.maxPagesBeforeRestart;
+      console.log(`🌐 BrowserPoolService initialized with pool size: ${poolSize}`);
+      console.log(`   Default max pages before restart: ${this.maxPagesBeforeRestart}`);
+      console.log(`   ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART: ${validationLimit}`);
+      console.log(`   ✅ Using validation limit: ${effectiveLimit} (more frequent restarts for memory efficiency)`);
+    } else {
+      console.log(`🌐 BrowserPoolService initialized with pool size: ${poolSize}, max pages before restart: ${this.maxPagesBeforeRestart}`);
+    }
   }
 
   isManagedBrowser(browser) {
@@ -115,7 +127,9 @@ class BrowserPoolService {
             args: [
                 // Only pass args that are specific to this service
                 '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                '--disable-features=IsolateOrigins,site-per-process', 
+                '--single-process',
+'--no-zygote' // Can help in Linux environments,
+'--disable-features=IsolateOrigins,site-per-process', 
                 '--disable-sync',
                 '--disable-default-apps'
             ]
@@ -214,13 +228,33 @@ class BrowserPoolService {
     });
   }
 
+  /**
+   * Get the effective max pages before restart limit.
+   * Checks for ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART at runtime for validation operations.
+   * If ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART is set, it takes precedence (for memory-constrained environments like Railway).
+   * Otherwise, uses the default MAX_PAGES_BEFORE_RESTART.
+   */
+  getMaxPagesBeforeRestart() {
+    // Check for validation-specific limit at runtime
+    const validationLimit = process.env.ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART;
+    if (validationLimit !== undefined && validationLimit !== '') {
+      const parsedValidationLimit = parseInt(validationLimit);
+      if (!isNaN(parsedValidationLimit) && parsedValidationLimit > 0) {
+        // Use validation limit if set (typically lower for memory-constrained environments)
+        return parsedValidationLimit;
+      }
+    }
+    return this.maxPagesBeforeRestart;
+  }
+
   incrementPageCount(browser) {
     const currentCount = this.pageCountPerBrowser.get(browser) || 0;
     this.pageCountPerBrowser.set(browser, currentCount + 1);
 
     const newCount = currentCount + 1;
-    if (newCount % 10 === 0) {
-      console.log(`📊 Browser page count: ${newCount}/${this.maxPagesBeforeRestart}`);
+    const effectiveLimit = this.getMaxPagesBeforeRestart();
+    if (newCount % 10 === 0 || newCount >= effectiveLimit * 0.8) {
+      console.log(`📊 Browser page count: ${newCount}/${effectiveLimit}`);
     }
 
     return newCount;
@@ -228,7 +262,8 @@ class BrowserPoolService {
 
   needsRestart(browser) {
     const pageCount = this.pageCountPerBrowser.get(browser) || 0;
-    return pageCount >= this.maxPagesBeforeRestart;
+    const effectiveLimit = this.getMaxPagesBeforeRestart();
+    return pageCount >= effectiveLimit;
   }
 
   releaseBrowser(browser) {
@@ -240,7 +275,8 @@ class BrowserPoolService {
     }
 
     if (this.needsRestart(browser)) {
-      console.log(`🔄 Browser reached page limit (${this.pageCountPerBrowser.get(browser)}/${this.maxPagesBeforeRestart}), scheduling restart...`);
+      const effectiveLimit = this.getMaxPagesBeforeRestart();
+      console.log(`🔄 Browser reached page limit (${this.pageCountPerBrowser.get(browser)}/${effectiveLimit}), scheduling restart...`);
       this.scheduleAsyncRestart(browser);
       
       if (this.waitingQueue.length > 0) {
@@ -403,6 +439,7 @@ class BrowserPoolService {
       totalBrowserRestarts: this.stats.totalBrowserRestarts,
       totalPoolRefreshes: this.stats.totalPoolRefreshes,
       maxPagesBeforeRestart: this.maxPagesBeforeRestart,
+      effectiveMaxPagesBeforeRestart: this.getMaxPagesBeforeRestart(),
       browserPageCounts: browserPageCounts
     };
   }

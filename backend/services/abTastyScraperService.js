@@ -210,7 +210,9 @@ class AbTastyScraperService {
             args: [
                 // Only pass args that are specific to this service
                 '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                '--disable-features=IsolateOrigins,site-per-process', 
+                '--single-process',
+'--no-zygote' // Can help in Linux environments,
+'--disable-features=IsolateOrigins,site-per-process', 
                 '--disable-sync',
                 '--disable-default-apps'
             ]
