@@ -383,7 +383,32 @@ class BrowserPoolService {
             )
           ]);
           
-          console.log(`   ✅ [scheduleAsyncRestart] Browser ${browserIndex + 1} closed completely`);
+          // ✅ MEMORY TRACKING: Get browser process info before closing
+          let browserPid = null;
+          let browserProcessMemory = null;
+          try {
+            if (browser.process && typeof browser.process === 'function') {
+              const proc = browser.process();
+              if (proc) {
+                browserPid = proc.pid;
+                // Try to get process memory (if available)
+                try {
+                  const memInfo = process.memoryUsage();
+                  browserProcessMemory = {
+                    rss: Math.round(memInfo.rss / 1024 / 1024), // Total OS memory
+                    heapUsed: Math.round(memInfo.heapUsed / 1024 / 1024),
+                    external: Math.round(memInfo.external / 1024 / 1024) // C++ objects (browser handles)
+                  };
+                } catch (e) {
+                  // Ignore if we can't get memory info
+                }
+              }
+            }
+          } catch (e) {
+            // Ignore if process info not available
+          }
+          
+          console.log(`   ✅ [scheduleAsyncRestart] Browser ${browserIndex + 1} closed completely${browserPid ? ` (pid: ${browserPid})` : ''}`);
           
           // ✅ MEMORY OPTIMIZATION: Wait for OS to reclaim memory
           // Longer delay in constrained environments (Railway, production) for better memory reclamation
@@ -396,27 +421,53 @@ class BrowserPoolService {
           const defaultDelay = isConstrained ? 3000 : 2000;
           const memoryReclaimDelay = parseInt(process.env.BROWSER_RESTART_MEMORY_DELAY_MS) || defaultDelay;
           
-          // Log memory before wait (if --expose-gc is enabled)
-          let memBefore = null;
-          if (global.gc) {
-            memBefore = process.memoryUsage();
-            const heapUsedMB = Math.round(memBefore.heapUsed / 1024 / 1024);
-            console.log(`   💾 [scheduleAsyncRestart] Memory before reclaim: ${heapUsedMB}MB heap used`);
+          // Log memory before wait
+          const memBefore = process.memoryUsage();
+          const rssBeforeMB = Math.round(memBefore.rss / 1024 / 1024); // Actual OS memory
+          const heapBeforeMB = Math.round(memBefore.heapUsed / 1024 / 1024);
+          const externalBeforeMB = Math.round(memBefore.external / 1024 / 1024);
+          
+          console.log(`   💾 [scheduleAsyncRestart] Memory BEFORE reclaim:`);
+          console.log(`      RSS (OS): ${rssBeforeMB}MB | Heap: ${heapBeforeMB}MB | External: ${externalBeforeMB}MB`);
+          console.log(`   ⏳ [scheduleAsyncRestart] STEP 4: Waiting ${memoryReclaimDelay}ms for OS memory reclaim...`);
+          await new Promise(resolve => setTimeout(resolve, memoryReclaimDelay));
+          
+          // Log memory after wait
+          const memAfter = process.memoryUsage();
+          const rssAfterMB = Math.round(memAfter.rss / 1024 / 1024);
+          const heapAfterMB = Math.round(memAfter.heapUsed / 1024 / 1024);
+          const externalAfterMB = Math.round(memAfter.external / 1024 / 1024);
+          
+          const rssFreedMB = rssBeforeMB - rssAfterMB;
+          const heapFreedMB = heapBeforeMB - heapAfterMB;
+          const externalFreedMB = externalBeforeMB - externalAfterMB;
+          
+          console.log(`   💾 [scheduleAsyncRestart] Memory AFTER reclaim:`);
+          console.log(`      RSS (OS): ${rssAfterMB}MB (${rssFreedMB > 0 ? `freed ${rssFreedMB}MB` : rssFreedMB < 0 ? `+${Math.abs(rssFreedMB)}MB` : 'no change'})`);
+          console.log(`      Heap: ${heapAfterMB}MB (${heapFreedMB > 0 ? `freed ${heapFreedMB}MB` : heapFreedMB < 0 ? `+${Math.abs(heapFreedMB)}MB` : 'no change'})`);
+          console.log(`      External: ${externalAfterMB}MB (${externalFreedMB > 0 ? `freed ${externalFreedMB}MB` : externalFreedMB < 0 ? `+${Math.abs(externalFreedMB)}MB` : 'no change'})`);
+          
+          // ✅ IMPORTANT: RSS (Resident Set Size) is the REAL OS memory
+          // Heap memory not dropping is NORMAL - Node.js keeps it for reuse
+          // The actual memory freed is the browser process (100-500MB), which shows in RSS
+          if (rssFreedMB > 0) {
+            console.log(`   ✅ [scheduleAsyncRestart] OS memory (RSS) freed: ${rssFreedMB}MB - Browser process memory released!`);
+          } else if (rssFreedMB < 0) {
+            console.log(`   ⚠️  [scheduleAsyncRestart] RSS increased by ${Math.abs(rssFreedMB)}MB (may be new browser launching)`);
+          } else {
+            console.log(`   ℹ️  [scheduleAsyncRestart] RSS unchanged (browser process may have already been cleaned up)`);
           }
           
-          console.log(`   ⏳ [scheduleAsyncRestart] STEP 4: Waiting ${memoryReclaimDelay}ms for OS memory reclaim...`);
-          await new Promise(resolve => setTimeout(resolve, 2500));
-          
-          // Log memory after wait (if --expose-gc is enabled)
-          if (global.gc && memBefore) {
-            // Force GC to see actual memory freed
+          // Force GC if available to see heap changes
+          if (global.gc) {
             global.gc();
-            await new Promise(resolve => setTimeout(resolve, 100)); // Small delay for GC to complete
-            
-            const memAfter = process.memoryUsage();
-            const heapUsedMB = Math.round(memAfter.heapUsed / 1024 / 1024);
-            const freedMB = Math.round((memBefore.heapUsed - memAfter.heapUsed) / 1024 / 1024);
-            console.log(`   💾 [scheduleAsyncRestart] Memory after reclaim: ${heapUsedMB}MB heap used (freed ${freedMB > 0 ? freedMB : 0}MB)`);
+            await new Promise(resolve => setTimeout(resolve, 100));
+            const memAfterGC = process.memoryUsage();
+            const heapAfterGCMB = Math.round(memAfterGC.heapUsed / 1024 / 1024);
+            const heapFreedByGCMB = heapAfterMB - heapAfterGCMB;
+            if (heapFreedByGCMB > 0) {
+              console.log(`   🧹 [scheduleAsyncRestart] After GC: Heap freed ${heapFreedByGCMB}MB (now ${heapAfterGCMB}MB)`);
+            }
           }
         } catch (e) {
           console.warn(`   ⚠️  [scheduleAsyncRestart] Error closing browser: ${e.message}`);
