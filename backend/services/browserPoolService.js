@@ -128,8 +128,8 @@ class BrowserPoolService {
                 // Only pass args that are specific to this service
                 '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 '--single-process',
-'--no-zygote' ,
-'--disable-features=IsolateOrigins,site-per-process', 
+                '--no-zygote' ,
+                '--disable-features=IsolateOrigins,site-per-process', 
                 '--disable-sync',
                 '--disable-default-apps'
             ]
@@ -144,7 +144,17 @@ class BrowserPoolService {
         }
 
         console.log(`Launching browser with executable: ${browserOptions.executablePath}`);
-        return await puppeteer.launch(browserOptions);
+        const browser = await puppeteer.launch(browserOptions);
+        try {
+            const page = await browser.newPage();
+            await page.goto('about:blank', { timeout: 5000 }); 
+            await page.close();
+            console.log("✅ Browser instance stabilized (stealth setup complete on dummy page).");
+        } catch (stabError) {
+            console.warn(`⚠️ Failed to stabilize browser (stealth setup may be incomplete): ${stabError.message}`);
+        }
+
+        return browser;
 
     } catch (error) {
         console.error('Failed to launch browser in AdobeTarget1_0Service:', error);
