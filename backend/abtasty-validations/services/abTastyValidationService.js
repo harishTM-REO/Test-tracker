@@ -105,6 +105,17 @@ class ABTastyValidationService {
           failedCount: results.failed.length
         };
 
+        if ((b + 1) < batches && (b + 1) % BATCH_SIZE === 0) {
+            console.log(`\n\n♻️  [MEMORY REFRESH] Triggering full browser pool restart after Batch ${b + 1} to free ${process.env.MEMORY_THRESHOLD_MB}MB.`);
+            
+            // 1. Shutdown the memory-leaky Chromium process
+            await browserPool.close();
+            
+            // 2. Start a fresh, clean Chromium process
+            await browserPool.initialize();
+            
+            console.log(`✅ Browser pool successfully restarted. Continuing with next batch.`);
+        }
         if (progressCallback) {
              try { await progressCallback(progress); } catch (e) { console.warn('Progress callback error:', e.message); }
         }
