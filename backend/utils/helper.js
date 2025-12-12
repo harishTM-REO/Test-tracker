@@ -156,7 +156,8 @@ const buildPuppeteerLaunchOptions = async (overrides = {}) => {
         '--disable-blink-features=AutomationControlled',
         '--disable-features=VizServiceDisplay',
         '--allow-running-insecure-content',
-        '--disable-web-security'
+        '--disable-web-security',
+        '--single-process', // Can improve stability, sometimes slightly increases memory
     ];
 
     const { args: overrideArgs = [], headless, ignoreHTTPSErrors, ...restOverrides } = overrides;
