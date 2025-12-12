@@ -220,11 +220,13 @@ const createPage = async (browser, opts = {}) => {
   const isProduction = process.env.NODE_ENV === 'production';
   const isConstrained = isRailway || (isProduction && !process.env.HIGH_RESOURCE_MODE);
   
-  const defaultTimeout = isConstrained ? 45000 : 30000;
+  // ✅ MEMORY OPTIMIZATION: Increase timeouts for validation operations under memory pressure
+  // When browsers are under memory pressure, they respond slower to CDP commands
+  const defaultTimeout = isConstrained ? 60000 : 45000; // Increased from 45000/30000
   const defaultRetries = isConstrained ? 3 : 2;
   const maxRetries = parseInt(process.env.PAGE_CREATION_RETRIES || opts.retries || defaultRetries);
   const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || opts.timeout || defaultTimeout;
-  const backoffBase = parseInt(process.env.PAGE_CREATION_BACKOFF_MS) || opts.backoffMs || 500;
+  const backoffBase = parseInt(process.env.PAGE_CREATION_BACKOFF_MS) || opts.backoffMs || 1000; // Increased from 500
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     let timeoutId;
@@ -267,13 +269,35 @@ const createPage = async (browser, opts = {}) => {
 
       console.error(`[createPage] attempt ${attempt + 1} failed:`, error.message || error);
 
-      if (attempt < maxRetries) {
+      // ✅ MEMORY OPTIMIZATION: Detect protocol errors (browser is stuck/unresponsive)
+      // Protocol errors indicate the browser can't respond to CDP commands (likely memory pressure)
+      const isProtocolError = error.message && (
+        error.message.includes('ProtocolError') ||
+        error.message.includes('Network.enable timed out') ||
+        error.message.includes('protocolTimeout') ||
+        error.message.includes('Target.createTarget timed out')
+      );
+
+      if (isProtocolError && attempt < maxRetries) {
+        const wait = backoffBase * (attempt + 1);
+        console.warn(`[createPage] Protocol error detected (browser may be stuck) -> retrying after ${wait}ms`);
+        console.warn(`   This usually indicates browser is under memory pressure. Consider restarting browser.`);
+        await sleep(wait);
+        continue;
+      }
+
+      if (attempt < maxRetries && !isProtocolError) {
         const wait = backoffBase * (attempt + 1);
         console.log(`[createPage] timeout -> retrying after ${wait}ms`);
         await sleep(wait);
         continue;
       }
-      if (error.message === 'PAGE_CREATION_TIMEOUT') throw new Error('BROWSER_STUCK_RESTART_REQUIRED');
+
+      // If we've exhausted retries or got protocol errors, browser needs restart
+      if (error.message === 'PAGE_CREATION_TIMEOUT' || isProtocolError) {
+        console.error(`[createPage] Browser appears stuck/unresponsive. Restart required.`);
+        throw new Error('BROWSER_STUCK_RESTART_REQUIRED');
+      }
       throw error;
     }
   }

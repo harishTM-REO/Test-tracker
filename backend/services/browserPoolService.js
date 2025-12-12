@@ -33,7 +33,10 @@ class BrowserPoolService {
 
     // Page counter per browser - triggers restart after N pages
     this.pageCountPerBrowser = new Map();
-    this.maxPagesBeforeRestart = parseInt(process.env.MAX_PAGES_BEFORE_RESTART) || 30;
+    // ✅ MEMORY OPTIMIZATION: Lower default for validation operations
+    // Default to 15 pages for validation (more frequent restarts = better memory management)
+    // This creates the saw-tooth memory pattern by restarting browsers more frequently
+    this.maxPagesBeforeRestart = parseInt(process.env.MAX_PAGES_BEFORE_RESTART) || 15;
 
     // Pool lifecycle tracking
     this.poolCreatedAt = null;
@@ -122,7 +125,10 @@ class BrowserPoolService {
         const browserOptions = await buildPuppeteerLaunchOptions({
             headless: 'new',
             ignoreHTTPSErrors: true,
-            protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
+            // ✅ MEMORY OPTIMIZATION: Increase protocol timeout for validation operations
+            // When browsers are under memory pressure, they respond slower to CDP commands
+            // Higher timeout prevents false "stuck browser" detections during memory cleanup
+            protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 120000, // Increased from 60000 to 120000 (2 minutes)
             timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000,
             args: [
                 // Only pass args that are specific to this service
