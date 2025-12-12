@@ -128,7 +128,7 @@ class BrowserPoolService {
                 // Only pass args that are specific to this service
                 '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 '--single-process',
-'--no-zygote' // Can help in Linux environments,
+'--no-zygote' ,
 '--disable-features=IsolateOrigins,site-per-process', 
                 '--disable-sync',
                 '--disable-default-apps'
