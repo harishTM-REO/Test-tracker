@@ -191,6 +191,19 @@ async function launchBrowser() {
 
         const browser = await puppeteer.launch(browserOptions);
         console.log(`Browser launched successfully (Path: ${browserOptions.executablePath})`);
+        try {
+            // Create a temporary page and close it immediately. This forces the 
+            // puppeteer-extra-plugin-stealth to finish all its async setup 
+            // before the browser is marked as available in the pool.
+            const page = await browser.newPage();
+            await page.goto('about:blank', { timeout: 5000 }); 
+            await page.close();
+            console.log("✅ Browser instance stabilized (stealth setup complete on dummy page).");
+        } catch (stabError) {
+            console.warn(`⚠️ Failed to stabilize browser (stealth setup failed): ${stabError.message}`);
+            // Log a warning, but return the browser if it launched successfully, 
+            // relying on the pool's health check to catch critical failures later.
+        }
         return browser;
 
     } catch (error) {
