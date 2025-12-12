@@ -4,10 +4,10 @@
   "description": "Adobe Target 1.0 worker service for advanced URL prioritization, categorization, and experiment scraping",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "start": "node --expose-gc index.js",
+  "dev": "nodemon --expose-gc index.js",
+  "test": "echo \"Error: no test specified\" && exit 1"
+},
   "keywords": [
     "adobe-target",
     "worker",

@@ -4,9 +4,9 @@
   "description": "Dedicated scraper worker service for Optimizely and ABTasty",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
-  },
+  "start": "node --expose-gc index.js",
+  "dev": "nodemon --expose-gc index.js"
+},
   "author": "",
   "license": "ISC",
   "dependencies": {

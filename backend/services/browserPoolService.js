@@ -385,9 +385,39 @@ class BrowserPoolService {
           
           console.log(`   ✅ [scheduleAsyncRestart] Browser ${browserIndex + 1} closed completely`);
           
-          // Wait a bit for OS to reclaim memory
-          console.log(`   ⏳ [scheduleAsyncRestart] STEP 4: Waiting 1s for OS memory reclaim...`);
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // ✅ MEMORY OPTIMIZATION: Wait for OS to reclaim memory
+          // Longer delay in constrained environments (Railway, production) for better memory reclamation
+          const isRailway = process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID;
+          const isProduction = process.env.NODE_ENV === 'production';
+          const isConstrained = isRailway || (isProduction && !process.env.HIGH_RESOURCE_MODE);
+          
+          // Default: 2s for normal, 3s for constrained environments
+          // Can be overridden with BROWSER_RESTART_MEMORY_DELAY_MS
+          const defaultDelay = isConstrained ? 3000 : 2000;
+          const memoryReclaimDelay = parseInt(process.env.BROWSER_RESTART_MEMORY_DELAY_MS) || defaultDelay;
+          
+          // Log memory before wait (if --expose-gc is enabled)
+          let memBefore = null;
+          if (global.gc) {
+            memBefore = process.memoryUsage();
+            const heapUsedMB = Math.round(memBefore.heapUsed / 1024 / 1024);
+            console.log(`   💾 [scheduleAsyncRestart] Memory before reclaim: ${heapUsedMB}MB heap used`);
+          }
+          
+          console.log(`   ⏳ [scheduleAsyncRestart] STEP 4: Waiting ${memoryReclaimDelay}ms for OS memory reclaim...`);
+          await new Promise(resolve => setTimeout(resolve, 2500));
+          
+          // Log memory after wait (if --expose-gc is enabled)
+          if (global.gc && memBefore) {
+            // Force GC to see actual memory freed
+            global.gc();
+            await new Promise(resolve => setTimeout(resolve, 100)); // Small delay for GC to complete
+            
+            const memAfter = process.memoryUsage();
+            const heapUsedMB = Math.round(memAfter.heapUsed / 1024 / 1024);
+            const freedMB = Math.round((memBefore.heapUsed - memAfter.heapUsed) / 1024 / 1024);
+            console.log(`   💾 [scheduleAsyncRestart] Memory after reclaim: ${heapUsedMB}MB heap used (freed ${freedMB > 0 ? freedMB : 0}MB)`);
+          }
         } catch (e) {
           console.warn(`   ⚠️  [scheduleAsyncRestart] Error closing browser: ${e.message}`);
           // Try to force kill if normal close fails
@@ -728,11 +758,17 @@ class BrowserPoolService {
             new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 10000))
           ]);
           
-          // Wait for OS to reclaim memory
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // ✅ MEMORY OPTIMIZATION: Wait for OS to reclaim memory (same logic as scheduleAsyncRestart)
+          const isRailway = process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID;
+          const isProduction = process.env.NODE_ENV === 'production';
+          const isConstrained = isRailway || (isProduction && !process.env.HIGH_RESOURCE_MODE);
+          const defaultDelay = isConstrained ? 3000 : 2000;
+          const memoryReclaimDelay = parseInt(process.env.BROWSER_RESTART_MEMORY_DELAY_MS) || defaultDelay;
+          
+          await new Promise(resolve => setTimeout(resolve, memoryReclaimDelay));
           
           this.stats.totalBrowsersClosed = (this.stats.totalBrowsersClosed || 0) + 1;
-          console.log(`✅ Old browser ${browserIndex + 1} closed completely`);
+          console.log(`✅ Old browser ${browserIndex + 1} closed completely (waited ${memoryReclaimDelay}ms for memory reclaim)`);
         }
       } catch (closeError) {
         console.warn(`⚠️  Could not gracefully close browser ${browserIndex + 1}: ${closeError.message}`);
