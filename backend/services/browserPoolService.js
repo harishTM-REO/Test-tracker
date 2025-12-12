@@ -454,37 +454,20 @@ class BrowserPoolService {
   }
 
   async closeAll() {
-    console.log('\n🛑 Closing all browsers in pool...');
-
     try {
-      const closePromises = this.browsers.map((browser, index) => {
-        // ✅ FIX: Check if browser exists (it might be null during restart)
-        if (!browser) return Promise.resolve();
-
-        return browser.close()
-          .then(() => {
-            this.stats.totalBrowsersClosed++;
-            console.log(`   ✅ Browser ${index + 1} closed`);
-          })
-          .catch(err => {
-            console.warn(`   ⚠️  Error closing browser ${index + 1}: ${err.message}`);
-          });
-      });
-
-      await Promise.all(closePromises);
-
-      this.browsers = [];
-      this.availableBrowsers = [];
-      this.busyBrowsers.clear();
-      this.waitingQueue = [];
-      this.isInitialized = false;
-      this.poolCreatedAt = null;
-
-      console.log('✅ All browsers closed successfully\n');
-    } catch (error) {
-      console.error('❌ Error during browser pool cleanup:', error.message);
+      for (const b of this.browsers || []) {
+        try { await b.close(); } catch (e) {}
+      }
+    } catch (e) { console.warn('Error while closing browsers:', e.message); }
+    // Clear internal references
+    this.browsers = [];
+    this.pageCountMap = new Map();
+    this.browserMeta = {};
+    if (typeof global !== 'undefined' && typeof global.gc === 'function') {
+      try { global.gc(); } catch (e) {}
     }
   }
+  
 
   async restart() {
     console.log('🔄 Restarting browser pool...');
