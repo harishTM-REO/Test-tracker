@@ -132,12 +132,24 @@ class BrowserPoolService {
             timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000,
             args: [
                 // Only pass args that are specific to this service
-                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                '--single-process',
-                '--no-zygote' ,
-                '--disable-features=IsolateOrigins,site-per-process', 
-                '--disable-sync',
-                '--disable-default-apps'
+                '--no-sandbox', 
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage', // Helps if /dev/shm is small
+    '--disable-gpu',
+    
+    // SAFE BROWSER/STEALTH FLAGS
+    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    '--mute-audio',
+    '--no-first-run',
+    '--window-size=1366,768',
+    '--disable-blink-features=AutomationControlled',
+    
+    // Tweak to manage resources without inducing deadlocks
+    '--disable-sync',
+    '--disable-default-apps',
+    '--disable-software-rasterizer', 
+    '--disable-accelerated-2d-canvas',
+    '--disable-features=VizServiceDisplay',
             ]
         });
 

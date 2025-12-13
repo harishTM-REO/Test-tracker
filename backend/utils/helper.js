@@ -143,20 +143,24 @@ const buildPuppeteerLaunchOptions = async (overrides = {}) => {
     const executablePath = overrides.executablePath || await resolvePuppeteerExecutablePath();
     
     const baseArgs = [
-        '--no-sandbox',
+        '--no-sandbox', 
         '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
+        '--disable-dev-shm-usage', // Helps if /dev/shm is small
         '--disable-gpu',
-        '--disable-software-rasterizer',
-        '--disable-accelerated-2d-canvas',
+        
+        // SAFE BROWSER/STEALTH FLAGS
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         '--mute-audio',
         '--no-first-run',
-        '--no-zygote',
         '--window-size=1366,768',
         '--disable-blink-features=AutomationControlled',
+        
+        // Tweak to manage resources without inducing deadlocks
+        '--disable-sync',
+        '--disable-default-apps',
+        '--disable-software-rasterizer', 
+        '--disable-accelerated-2d-canvas',
         '--disable-features=VizServiceDisplay',
-        '--allow-running-insecure-content',
-        '--disable-web-security'
     ];
 
     const { args: overrideArgs = [], headless, ignoreHTTPSErrors, ...restOverrides } = overrides;
