@@ -1,5 +1,6 @@
 const chromium = require('@sparticuz/chromium');
-const browserPool = require('./browserPoolService'); // ✅ Import once
+// ✅ Use cluster service for better memory/CPU management
+const browserPool = require('./browserClusterService');
 const {
     extractDomainName,
     extractDomain,
@@ -450,7 +451,7 @@ class AdobeScraperService {
   
     /**
      * Lightweight detector to quickly determine if Adobe Target is present on a page
-     * FIX: Wraps the entire logic in browserPool.withBrowser for stability.
+     * Uses browser cluster service for stable browser lifecycle management.
      */
     async detectAdobeTargetPresence(url) {
         try {
@@ -458,9 +459,8 @@ class AdobeScraperService {
                 let page = null;
                 try {
                     page = await createPage(browser);
-                    // ✅ MEMORY OPTIMIZATION: Increment page count for browser restart tracking
-                    // This ensures browsers restart more frequently for validation operations
-                    browserPool.incrementPageCount(browser); 
+                    // Note: Browser lifecycle management is handled by the pool/cluster service
+                    // No need to manually track page counts - the service handles this internally
                     
                     // We must return the final result object, not the intermediate steps
                     const detectionResult = await this.detectAdobeTargetPresenceWithSharedPage(page, url);
@@ -562,7 +562,7 @@ class AdobeScraperService {
                 const isBrowserSessionError = browserSessionErrors.some(msg => error.message.includes(msg));
                 
                 if (isBrowserSessionError) {
-                    throw error; // Propagate up to processBrowserBatchSequential -> browserPool.withBrowser
+                    throw error; // Propagate up to processBrowserBatchSequential -> browser cluster service
                 }
                 throw error; // Propagate non-fatal errors like network failures
 
@@ -2966,7 +2966,7 @@ class AdobeScraperService {
 
     /**
      * Process URL chunk using sequential browser processing (like Optimizely)
-     * FIX: Uses browserPool.withBrowser to manage browser lifecycle automatically.
+     * Uses browser cluster service to manage browser lifecycle automatically.
      */
     async processUrlChunkSequential(urls, options = {}) {
         const poolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
@@ -2994,12 +2994,16 @@ class AdobeScraperService {
 
             // Flatten results
             batchResults.forEach(result => {
-                if (result.status === 'fulfilled' && result.value) {
-                    results.push(...result.value);
-                } else if (result.status === 'rejected') {
-                    console.error('❌ Batch processing failed:', result.reason?.message || result.reason);
-                }
-            });
+                                // [CRITICAL FIX] 
+                                // Only process fulfilled promises that return an array (from inner batch processing)
+                                if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+                                    results.push(...result.value);
+                                } else if (result.status === 'rejected') {
+                                    console.error('❌ Batch processing failed:', result.reason?.message || result.reason);
+                                    // NOTE: The URLs in this rejected batch failed catastrophically and are lost.
+                                    // They should be re-queued or marked as failed later. For now, log and skip.
+                                }
+                            });
 
         } catch (error) {
             console.error('Error in processUrlChunkSequential (Pool failure):', error);
@@ -3026,9 +3030,8 @@ class AdobeScraperService {
                     console.log(`[${i + 1}/${urls.length}] Processing: ${url}`);
                     // Page Creation
                     page = await createPage(browser);
-                    // ❌ FIX APPLIED: REMOVED browserPool.incrementPageCount(browser); 
-                    //    The outer withBrowser wrapper will increment the count once 
-                    //    if the entire batch loop (the inner function) succeeds.
+                    // Note: Browser lifecycle management is handled by the pool/cluster service
+                    // No need to manually track page counts - the service handles this internally
                     
                     // Scrape using the sharedPage mode of scrapeExperimentsFromPage
                     const experimentData = await this.scrapeExperimentsFromPage(url, {
@@ -3070,6 +3073,20 @@ class AdobeScraperService {
             // Catches fatal re-throws from the loop and propagates to pool
             console.error('Fatal error in sequential batch; propagating to pool:', error.message);
             throw error; 
+        }finally {
+                                if (page) {
+                                    try {
+                                        await closePage(page);
+                                        await new Promise(resolve => setTimeout(resolve, 200)); 
+                                    } catch (e) {
+                                        console.warn('⚠️ Error closing page:', e.message);
+                                        // If the page is unresponsive, it signals a deeper browser issue.
+                                        if (e.message.includes('Protocol error') || e.message.includes('closed')) {
+                                            // [CRITICAL FIX] Use a known cluster fatal error string
+                                            throw new Error(`BROWSER_NOT_CONNECTED: Page close failure - ${e.message}`);
+                                        }
+                                    }
+                                }
         }
         
         return results;
@@ -3214,7 +3231,7 @@ class AdobeScraperService {
 
     /**
      * Process URL chunk using sequential browser processing (like Optimizely)
-     * FIX: Uses browserPool.withBrowser to manage browser lifecycle automatically.
+     * Uses browser cluster service to manage browser lifecycle automatically.
      */
     async processUrlChunkSequential(urls, options = {}) {
         const poolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
@@ -3266,7 +3283,8 @@ class AdobeScraperService {
                 try {
                     console.log(`[${i + 1}/${urls.length}] Processing: ${url}`);
                     page = await createPage(browser);
-                    browserPool.incrementPageCount(browser);
+                    // Note: Browser lifecycle management is handled by the pool/cluster service
+                    // No need to manually track page counts - the service handles this internally
                     
                     const experimentData = await this.scrapeExperimentsFromPage(url, {
                         sharedPage: page,

@@ -181,7 +181,7 @@ class BrowserPoolService {
 }
 
   async acquireBrowser() {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const queueTimeout = parseInt(process.env.QUEUE_TIMEOUT) || 40000;
       let timeoutHandle;
 
@@ -205,6 +205,21 @@ class BrowserPoolService {
               browser = null;
               continue;
             }
+            
+            // ✅ FIX: Quick health check - try to get browser version (fast operation)
+            // This prevents acquiring a stuck browser that will timeout on page creation
+            try {
+              await Promise.race([
+                browser.version(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Health check timeout')), 3000))
+              ]);
+            } catch (healthError) {
+              console.warn(`[acquireBrowser] Browser health check failed (browser may be stuck): ${healthError.message}`);
+              this.forceRestartBrowser(browser).catch(e2 => console.error('forceRestartBrowser:', e2.message));
+              browser = null;
+              continue;
+            }
+            
             break;
           } catch (e) {
             console.warn('[acquireBrowser] health check error, skipping browser:', e.message);

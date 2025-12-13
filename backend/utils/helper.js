@@ -224,13 +224,14 @@ const createPage = async (browser, opts = {}) => {
   const isProduction = process.env.NODE_ENV === 'production';
   const isConstrained = isRailway || (isProduction && !process.env.HIGH_RESOURCE_MODE);
   
-  // ✅ MEMORY OPTIMIZATION: Increase timeouts for validation operations under memory pressure
-  // When browsers are under memory pressure, they respond slower to CDP commands
-  const defaultTimeout = isConstrained ? 60000 : 45000; // Increased from 45000/30000
-  const defaultRetries = isConstrained ? 3 : 2;
+  // ✅ FIX: Reduce timeout to fail faster on stuck browsers
+  // 30s is too long - if browser is stuck, we should detect it faster
+  // Lower timeout = faster detection = quicker browser restart
+  const defaultTimeout = isConstrained ? 20000 : 15000; // Reduced from 60000/45000 to fail faster
+  const defaultRetries = isConstrained ? 2 : 1; // Reduced retries - if it times out once, browser is likely stuck
   const maxRetries = parseInt(process.env.PAGE_CREATION_RETRIES || opts.retries || defaultRetries);
   const pageCreationTimeout = parseInt(process.env.PAGE_CREATION_TIMEOUT) || opts.timeout || defaultTimeout;
-  const backoffBase = parseInt(process.env.PAGE_CREATION_BACKOFF_MS) || opts.backoffMs || 1000; // Increased from 500
+  const backoffBase = parseInt(process.env.PAGE_CREATION_BACKOFF_MS) || opts.backoffMs || 500; // Reduced backoff
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     let timeoutId;
@@ -238,6 +239,21 @@ const createPage = async (browser, opts = {}) => {
     try {
       if (!browser || (browser.isConnected && !browser.isConnected())) {
         throw new Error('BROWSER_NOT_CONNECTED');
+      }
+
+      // ✅ FIX: Quick health check before attempting page creation
+      // This prevents wasting 30s on a stuck browser
+      if (attempt > 0) {
+        try {
+          // Quick check: try to get browser version (fast operation)
+          await Promise.race([
+            browser.version(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Health check timeout')), 2000))
+          ]);
+        } catch (healthError) {
+          console.warn(`[createPage] Browser health check failed (browser may be stuck): ${healthError.message}`);
+          throw new Error('BROWSER_STUCK_RESTART_REQUIRED');
+        }
       }
 
       console.log(`[createPage] attempt ${attempt + 1}/${maxRetries + 1} - creating page`);
@@ -297,9 +313,16 @@ const createPage = async (browser, opts = {}) => {
         continue;
       }
 
+      // ✅ FIX: If timeout occurs, browser is definitely stuck - don't retry
+      // After first timeout, browser is unresponsive and needs restart
+      if (error.message === 'PAGE_CREATION_TIMEOUT' || error.message.includes('Timed out after waiting')) {
+        console.error(`[createPage] Browser appears stuck/unresponsive (timeout after ${pageCreationTimeout}ms). Restart required.`);
+        throw new Error('BROWSER_STUCK_RESTART_REQUIRED');
+      }
+      
       // If we've exhausted retries or got protocol errors, browser needs restart
-      if (error.message === 'PAGE_CREATION_TIMEOUT' || isProtocolError) {
-        console.error(`[createPage] Browser appears stuck/unresponsive. Restart required.`);
+      if (isProtocolError) {
+        console.error(`[createPage] Browser protocol error detected. Restart required.`);
         throw new Error('BROWSER_STUCK_RESTART_REQUIRED');
       }
       throw error;

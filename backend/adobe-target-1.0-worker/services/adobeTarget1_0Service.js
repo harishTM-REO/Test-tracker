@@ -8,7 +8,8 @@ const OptimizelyValidationDocument = require(path.join(__dirname, '../../models/
 const Dataset = require(path.join(__dirname, '../../models/Dataset'));
 const AdobeScraperService = require(path.join(__dirname, '../../services/adobeScraperService'));
 const OptimizelyValidationService = require(path.join(__dirname, './optimizelyValidationService'));
-const browserPool = require(path.join(__dirname, '../../services/browserPoolService'));
+// ✅ Use cluster service for better memory/CPU management
+const browserPool = require(path.join(__dirname, '../../services/browserClusterService'));
 const { 
     sanitizeWorkflowResult
 } = require(path.join(__dirname, '../../utils/adobeTargetResultSanitizer'));
