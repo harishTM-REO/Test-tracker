@@ -90,193 +90,221 @@ class AdobeScraperService {
      */
     async detectAdobeTargetPresenceWithSharedPage(sharedPage, url) {
         let requestHandler = null;
-        
+      
         console.log('detectAdobeTargetPresenceWithSharedPage is called');
+        console.log(`🔍 Validating Adobe Target presence: ${url}`);
+      
         try {
-            console.log(`🔍 Validating Adobe Target presence: ${url}`);
-
-            // Pre-flight check (Fast fail on DNS/Cert issues)
-            try {
-                const preflightCheck = await httpCheck(url, 4000);
-                const certIssue = preflightCheck.error && preflightCheck.error.toLowerCase().includes('cert');
-                if (!preflightCheck.isValid && (certIssue || !preflightCheck.status)) {
-                    console.warn(`⚠️ Pre-flight issue for ${url}: ${preflightCheck.error}`);
-                    return {
-                        detected: false,
-                        version: null,
-                        hasMboxCookie: false,
-                        hasAdobeScript: false,
-                        httpStatusCode: preflightCheck.status || null,
-                        captchaDetected: false,
-                        detectionSource: {
-                            error: preflightCheck.error || 'preflight_failed',
-                            preflightCheck: true
-                        }
-                    };
-                }
-            } catch (e) {
-                console.warn(`⚠️ Reachability pre-check warning for ${url}: ${e.message}`);
-            }
-            
-            // Navigation
-            await navigateToPage(sharedPage, url);
-            await new Promise(r => setTimeout(r, 500)); 
-            
-            // Captcha detection
-            let captchaCheck = { detected: false };
-            try {
-                captchaCheck = await runWithTimeout(
-                    () => detectCaptcha(sharedPage), 
-                    5000,
-                    'detectCaptcha'
-                );
-            } catch (e) {
-                console.warn(`⚠️ Captcha detection timeout for ${url} (continuing): ${e.message}`);
-                // CRITICAL PROPAGATION: Re-throw if a session error occurred during the timeout/check
-                const fatal =
-                    e.message.includes('Target closed') ||
-                    e.message.includes('Session closed');
-                
-                if (fatal) throw e; 
-            }
-            
-            if (captchaCheck?.detected) {
-                console.log(`🚫 Captcha detected on ${url}`);
-                return {
-                    detected: false,
-                    captchaDetected: true,
-                    captchaStatus: captchaCheck.reason,
-                    httpStatusCode: null,
-                    detectionSource: { captchaBlocked: true }
-                };
-            }
-            else {
-                // Cookie consent
-                try {
-                    await runWithTimeout(
-                        () => handleCookieConsent(sharedPage), 
-                        6000,
-                        'handleCookieConsent'
-                    );
-                } catch (e) {
-                    console.warn(`⚠️ Cookie consent timeout for ${url} (continuing): ${e.message}`);
-                    const fatal =
-                        e.message.includes('Target closed') ||
-                        e.message.includes('Session closed');
-                    
-                    if (fatal) throw e; 
-                }
-            }
-            
-            // Request interception setup
-            const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
-            
-            if (false) {
-                try {
-                    await sharedPage.setRequestInterception(true);
-                    
-                    requestHandler = req => {
-                        try {
-                            if (!req || req._interceptionHandled === true) return;
-                            
-                            const t = req.resourceType();
-                            if (t === 'image' || t === 'font') {
-                                req.abort('blockedbyclient').catch(() => {});
-                            } else {
-                                req.continue().catch(() => {});
-                            }
-                        } catch (e) { /* ignore */ }
-                    };
-                    
-                    sharedPage.on('request', requestHandler);
-                    await new Promise(r => setTimeout(r, 300));
-                } catch (e) {
-                    console.warn(`⚠️ Request interception setup failed for ${url}:`, e.message);
-                }
-            } 
-
-            await new Promise(r => setTimeout(r, 2500)); 
-
-            let detectionResult = {
+          /* ======================================================
+           * 1. PRE-FLIGHT CHECK (Fast fail)
+           * ====================================================== */
+          try {
+            const preflightCheck = await httpCheck(url, 4000);
+            const certIssue =
+              preflightCheck.error &&
+              preflightCheck.error.toLowerCase().includes('cert');
+      
+            if (!preflightCheck.isValid && (certIssue || !preflightCheck.status)) {
+              console.warn(`⚠️ Pre-flight issue for ${url}: ${preflightCheck.error}`);
+              return {
                 detected: false,
                 version: null,
                 hasMboxCookie: false,
                 hasAdobeScript: false,
-                detectionSource: {}
-            };
-            
-            // Final detection
-            try {
-                detectionResult = await runWithTimeout(
-                    () => this.detectAdobeTargetPresenceUsingPage(sharedPage),
-                    15000,
-                    'detectAdobeTargetPresenceUsingPage'
-                );
-            } catch (e) {
-                console.warn(`⚠️ Detection timeout for ${url}: ${e.message}`);
-                const fatal =
-                    e.message.includes('Target closed') ||
-                    e.message.includes('Session closed');
-                
-                if (fatal) throw e; // CRITICAL PROPAGATION
-                return {
-                    detected: false,
-                    version: null,
-                    hasMboxCookie: false,
-                    hasAdobeScript: false,
-                    httpStatusCode: null,
-                    captchaDetected: false,
-                    detectionSource: { error: e.message, timeout: true }
-                };
-            }
-            
-            console.log(`${detectionResult.detected ? '✅' : '❌'} Adobe Target ${detectionResult.detected ? 'detected' : 'not detected'} on ${url}`);
-            
-            return {
-                detected: detectionResult.detected,
-                version: detectionResult.version,
-                hasMboxCookie: detectionResult.hasMboxCookie,
-                hasAdobeScript: detectionResult.hasAdobeScript,
-                httpStatusCode: null,
+                httpStatusCode: preflightCheck.status || null,
                 captchaDetected: false,
-                detectionSource: detectionResult.detectionSource
+                detectionSource: {
+                  error: preflightCheck.error || 'preflight_failed',
+                  preflightCheck: true
+                }
+              };
+            }
+          } catch (e) {
+            console.warn(`⚠️ Reachability pre-check warning: ${e.message}`);
+          }
+      
+          /* ======================================================
+           * 2. SAFE NAVIGATION (Cluster-safe)
+           * ====================================================== */
+          try {
+            await sharedPage.goto(url, {
+              waitUntil: 'domcontentloaded',
+              timeout: 20000
+            });
+          } catch (navError) {
+            console.warn(`⚠️ Navigation failed for ${url}: ${navError.message}`);
+      
+            // 🔑 CRITICAL: Reset page state to avoid "main frame too early"
+            await sharedPage.goto('about:blank').catch(() => {});
+      
+            throw navError;
+          }
+      
+          /* ======================================================
+           * 3. MAIN FRAME READINESS GUARD (VERY IMPORTANT)
+           * ====================================================== */
+          await sharedPage.waitForFunction(
+            () => !!document && !!document.body,
+            { timeout: 5000 }
+          );
+      
+          /* ======================================================
+           * 4. CAPTCHA DETECTION
+           * ====================================================== */
+          let captchaCheck = { detected: false };
+          try {
+            captchaCheck = await runWithTimeout(
+              () => detectCaptcha(sharedPage),
+              5000,
+              'detectCaptcha'
+            );
+          } catch (e) {
+            console.warn(`⚠️ Captcha detection warning: ${e.message}`);
+      
+            if (
+              e.message.includes('Target closed') ||
+              e.message.includes('Session closed')
+            ) {
+              throw e;
+            }
+          }
+      
+          if (captchaCheck?.detected) {
+            console.log(`🚫 Captcha detected on ${url}`);
+            return {
+              detected: false,
+              captchaDetected: true,
+              captchaStatus: captchaCheck.reason,
+              httpStatusCode: null,
+              detectionSource: { captchaBlocked: true }
             };
-            
+          }
+      
+          /* ======================================================
+           * 5. COOKIE CONSENT
+           * ====================================================== */
+          try {
+            await runWithTimeout(
+              () => handleCookieConsent(sharedPage),
+              6000,
+              'handleCookieConsent'
+            );
+          } catch (e) {
+            console.warn(`⚠️ Cookie consent warning: ${e.message}`);
+      
+            if (
+              e.message.includes('Target closed') ||
+              e.message.includes('Session closed')
+            ) {
+              throw e;
+            }
+          }
+      
+          /* ======================================================
+           * 6. OPTIONAL REQUEST INTERCEPTION (OFF BY DEFAULT)
+           * ====================================================== */
+          if (process.env.ENABLE_REQUEST_INTERCEPTION === 'true') {
+            try {
+              await sharedPage.setRequestInterception(true);
+      
+              requestHandler = req => {
+                if (!req || req._interceptionHandled) return;
+      
+                const type = req.resourceType();
+                if (type === 'image' || type === 'font') {
+                  req.abort('blockedbyclient').catch(() => {});
+                } else {
+                  req.continue().catch(() => {});
+                }
+              };
+      
+              sharedPage.on('request', requestHandler);
+            } catch (e) {
+              console.warn(`⚠️ Interception setup failed: ${e.message}`);
+            }
+          }
+      
+          await sharedPage.waitForTimeout(2500);
+      
+          /* ======================================================
+           * 7. FINAL ADOBE TARGET DETECTION
+           * ====================================================== */
+          let detectionResult;
+          try {
+            detectionResult = await runWithTimeout(
+              () => this.detectAdobeTargetPresenceUsingPage(sharedPage),
+              15000,
+              'detectAdobeTargetPresenceUsingPage'
+            );
+          } catch (e) {
+            console.warn(`⚠️ Detection timeout: ${e.message}`);
+      
+            if (
+              e.message.includes('Target closed') ||
+              e.message.includes('Session closed')
+            ) {
+              throw e;
+            }
+      
+            return {
+              detected: false,
+              version: null,
+              hasMboxCookie: false,
+              hasAdobeScript: false,
+              httpStatusCode: null,
+              captchaDetected: false,
+              detectionSource: { timeout: true }
+            };
+          }
+      
+          console.log(
+            `${detectionResult.detected ? '✅' : '❌'} Adobe Target ${
+              detectionResult.detected ? 'detected' : 'not detected'
+            } on ${url}`
+          );
+      
+          return {
+            detected: detectionResult.detected,
+            version: detectionResult.version,
+            hasMboxCookie: detectionResult.hasMboxCookie,
+            hasAdobeScript: detectionResult.hasAdobeScript,
+            httpStatusCode: null,
+            captchaDetected: false,
+            detectionSource: detectionResult.detectionSource
+          };
+      
         } catch (error) {
-            console.error(`❌ Error detecting Adobe Target on ${url}:`, error.message);
-            
-            // RE-THROW FATAL ERRORS to allow pool to handle browser restart
-            const fatal =
-                error.message.includes('Target closed') ||
-                error.message.includes('Session closed');
-            
-            if (fatal) throw error;
-            
-            return {
-                detected: false,
-                version: null,
-                hasMboxCookie: false,
-                hasAdobeScript: false,
-                httpStatusCode: null,
-                captchaDetected: false,
-                detectionSource: { 
-                    error: error.message,
-                    isProtocolError: true
-                }
-            };
+          console.error(`❌ Error detecting Adobe Target on ${url}:`, error.message);
+      
+          if (
+            error.message.includes('Target closed') ||
+            error.message.includes('Session closed')
+          ) {
+            throw error; // 🔥 let cluster recycle browser
+          }
+      
+          return {
+            detected: false,
+            version: null,
+            hasMboxCookie: false,
+            hasAdobeScript: false,
+            httpStatusCode: null,
+            captchaDetected: false,
+            detectionSource: { error: error.message }
+          };
         } finally {
-            // Clean up request interception
-            if (requestHandler && sharedPage) {
-                try {
-                    sharedPage.off('request', requestHandler);
-                    const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
-                    if (false) {
-                        await sharedPage.setRequestInterception(false);
-                    }
-                } catch (e) { /* ignore cleanup error */ }
-            }
+          /* ======================================================
+           * 8. CLEANUP
+           * ====================================================== */
+          if (requestHandler) {
+            try {
+              sharedPage.off('request', requestHandler);
+              await sharedPage.setRequestInterception(false).catch(() => {});
+            } catch (_) {}
+          }
         }
-    }
+      }
+      
 
   
     /**
