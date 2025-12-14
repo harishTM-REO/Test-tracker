@@ -13,6 +13,21 @@ let StealthPlugin;
 try {
   puppeteer = require('puppeteer-extra');
   StealthPlugin = require('puppeteer-extra-plugin-stealth');
+  const stealth = StealthPlugin();
+  [
+    'chrome.app',
+    'chrome.csi',
+    'chrome.loadTimes',
+    'chrome.runtime',
+    'iframe.contentWindow',
+    'media.codecs',
+    'navigator.hardwareConcurrency',
+    'navigator.languages',
+    'navigator.permissions',
+    'navigator.plugins',
+    'sourceurl',
+    'user-agent-override'
+  ].forEach(evasion => stealth.enabledEvasions.delete(evasion));
   puppeteer.use(StealthPlugin());
 } catch (e) {
   try {

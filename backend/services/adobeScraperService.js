@@ -459,6 +459,7 @@ class AdobeScraperService {
               // Use the page directly from cluster
               console.log('Avinas the url value->', url)
               console.log('Avinas the page value->', page)
+              await page.waitForTimeout(50);
               return await this.detectAdobeTargetPresenceWithSharedPage(page, url);
             });
           } catch (error) {
@@ -560,6 +561,7 @@ class AdobeScraperService {
             // We enforce the stable pool wrapper here.
             
             return await browserPool.withBrowser(async ({ page }) => {
+                await page.waitForTimeout(50);
                 return await this.scrapeExperimentsFromPage(url, {
                   sharedPage: page,
                   presenceOnly
@@ -3007,6 +3009,7 @@ class AdobeScraperService {
                     console.log(`[${i + 1}/${urls.length}] Processing: ${url}`);
                     // Page Creation
                     page = await createPage(browser);
+                    await page.waitForTimeout(50);
                     // Note: Browser lifecycle management is handled by the pool/cluster service
                     // No need to manually track page counts - the service handles this internally
                     

@@ -37,6 +37,20 @@ try {
     // 🛑 CRITICAL FIX: Disable evasions that force the new Fetch API (prevents Protocol Error)
     stealth.enabledEvasions.delete('iframe.contentWindow');
     stealth.enabledEvasions.delete('media.codecs');
+    [
+        'chrome.app',
+        'chrome.csi',
+        'chrome.loadTimes',
+        'chrome.runtime',
+        'iframe.contentWindow',
+        'media.codecs',
+        'navigator.hardwareConcurrency',
+        'navigator.languages',
+        'navigator.permissions',
+        'navigator.plugins',
+        'sourceurl',
+        'user-agent-override'
+      ].forEach(evasion => stealth.enabledEvasions.delete(evasion));
 
     puppeteer.use(stealth);
 } catch (e) {
