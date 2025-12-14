@@ -114,7 +114,8 @@ class BrowserClusterService {
         maxConcurrency: this.poolSize, // Number of concurrent browsers
         puppeteer: puppeteer, // Use puppeteer-extra with stealth
         puppeteerOptions: baseOptions,
-        
+        monitor: true, // Enables internal tracking for auto-restart
+        maxPagesPerBrowser: this.maxJobsPerBrowser, // Triggers auto-restart after N jobs
         // ✅ CPU OPTIMIZATION: Delay between worker creation to avoid CPU spikes
         workerCreationDelay: parseInt(process.env.CLUSTER_WORKER_CREATION_DELAY) || 2000,
         
@@ -202,43 +203,7 @@ class BrowserClusterService {
             console.log(`📊 Browser job count: ${newJobCount}/${self.maxJobsPerBrowser}`);
           }
           
-          // ✅ MEMORY OPTIMIZATION: Restart browser after maxJobsPerBrowser jobs
-          if (newJobCount >= self.maxJobsPerBrowser) {
-            console.log(`\n🔄 Browser reached job limit (${newJobCount}/${self.maxJobsPerBrowser}), will restart after this job...`);
-            setImmediate(async () => {
-              try {
-                if (!actualBrowser) {
-                  console.warn(`⚠️  Browser is null, cannot close`);
-                  return;
-                }
-                
-                if (actualBrowser.isConnected && typeof actualBrowser.isConnected === 'function' && !actualBrowser.isConnected()) {
-                  console.warn(`⚠️  Browser already disconnected, skipping close`);
-                  return;
-                }
-                
-                // Try to close pages and browser
-                try {
-                  const pages = await actualBrowser.pages();
-                  for (const p of pages) {
-                    try { await p.close(); } catch (e) { /* Ignore page close errors */ }
-                  }
-                } catch (pagesError) {
-                  console.warn(`⚠️  Error getting pages: ${pagesError.message}`);
-                }
-                
-                // Close browser
-                try {
-                  await actualBrowser.close();
-                  console.log(`✅ Browser closed after ${newJobCount} jobs (memory optimized restart)`);
-                } catch (closeError) {
-                  console.warn(`⚠️  Error closing browser: ${closeError.message}`);
-                }
-              } catch (e) {
-                console.warn(`⚠️  Error in browser restart logic: ${e.message}`);
-              }
-            });
-          }
+          
           
           // Extract function from data
           if (!data || typeof data !== 'object' || typeof data.fn !== 'function') {

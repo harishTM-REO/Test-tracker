@@ -154,7 +154,10 @@ class AdobeTarget1_0Service {
             // This creates more frequent cleanup cycles (saw tooth wave pattern)
             const BATCH_SIZE = parseInt(process.env.ADOBE_VALIDATION_BATCH_SIZE) || 
                                parseInt(process.env.BROWSER_RESTART_EVERY) || 20; // Reduced from 25 to 20
-            const CONCURRENCY = parseInt(process.env.PQUEUE_CONCURRENCY) || 1;
+            // ✅ FIX: Default concurrency to pool size if PQUEUE_CONCURRENCY is not set
+            // This ensures all browsers in the pool are utilized
+            const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
+            const CONCURRENCY = parseInt(process.env.PQUEUE_CONCURRENCY) || poolSize;
             
             const totalBatches = Math.max(1, Math.ceil(urls.length / BATCH_SIZE));
 
@@ -473,8 +476,9 @@ class AdobeTarget1_0Service {
     if (!urls || urls.length === 0) return [];
 
     // 1. Safe Concurrency (Pool handles the load)
-    // You can safely raise PQUEUE_CONCURRENCY to 5 or 8 now
-    const concurrency = options.concurrency || 2;
+    // Defaults to pool size if not specified (ensures all browsers are utilized)
+    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
+    const concurrency = options.concurrency || poolSize;
 
     console.log(`\n🔁 Processing ${urls.length} URLs (Browser Pool Mode)`);
     console.log(`   Concurrency: ${concurrency}`);
