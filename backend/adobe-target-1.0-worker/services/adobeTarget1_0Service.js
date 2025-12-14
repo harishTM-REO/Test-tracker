@@ -360,20 +360,6 @@ class AdobeTarget1_0Service {
                     const heapTotalMB = Math.round(memBefore.heapTotal / 1024 / 1024);
                     console.log(`\n💾 Memory before cleanup: ${heapUsedMB}MB / ${heapTotalMB}MB (${Math.round((heapUsedMB / heapTotalMB) * 100)}%)`);
                     
-                    // ✅ CRITICAL: Force browser restarts between batches to clear browser memory
-                    // This is the key to achieving saw-tooth memory pattern
-                    const poolStats = browserPool.getStats();
-                    console.log(`📊 Browser pool stats: ${poolStats.inUse} in use, ${poolStats.available} available`);
-                    console.log(`   Total browser restarts: ${poolStats.totalBrowserRestarts}`);
-                    console.log(`   Browser page counts:`, poolStats.browserPageCounts);
-                    
-                    // Log warning if browsers are getting close to restart limit
-                    const effectiveLimit = parseInt(process.env.ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART) || 15;
-                    Object.entries(poolStats.browserPageCounts).forEach(([browserName, pageCount]) => {
-                        if (typeof pageCount === 'number' && pageCount >= effectiveLimit * 0.7) {
-                            console.log(`⚠️  ${browserName} has ${pageCount}/${effectiveLimit} pages - will restart soon`);
-                        }
-                    });
                     
                     await performMemoryCleanup(batchDelay);
                     
@@ -484,8 +470,6 @@ class AdobeTarget1_0Service {
     console.log(`   Concurrency: ${concurrency}`);
     console.log('═'.repeat(70));
 
-    // Ensure pool is ready
-    await browserPool.initialize();
 
     const PQueueLib = require('p-queue');
     const PQueue = PQueueLib.default || PQueueLib; 
