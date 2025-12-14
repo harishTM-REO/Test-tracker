@@ -455,38 +455,20 @@ class AdobeScraperService {
      */
     async detectAdobeTargetPresence(url) {
         try {
-            return await browserPool.withBrowser(async (browser) => {
-                let page = null;
-                try {
-                    page = await createPage(browser);
-                    // Note: Browser lifecycle management is handled by the pool/cluster service
-                    // No need to manually track page counts - the service handles this internally
-                    
-                    // We must return the final result object, not the intermediate steps
-                    const detectionResult = await this.detectAdobeTargetPresenceWithSharedPage(page, url);
-
-                    return detectionResult;
-
-                } finally {
-                    // CRITICAL FIX: Ensure page is closed before the browser is released
-                    if (page) {
-                        try {
-                            await closePage(page, 2000);
-                        } catch (finalErr) {
-                            console.warn('Error closing page in detectAdobeTargetPresence:', finalErr.message);
-                            // If the page is stuck, the outer withBrowser catch block will handle any error propagated up.
-                            if (finalErr.message.includes('Protocol error') || finalErr.message.includes('closed')) {
-                                throw finalErr;
-                            }
-                        }
-                    }
-                }
+            return await browserPool.withBrowser(async ({ page }) => {
+              // Use the page directly from cluster
+              console.log('Avinas the url value->', url)
+              console.log('Avinas the page value->', page)
+              return await this.detectAdobeTargetPresenceWithSharedPage(page, url);
             });
-        } catch (error) {
-            // Re-throw fatal error for upper layers/caller to handle
-            console.error('Error detecting Adobe Target presence (final catch):', error.message);
-            throw error; 
-        }
+          } catch (error) {
+            console.error(
+              'Error detecting Adobe Target presence (final catch):',
+              error.message
+            );
+            throw error;
+          }
+          
     }
     
     async detectAdobeTargetPresenceUsingPage(page) {
@@ -577,19 +559,14 @@ class AdobeScraperService {
             // Case 2: Standalone call (Original scrapeAdobeTargetExperiments path).
             // We enforce the stable pool wrapper here.
             
-            return await browserPool.withBrowser(async (browser) => {
-                let page = null;
-                try {
-                    page = await createPage(browser);
-                    
-                    // We call the existing logic, which will use the acquired page.
-                    const result = await this.scrapeExperimentsFromPage(url, { sharedPage: page, presenceOnly });
-                    return result;
-
-                } finally {
-                    if (page) await closePage(page);
-                }
-            });
+            return await browserPool.withBrowser(async ({ page }) => {
+                return await this.scrapeExperimentsFromPage(url, {
+                  sharedPage: page,
+                  presenceOnly
+                });
+              });
+              
+              
         }
     }
 
@@ -2982,13 +2959,13 @@ class AdobeScraperService {
             const urlBatches = distributeUrlsAcrossBrowsers(urls, actualBrowserCount, 1);
 
             // Process each browser's batch using the pool's stable wrapper
-            const batchPromises = urlBatches.map(async (urlBatch) => {
-                // CRITICAL FIX: The processBrowserBatchSequential logic is run entirely 
-                // inside the pool wrapper, guaranteeing release/restart.
-                return browserPool.withBrowser(async (browser) => {
-                    return await this.processBrowserBatchSequential(browser, urlBatch);
-                });
-            });
+            const batchPromises = urlBatches.map((urlBatch) =>
+                browserPool.withBrowser(async ({ browser }) => {
+                  // Run the batch using a single browser instance
+                  // puppeteer-cluster manages lifecycle automatically
+                  return this.processBrowserBatchSequential(browser, urlBatch);
+                })
+              );
 
             const batchResults = await Promise.allSettled(batchPromises);
 
@@ -3046,7 +3023,6 @@ class AdobeScraperService {
                     console.error(`❌ Error processing ${url}:`, error.message);
                     results.push({ url, success: false, error: error.message });
                     
-                    // CRITICAL FIX: Ensure fatal errors re-throw to outer withBrowser
                     const fatalErrors = ['Protocol error', 'Target closed', 'Session closed', 'Browser has been closed', 'BROWSER_STUCK_RESTART_REQUIRED', 'Network.enable timed out'];
                     if (fatalErrors.some(msg => error.message.includes(msg))) {
                         throw error;
@@ -3246,16 +3222,23 @@ class AdobeScraperService {
             // Distribute URLs across browsers (batches)
             const urlBatches = distributeUrlsAcrossBrowsers(urls, actualBrowserCount, 1);
 
-            // Process each browser's batch using the pool's stable wrapper
-            const batchPromises = urlBatches.map(async (urlBatch) => {
-                // CRITICAL FIX: The processBrowserBatchSequential logic is run entirely 
-                // inside the pool wrapper, guaranteeing release/restart.
-                return browserPool.withBrowser(async (browser) => {
+            const batchPromises = urlBatches.map((urlBatch) =>
+                browserPool.withBrowser(async ({ browser }) => {
+                  try {
                     return await this.processBrowserBatchSequential(browser, urlBatch);
-                });
-            });
-
-            const batchResults = await Promise.allSettled(batchPromises);
+                  } catch (err) {
+                    return {
+                      success: false,
+                      error: err.message,
+                      batch: urlBatch
+                    };
+                  }
+                })
+              );
+              
+              // Always wait using allSettled to avoid early abort
+              const batchResults = await Promise.allSettled(batchPromises);
+              
 
             // Flatten results
             batchResults.forEach(result => {
