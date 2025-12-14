@@ -224,7 +224,7 @@ class AdobeScraperService {
             }
           }
       
-          await sharedPage.waitForTimeout(2500);
+          await new Promise(resolve => setTimeout(resolve, 2500));
       
           /* ======================================================
            * 7. FINAL ADOBE TARGET DETECTION
