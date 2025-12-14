@@ -133,7 +133,11 @@ class AdobeScraperService {
             } catch (e) {
                 console.warn(`⚠️ Captcha detection timeout for ${url} (continuing): ${e.message}`);
                 // CRITICAL PROPAGATION: Re-throw if a session error occurred during the timeout/check
-                if (e.message.includes('Protocol error') || e.message.includes('closed')) throw e; 
+                const fatal =
+                    e.message.includes('Target closed') ||
+                    e.message.includes('Session closed');
+                
+                if (fatal) throw e; 
             }
             
             if (captchaCheck?.detected) {
@@ -156,14 +160,18 @@ class AdobeScraperService {
                     );
                 } catch (e) {
                     console.warn(`⚠️ Cookie consent timeout for ${url} (continuing): ${e.message}`);
-                    if (e.message.includes('Protocol error') || e.message.includes('closed')) throw e; 
+                    const fatal =
+                        e.message.includes('Target closed') ||
+                        e.message.includes('Session closed');
+                    
+                    if (fatal) throw e; 
                 }
             }
             
             // Request interception setup
             const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
             
-            if (enableInterception) {
+            if (false) {
                 try {
                     await sharedPage.setRequestInterception(true);
                     
@@ -206,7 +214,11 @@ class AdobeScraperService {
                 );
             } catch (e) {
                 console.warn(`⚠️ Detection timeout for ${url}: ${e.message}`);
-                if (e.message.includes('Protocol error') || e.message.includes('closed')) throw e; // CRITICAL PROPAGATION
+                const fatal =
+                    e.message.includes('Target closed') ||
+                    e.message.includes('Session closed');
+                
+                if (fatal) throw e; // CRITICAL PROPAGATION
                 return {
                     detected: false,
                     version: null,
@@ -234,9 +246,11 @@ class AdobeScraperService {
             console.error(`❌ Error detecting Adobe Target on ${url}:`, error.message);
             
             // RE-THROW FATAL ERRORS to allow pool to handle browser restart
-            if (error.message.includes('Protocol error') || error.message.includes('closed') || error.message.includes('timeout')) {
-                throw error;
-            }
+            const fatal =
+                error.message.includes('Target closed') ||
+                error.message.includes('Session closed');
+            
+            if (fatal) throw error;
             
             return {
                 detected: false,
@@ -256,7 +270,7 @@ class AdobeScraperService {
                 try {
                     sharedPage.off('request', requestHandler);
                     const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION === 'true';
-                    if (enableInterception) {
+                    if (false) {
                         await sharedPage.setRequestInterception(false);
                     }
                 } catch (e) { /* ignore cleanup error */ }
@@ -2856,7 +2870,11 @@ class AdobeScraperService {
                         } catch (e) {
                             console.warn('⚠️ Error closing page:', e.message);
                             // If page closing fails, force a restart
-                            if (e.message.includes('Protocol error') || e.message.includes('closed')) {
+                            const fatal =
+                                e.message.includes('Target closed') ||
+                                e.message.includes('Session closed');
+                            
+                            if (fatal) {
                                 throw new Error(`Browser Critical Failure (Page Stuck): ${e.message}`);
                             }
                         }
@@ -2876,7 +2894,11 @@ class AdobeScraperService {
                                     } catch (e) {
                                         console.warn('⚠️ Error closing page:', e.message);
                                         // If the page is unresponsive, it signals a deeper browser issue.
-                                        if (e.message.includes('Protocol error') || e.message.includes('closed')) {
+                                        const fatal =
+                                            e.message.includes('Target closed') ||
+                                            e.message.includes('Session closed');
+                                        
+                                        if (fatal) {
                                             // [CRITICAL FIX] Use a known cluster fatal error string
                                             throw new Error(`BROWSER_NOT_CONNECTED: Page close failure - ${e.message}`);
                                         }
