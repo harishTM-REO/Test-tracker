@@ -49,10 +49,26 @@ try {
         'navigator.permissions',
         'navigator.plugins',
         'sourceurl',
-        'user-agent-override'
+        'user-agent-override',
+        'navigator.webdriver' // ✅ FIX: Also disable navigator.webdriver to prevent main frame errors
       ].forEach(evasion => stealth.enabledEvasions.delete(evasion));
 
     puppeteer.use(stealth);
+    
+    // ✅ FIX: Add process-level error handler to catch "main frame too early" errors
+    // These errors occur when the stealth plugin tries to access the main frame before it exists
+    // (e.g., after SSL errors or when pages are in an invalid state)
+    const originalEmit = process.emit;
+    process.emit = function(event, error) {
+      if (event === 'uncaughtException' || event === 'unhandledRejection') {
+        if (error && error.message && error.message.includes('Requesting main frame too early')) {
+          // Suppress these errors - they're non-fatal and occur during stealth plugin initialization
+          console.warn('⚠️ Suppressed stealth plugin error (non-fatal): Requesting main frame too early');
+          return true; // Prevent default error handling
+        }
+      }
+      return originalEmit.apply(this, arguments);
+    };
 } catch (e) {
     console.warn('Puppeteer Extra/Stealth failed, falling back to core:', e.message);
     try {

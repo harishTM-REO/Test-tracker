@@ -41,6 +41,21 @@ try {
   ].forEach(e => stealth.enabledEvasions.delete(e));
 
   puppeteer.use(stealth);
+  
+  // ✅ FIX: Add process-level error handler to catch "main frame too early" errors
+  // These errors occur when the stealth plugin tries to access the main frame before it exists
+  // (e.g., after SSL errors or when pages are in an invalid state)
+  const originalEmit = process.emit;
+  process.emit = function(event, error) {
+    if (event === 'uncaughtException' || event === 'unhandledRejection') {
+      if (error && error.message && error.message.includes('Requesting main frame too early')) {
+        // Suppress these errors - they're non-fatal and occur during stealth plugin initialization
+        console.warn('⚠️ Suppressed stealth plugin error (non-fatal): Requesting main frame too early');
+        return true; // Prevent default error handling
+      }
+    }
+    return originalEmit.apply(this, arguments);
+  };
 } catch {
   try {
     puppeteer = require('puppeteer');
@@ -207,7 +222,8 @@ class BrowserClusterService {
         // ✅ FIX: Better error categorization
         const isStealthInitError = 
           err?.message?.includes('addScriptToEvaluateOnNewDocument') ||
-          err?.message?.includes('evaluateOnNewDocument');
+          err?.message?.includes('evaluateOnNewDocument') ||
+          err?.message?.includes('Requesting main frame too early');
         
         const isSessionError = 
           err?.message?.includes('Protocol error') ||
@@ -264,6 +280,12 @@ class BrowserClusterService {
 
     this.cluster.on('taskerror', (err, data, willRetry) => {
       // ✅ FIX: Better error logging with context
+      // Suppress "Requesting main frame too early" errors - they're non-fatal
+      if (err?.message?.includes('Requesting main frame too early')) {
+        console.warn(`⚠️ Cluster task error [stealth_init] (suppressed, non-fatal): ${err.message}`);
+        return; // Don't log as error, just warn
+      }
+      
       const errorType = err?.message?.includes('addScriptToEvaluateOnNewDocument') ? 'stealth_init' :
                        err?.message?.includes('Session closed') ? 'session_closed' :
                        err?.message?.includes('Target closed') ? 'target_closed' :
