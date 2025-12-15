@@ -8,8 +8,8 @@ const OptimizelyValidationDocument = require(path.join(__dirname, '../../models/
 const Dataset = require(path.join(__dirname, '../../models/Dataset'));
 const AdobeScraperService = require(path.join(__dirname, '../../services/adobeScraperService'));
 const OptimizelyValidationService = require(path.join(__dirname, './optimizelyValidationService'));
-// ✅ Use cluster service for better memory/CPU management
-const browserPool = require(path.join(__dirname, '../../services/browserClusterService'));
+// ✅ Use browser pool service for validation memory/CPU management
+const browserPool = require(path.join(__dirname, '../../services/browserPoolService'));
 const { 
     sanitizeWorkflowResult
 } = require(path.join(__dirname, '../../utils/adobeTargetResultSanitizer'));
@@ -170,6 +170,14 @@ class AdobeTarget1_0Service {
 
         if (!urls || urls.length === 0) {
             throw new Error('No URLs provided for Adobe Target validation');
+        }
+
+        // Ensure browser pool is initialized for validation runs
+        try {
+            await browserPool.initialize();
+        } catch (e) {
+            console.error('❌ Failed to initialize browser pool for validation:', e.message);
+            throw e;
         }
 
         let datasetDoc = null;
