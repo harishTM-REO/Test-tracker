@@ -6,6 +6,15 @@ const { isUrlReachable } = require('../../utils/urlValidator');
 const { handleCookieConsent, detectCaptcha, navigateToPage, createPage, closePage } = require('../../utils/helper');
 // const browserPool = require('../../adobe-targetscraping/services/browserPoolService'); // ✅ Import Browser Pool
 const browserPool = require('../../services/browserPoolService');
+
+// Timeout wrapper utility (matching Adobe implementation)
+const runWithTimeout = async (promiseOrFn, ms, label = 'operation') => {
+    const fn = (typeof promiseOrFn === 'function') ? promiseOrFn : () => promiseOrFn;
+    return await Promise.race([
+        (async () => fn())(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms))
+    ]);
+};
 class ABTastyValidationService {
   
   /**
@@ -257,6 +266,7 @@ class ABTastyValidationService {
   /**
    * Validate a single URL (Actual Logic)
    * Note: No browser launch/close here. Just page operations.
+   * ✅ ENHANCED: Follows Adobe Target stable patterns
    */
   async validateUrl(page, urlEntry) {
     const { url, companyName } = urlEntry;
@@ -264,41 +274,76 @@ class ABTastyValidationService {
       url,
       companyName: companyName || null,
       status: 'failed',
-      detectionDetails: { 
-          projectId: null, 
+      detectionDetails: {
+          projectId: null,
           experiments: [],
           experimentCount: 0,
           activeCount: 0,
           detectedExplicitly: false,
           captchaDetected: false,
           cookieType: 'unknown',
-          error: null 
+          error: null
       },
       scrapedAt: new Date(),
       error: null
     };
 
     try {
-      console.log(`   🔍 Navigating to: ${url}`);
+      console.log(`   🔍 Validating ABTasty presence: ${url}`);
 
-      // Navigate
+      /* ======================================================
+       * 1. SAFE NAVIGATION (Cluster-safe)
+       * ====================================================== */
       try {
           await navigateToPage(page, url); // Uses helper with timeout
           console.log(`   ✓ Page loaded`);
       } catch (navError) {
-          console.error(`   ❌ Navigation error: ${navError.message}`);
+          console.warn(`   ⚠️ Navigation failed for ${url}: ${navError.message}`);
+
+          // 🔑 CRITICAL: Reset page state to avoid "main frame too early"
+          await page.goto('about:blank').catch(() => {});
+
           result.status = 'failed';
           result.error = `Navigation failed: ${navError.message}`;
           result.detectionDetails.error = result.error;
           return result;
       }
 
-      // 1. Captcha Check
-      let captchaResult = { detected: false };
-      try { captchaResult = await detectCaptcha(page); } catch (e) {}
-      
-      if (captchaResult && captchaResult.detected) {
-         console.warn(`   🚫 Captcha detected`);
+      /* ======================================================
+       * 2. MAIN FRAME READINESS GUARD (VERY IMPORTANT)
+       * ====================================================== */
+      try {
+          await page.waitForFunction(
+              () => !!document && !!document.body,
+              { timeout: 5000 }
+          );
+      } catch (e) {
+          console.warn(`   ⚠️ Main frame readiness timeout: ${e.message}`);
+      }
+
+      /* ======================================================
+       * 3. CAPTCHA DETECTION
+       * ====================================================== */
+      let captchaCheck = { detected: false };
+      try {
+          captchaCheck = await runWithTimeout(
+              () => detectCaptcha(page),
+              5000,
+              'detectCaptcha'
+          );
+      } catch (e) {
+          console.warn(`   ⚠️ Captcha detection warning: ${e.message}`);
+
+          if (
+              e.message.includes('Target closed') ||
+              e.message.includes('Session closed')
+          ) {
+              throw e;
+          }
+      }
+
+      if (captchaCheck?.detected) {
+         console.log(`   🚫 Captcha detected on ${url}`);
          result.status = 'failed';
          result.error = 'Captcha detected';
          result.detectionDetails.captchaDetected = true;
@@ -306,15 +351,55 @@ class ABTastyValidationService {
          return result;
       }
 
-      // 2. Cookie Consent
-      try { await handleCookieConsent(page); } catch (e) {}
-
-      // 3. Detect ABTasty (Wait slightly)
+      /* ======================================================
+       * 4. COOKIE CONSENT
+       * ====================================================== */
       try {
-        await page.waitForFunction(() => typeof window.ABTasty !== 'undefined', { timeout: 3500, polling: 200 });
-      } catch (e) {}
+          await runWithTimeout(
+              () => handleCookieConsent(page),
+              6000,
+              'handleCookieConsent'
+          );
+      } catch (e) {
+          console.warn(`   ⚠️ Cookie consent warning: ${e.message}`);
+      }
 
-      const abTastyDetection = await this.detectABTasty(page);
+      /* ======================================================
+       * 5. WAIT FOR ABTASTY OBJECT
+       * ====================================================== */
+      try {
+        await page.waitForFunction(
+            () => typeof window.ABTasty !== 'undefined',
+            { timeout: 3500, polling: 200 }
+        );
+      } catch (e) {
+          // ABTasty might not be present, continue to detection
+      }
+
+      /* ======================================================
+       * 6. FINAL ABTASTY DETECTION
+       * ====================================================== */
+      let abTastyDetection;
+      try {
+          abTastyDetection = await runWithTimeout(
+              () => this.detectABTasty(page),
+              15000,
+              'detectABTasty'
+          );
+      } catch (e) {
+          console.warn(`   ⚠️ Detection timeout: ${e.message}`);
+
+          if (
+              e.message.includes('Target closed') ||
+              e.message.includes('Session closed')
+          ) {
+              throw e;
+          }
+
+          result.status = 'negative';
+          result.detectionDetails.error = 'Detection timeout';
+          return result;
+      }
 
       if (abTastyDetection.detected) {
         result.status = 'positive';
@@ -334,15 +419,36 @@ class ABTastyValidationService {
       }
 
     } catch (error) {
+      console.error(`   ❌ Error detecting ABTasty on ${url}:`, error.message);
+
+      /* ======================================================
+       * 7. COMPREHENSIVE ERROR CATEGORIZATION
+       * ====================================================== */
+      // Check for stealth-related errors
+      const isStealthError = error?.message?.includes('addScriptToEvaluateOnNewDocument') ||
+                             error?.message?.includes('evaluateOnNewDocument');
+
+      // Check for session/browser errors
+      const isSessionError = error?.message?.includes('Target closed') ||
+                            error?.message?.includes('Session closed') ||
+                            error?.message?.includes('Protocol error') ||
+                            error?.message?.includes('TargetCloseError');
+
+      if (isStealthError || isSessionError) {
+          // These errors should be thrown up to the pool for browser restart
+          throw error;
+      }
+
+      // For other errors, return failed result
       result.status = 'failed';
       result.error = error.message;
       result.detectionDetails.error = error.message;
-      console.error(`   ❌ Error: ${error.message}`);
-      
-      // If fatal browser error, throw up to Pool
-      if (error.message.includes('Protocol error') || error.message.includes('Target closed')) {
-          throw error;
-      }
+    } finally {
+      /* ======================================================
+       * 8. CLEANUP (if needed in future)
+       * ====================================================== */
+      // Placeholder for any future cleanup operations
+      // (e.g., request handler cleanup, resource disposal)
     }
 
     return result;
