@@ -191,13 +191,7 @@ class AdobeScraperService {
             );
           } catch (e) {
             console.warn(`⚠️ Cookie consent warning: ${e.message}`);
-      
-            if (
-              e.message.includes('Target closed') ||
-              e.message.includes('Session closed')
-            ) {
-              throw e;
-            }
+    
           }
       
           /* ======================================================

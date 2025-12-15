@@ -451,39 +451,74 @@ const tryAlternativeUrl = async (url, attempt) => {
  */
 const detectCaptcha = async (page) => {
     try {
-        console.log("🕵️  Running captcha detection...");
-        const fastSelectorCheck = await page.$('#g-recaptcha, div.g-recaptcha, [data-sitekey], #h-captcha, div.h-captcha, .cf-turnstile, .frc-captcha, #captcha-container, [class*="captcha"]');
-        if (fastSelectorCheck) {
-            console.warn(`🚫 Captcha detected (Fast Check)`);
-            return { detected: true, reason: 'Fast selector match' };
-        }
-        
-        // Return explicit promise to handle race
-        const captchaResult = await Promise.race([
-            page.evaluate(() => {
-                const iframeKeywords = ['recaptcha', 'hcaptcha', 'challenges.cloudflare.com', 'arkoselabs'];
-                for (const iframe of document.querySelectorAll('iframe')) {
-                    try {
-                        const src = iframe.src || '';
-                        if (iframeKeywords.some(k => src.includes(k))) return { detected: true, reason: `iframe src contains: ${src}` };
-                    } catch (e) {}
-                }
-                const title = document.title.toLowerCase();
-                if (title.includes('verify you are') || title.includes('security check')) return { detected: true, reason: `Suspicious title: ${document.title}` };
-                return { detected: false, reason: 'No indicators' };
-            }),
-            new Promise(resolve => setTimeout(() => resolve({ detected: false, reason: 'Detection timed out' }), 4500))
-        ]);
-
-        if (captchaResult.detected) console.warn(`🚫 Captcha detected! Reason: ${captchaResult.reason}`);
-        else console.log("✅ No captcha detected.");
-        
-        return captchaResult;
-    } catch (error) {
-        console.warn(`⚠️ Captcha detection skipped: ${error.message}`);
-        return { detected: false, reason: 'Browser unresponsive' };
+      if (!page || page.isClosed()) {
+        return { detected: false, reason: 'page_closed' };
+      }
+  
+      console.log("🕵️ Running captcha detection...");
+  
+      // Fast selector check
+      let fastMatch;
+      try {
+        fastMatch = await page.$(
+          '#g-recaptcha, div.g-recaptcha, [data-sitekey], ' +
+          '#h-captcha, div.h-captcha, .cf-turnstile, .frc-captcha'
+        );
+      } catch (e) {
+        if (isSessionError(e)) throw e;
+        return { detected: false, reason: 'selector_failed' };
+      }
+  
+      if (fastMatch) {
+        return { detected: true, reason: 'fast_selector_match' };
+      }
+  
+      const result = await Promise.race([
+        page.evaluate(() => {
+          const iframeKeywords = [
+            'recaptcha',
+            'hcaptcha',
+            'challenges.cloudflare.com',
+            'arkoselabs'
+          ];
+  
+          for (const iframe of document.querySelectorAll('iframe')) {
+            const src = iframe.src || '';
+            if (iframeKeywords.some(k => src.includes(k))) {
+              return { detected: true, reason: `iframe: ${src}` };
+            }
+          }
+  
+          const title = document.title?.toLowerCase() || '';
+          if (title.includes('verify you are') || title.includes('security check')) {
+            return { detected: true, reason: 'suspicious_title' };
+          }
+  
+          return { detected: false };
+        }),
+        new Promise(resolve =>
+          setTimeout(() => resolve({ detected: false, reason: 'timeout' }), 4500)
+        )
+      ]);
+  
+      return result;
+  
+    } catch (e) {
+      // 🔥 Session errors must bubble up
+      if (isSessionError(e)) throw e;
+  
+      return { detected: false, reason: 'non_fatal_error' };
     }
-}
+  };
+  
+  function isSessionError(e) {
+    return (
+      e.message?.includes('Target closed') ||
+      e.message?.includes('Session closed') ||
+      e.message?.includes('Protocol error')
+    );
+  }
+  
 
 
 /**
@@ -492,213 +527,68 @@ const detectCaptcha = async (page) => {
  * @returns {string} Cookie type detected
  */
 const handleCookieConsent = async (page) => {
+    if (!page || page.isClosed()) return 'page_closed';
+  
+    console.log('🍪 Handling cookie consent (safe mode)...');
+  
+    const startUrl = page.url();
+    const start = Date.now();
+    const MAX_TIME = 6000;
+  
     try {
-        if (!page || page.isClosed()) {
-            console.warn('Page is closed, skipping cookie consent handling');
-            return 'page_closed';
-        }
-
-        const currentUrl = await page.url();
-        console.log("Handling cookie consent with enhanced detection...");
-
-        const cookieType = await Promise.race([
-            page.evaluate(() => {
-                return new Promise((resolve) => {
-                    let cookieType = 'custom';
-
-                    function acceptCookie(btn, interval) {
-                        if (interval) {
-                            clearInterval(interval);
-                        }
-                        btn.click();
-                        console.log(`Clicked cookie consent button: ${btn.textContent}`);
-                        resolve(cookieType);
-                    }
-
-                    const cookieProviderAcceptSelector = [
-                        {
-                            cookieType: 'onetrust',
-                            cookieSelector: '#onetrust-accept-btn-handler',
-                        },
-                        {
-                            cookieType: 'Cookie Bot',
-                            cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
-                        },
-                        {
-                            cookieType: 'cookielaw',
-                            cookieSelector: '.cc-dismiss',
-                        },
-                        {
-                            cookieType: 'gdpr',
-                            cookieSelector: '.gdpr-accept',
-                        },
-                        {
-                            cookieType: 'consent-manager',
-                            cookieSelector: '[data-testid="consent-accept-all"]',
-                        },
-                        {
-                            cookieType: 'evidon',
-                            cookieSelector: '[id="_evidon-accept-button"]',
-                        },
-                        {
-                            cookieType: 'quantcast',
-                            cookieSelector: '.qc-cmp2-summary-buttons > button[mode="primary"]',
-                        },
-                        {
-                            cookieType: 'bbc',
-                            cookieSelector: '.piano-bbc-close-button',
-                        },
-                        {
-                            cookieType: 'howden',
-                            cookieSelector: '.iubenda-cs-accept-btn',
-                        }
-                    ];
-
-                    let attempts = 0;
-                    const maxAttempts = 50;
-
-                    let interval = setInterval(() => {
-                        attempts++;
-
-                        if (attempts > maxAttempts) {
-                            clearInterval(interval);
-
-                            let found = false;
-
-                            const specificCookieSelectors = [
-                                '[class*="cookie"] button[class*="accept"]',
-                                '[class*="consent"] button[class*="accept"]',
-                                '[class*="cookie"] button[class*="allow"]',
-                                '[class*="consent"] button[class*="allow"]',
-                                '[id*="cookie"] button',
-                                '[class*="banner"] button[class*="accept"]',
-                                '[class*="privacy"] button[class*="accept"]',
-                                '[data-testid*="cookie"] button',
-                                '[data-testid*="consent"] button',
-                                '[class="piano-bbc-close-button"]'
-                            ];
-
-                            if (!found) {
-                                const potentialCookieAreas = document.querySelectorAll([
-                                    '[class*="cookie"]', '[class*="consent"]', '[class*="privacy"]',
-                                    '[class*="banner"]', '[class*="notice"]', '[class*="popup"]',
-                                    '[id*="cookie"]', '[id*="consent"]', '[id*="privacy"]'
-                                ].join(','));
-
-                                for (const area of potentialCookieAreas) {
-                                    if (found) break;
-                                    const buttons = area.querySelectorAll('button, a[role="button"], div[role="button"]');
-                                    for (const button of buttons) {
-                                        if (button.offsetParent && button.getBoundingClientRect().width > 0) {
-                                            const text = button.textContent?.toLowerCase() || '';
-                                            const acceptTerms = ['accept all', 'accept cookies', 'allow all', 'agree', 'accept', 'allow', 'ok', 'got it', 'understood'];
-                                            const rejectTerms = ['reject', 'decline', 'deny', 'close', 'dismiss'];
-
-                                            if (acceptTerms.some(term => text.includes(term)) && !rejectTerms.some(term => text.includes(term))) {
-                                                cookieType = 'pattern-matched';
-                                                found = true;
-                                                button.click();
-                                                console.log(`Layer 2 - Clicked pattern matched: ${text}`);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (!found) {
-                                const allButtons = document.querySelectorAll('button, a[role="button"], div[role="button"]');
-                                for (const button of allButtons) {
-                                    if (found) break;
-                                    const computedStyle = window.getComputedStyle(button);
-                                    const isFixedOrAbsolute = ['fixed', 'absolute'].includes(computedStyle.position);
-
-                                    if (isFixedOrAbsolute && button.offsetParent) {
-                                        const rect = button.getBoundingClientRect();
-                                        const isBottomOrTop = rect.bottom > window.innerHeight * 0.8 || rect.top < window.innerHeight * 0.2;
-
-                                        if (isBottomOrTop) {
-                                            const text = button.textContent?.toLowerCase() || '';
-                                            const navigationTerms = ['login', 'signup', 'register', 'menu', 'search', 'back', 'next', 'submit', 'buy', 'cart', 'checkout'];
-                                            const hasNavTerms = navigationTerms.some(term => text.includes(term));
-
-                                            if (!hasNavTerms && ['accept', 'allow', 'agree', 'ok', 'continue', 'got it'].some(term => text.includes(term))) {
-                                                cookieType = 'heuristic';
-                                                found = true;
-                                                button.click();
-                                                console.log(`Layer 3 - Clicked heuristic match: ${text}`);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (!found) {
-                                const acceptButtons = Array.from(document.querySelectorAll('button, a[role="button"], div[role="button"]'))
-                                    .filter(btn => {
-                                        const text = btn.textContent?.toLowerCase() || '';
-                                        return text.includes('accept') && btn.offsetParent && btn.getBoundingClientRect().width > 50;
-                                    })
-                                    .sort((a, b) => {
-                                        const aRect = a.getBoundingClientRect();
-                                        const bRect = b.getBoundingClientRect();
-                                        return (bRect.width * bRect.height) - (aRect.width * aRect.height);
-                                    });
-
-                                if (acceptButtons[0]) {
-                                    const button = acceptButtons[0];
-                                    const text = button.textContent?.toLowerCase() || '';
-                                    const badTerms = ['newsletter', 'subscription', 'login', 'signup', 'register'];
-
-                                    if (!badTerms.some(term => text.includes(term))) {
-                                        cookieType = 'last-resort';
-                                        found = true;
-                                        button.click();
-                                        console.log(`Layer 4 - Clicked last resort: ${text}`);
-                                    }
-                                }
-                            }
-
-                            resolve(found ? cookieType : 'not_found');
-                            return;
-                        }
-
-                        for (const cookie of cookieProviderAcceptSelector) {
-                            const element = document.querySelector(cookie.cookieSelector);
-                            if (element && element.offsetParent) {
-                                cookieType = cookie.cookieType;
-                                acceptCookie(element, interval);
-                                return;
-                            }
-                        }
-                    }, 100);
-                });
-            }),
-            new Promise((resolve) => setTimeout(() => resolve('timeout'), 10000))
-        ]).catch((error) => {
-            if (error.message.includes('Execution context was destroyed') ||
-                error.message.includes('Target closed')) {
-                console.log('Page context destroyed during cookie consent - likely due to navigation');
-                return 'context_destroyed';
+      while (Date.now() - start < MAX_TIME) {
+        if (page.isClosed()) return 'page_closed';
+        if (page.url() !== startUrl) return 'navigated';
+  
+        const result = await page.evaluate(() => {
+          const providers = [
+            { type: 'onetrust', sel: '#onetrust-accept-btn-handler' },
+            { type: 'cookiebot', sel: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll' },
+            { type: 'quantcast', sel: '.qc-cmp2-summary-buttons button[mode="primary"]' },
+            { type: 'iubenda', sel: '.iubenda-cs-accept-btn' }
+          ];
+  
+          for (const p of providers) {
+            const el = document.querySelector(p.sel);
+            if (el && el.offsetParent) {
+              el.click();
+              return { found: true, type: p.type };
             }
-            throw error;
+          }
+  
+          // Heuristic fallback
+          const buttons = [...document.querySelectorAll('button, a[role="button"]')];
+          for (const btn of buttons) {
+            const text = btn.textContent?.toLowerCase() || '';
+            if (
+              btn.offsetParent &&
+              ['accept', 'allow', 'agree', 'ok', 'got it'].some(t => text.includes(t)) &&
+              !['reject', 'decline'].some(t => text.includes(t))
+            ) {
+              btn.click();
+              return { found: true, type: 'heuristic' };
+            }
+          }
+  
+          return { found: false };
         });
-
-        console.log(`Cookie consent handling completed for ${currentUrl}. Type detected: ${cookieType}`);
-        return cookieType;
-    } catch (error) {
-        if (error.message.includes('Execution context was destroyed') ||
-            error.message.includes('Target closed') ||
-            error.message.includes('Session closed')) {
-            console.log('Page navigated or closed during cookie consent handling - this is normal for some sites');
-            return 'context_destroyed';
+  
+        if (result?.found) {
+          console.log(`✅ Cookie consent accepted (${result.type})`);
+          return result.type;
         }
-        console.warn('Error handling cookie consent:', error.message);
-        return 'error';
+  
+        await page.waitForTimeout(250);
+      }
+  
+      return 'not_found';
+    } catch (e) {
+      // ❗ Never throw from cookie consent
+      console.warn(`⚠️ Cookie consent skipped: ${e.message}`);
+      return 'skipped';
     }
-}
-
+  };
+  
 
 /**
  * Safely close a page with timeout protection
