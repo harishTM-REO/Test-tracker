@@ -317,10 +317,39 @@ class AdobeScraperService {
               // Use the page directly from cluster
               console.log('Avinas the url value->', url)
               console.log('Avinas the page value->', page)
-              //await page.waitForTimeout(50);
+              
+              // ✅ FIX: Verify page is ready before using it
+              if (!page || page.isClosed()) {
+                throw new Error('Page is closed or invalid');
+              }
+              
               return await this.detectAdobeTargetPresenceWithSharedPage(page, url);
             });
           } catch (error) {
+            // ✅ FIX: Better error handling for session/stealth errors
+            const isStealthError = error?.message?.includes('addScriptToEvaluateOnNewDocument') ||
+                                 error?.message?.includes('evaluateOnNewDocument');
+            const isSessionError = error?.message?.includes('Target closed') ||
+                                  error?.message?.includes('Session closed') ||
+                                  error?.message?.includes('Protocol error') ||
+                                  error?.message?.includes('TargetCloseError');
+            
+            if (isStealthError || isSessionError) {
+              console.warn(`⚠️ Browser session error for ${url}: ${error.message}`);
+              // Return safe error response instead of throwing
+              return {
+                detected: false,
+                version: null,
+                hasMboxCookie: false,
+                hasAdobeScript: false,
+                captchaDetected: false,
+                detectionSource: {
+                  error: isStealthError ? 'stealth_init_error' : 'session_error',
+                  message: error.message
+                }
+              };
+            }
+            
             console.error(
               'Error detecting Adobe Target presence (final catch):',
               error.message

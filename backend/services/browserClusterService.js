@@ -85,6 +85,10 @@ class BrowserClusterService {
     const launchOptions = await buildPuppeteerLaunchOptions({
       headless: 'new',
       ignoreHTTPSErrors: true,
+      // ✅ FIX: Increase protocol timeout for memory pressure scenarios
+      // When browsers are under memory pressure (after 200+ URLs), they respond slower to CDP commands
+      protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT, 10) || 120000, // 2 minutes default
+      timeout: parseInt(process.env.LAUNCH_TIMEOUT, 10) || 30000,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -110,9 +114,10 @@ class BrowserClusterService {
       maxConcurrency: this.poolSize,
       puppeteer,
       puppeteerOptions: launchOptions,
-      retryLimit: parseInt(process.env.CLUSTER_RETRY_LIMIT, 10) || 2,
-      retryDelay: 1000,
-      timeout: 60000
+      // ✅ FIX: Increase retry limit for session errors
+      retryLimit: parseInt(process.env.CLUSTER_RETRY_LIMIT, 10) || 3, // Increased from 2 to 3
+      retryDelay: parseInt(process.env.CLUSTER_RETRY_DELAY, 10) || 2000, // Increased from 1000 to 2000ms
+      timeout: parseInt(process.env.CLUSTER_TIMEOUT, 10) || 120000 // Increased from 60000 to 120000ms
     });
 
     /* -------------------------------------------------- */
@@ -123,8 +128,69 @@ class BrowserClusterService {
       const TASK_TIMEOUT = parseInt(process.env.TASK_TIMEOUT, 10) || 45000;
 
       try {
+        // ✅ FIX: Wait for page to be fully ready before using it
+        // This allows stealth plugin to finish initialization before we use the page
+        let pageReady = false;
+        let attempts = 0;
+        const maxAttempts = 5;
+        
+        while (!pageReady && attempts < maxAttempts) {
+          try {
+            // Check if page is still valid
+            if (page.isClosed()) {
+              throw new Error('Page was closed before task execution');
+            }
+            
+            // Try to access page properties to ensure it's ready
+            await page.evaluate(() => true).catch(() => {
+              throw new Error('Page not ready');
+            });
+            
+            pageReady = true;
+          } catch (checkError) {
+            attempts++;
+            if (attempts >= maxAttempts) {
+              console.warn(`⚠️ Page readiness check failed after ${maxAttempts} attempts: ${checkError.message}`);
+              // If page is not ready, return error response instead of crashing
+              return {
+                detected: false,
+                detectionSource: {
+                  error: 'page_not_ready',
+                  message: checkError.message
+                }
+              };
+            }
+            // Wait a bit before retrying
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
+
+        // ✅ FIX: Small delay to ensure stealth plugin has finished initialization
+        // This prevents race conditions where page closes before stealth scripts are injected
+        await new Promise(resolve => setTimeout(resolve, 50));
+
         // Always reset page state
-        await page.goto('about:blank').catch(() => {});
+        try {
+          await page.goto('about:blank', { 
+            waitUntil: 'domcontentloaded',
+            timeout: 5000 
+          }).catch(() => {});
+        } catch (navError) {
+          // If navigation fails, page might be in bad state - return error
+          if (
+            navError?.message?.includes('Target closed') ||
+            navError?.message?.includes('Session closed') ||
+            navError?.message?.includes('Protocol error')
+          ) {
+            return {
+              detected: false,
+              detectionSource: {
+                error: 'page_navigation_failed',
+                message: navError.message
+              }
+            };
+          }
+        }
 
         const browser = await page.browser();
 
@@ -138,17 +204,38 @@ class BrowserClusterService {
           detectionSource: { error: 'undefined_result' }
         };
       } catch (err) {
-        // 🔴 Only rethrow fatal browser / CDP failures
-        if (
+        // ✅ FIX: Better error categorization
+        const isStealthInitError = 
+          err?.message?.includes('addScriptToEvaluateOnNewDocument') ||
+          err?.message?.includes('evaluateOnNewDocument');
+        
+        const isSessionError = 
           err?.message?.includes('Protocol error') ||
           err?.message?.includes('Target closed') ||
           err?.message?.includes('Session closed') ||
-          err?.message?.includes('Browser has been closed')
-        ) {
-          throw err; // let cluster retry
+          err?.message?.includes('Browser has been closed') ||
+          err?.message?.includes('TargetCloseError');
+        
+        // ✅ FIX: Stealth plugin errors are often recoverable - don't crash the worker
+        if (isStealthInitError) {
+          console.warn(`⚠️ Stealth plugin initialization error (non-fatal): ${err.message}`);
+          return {
+            detected: false,
+            detectionSource: {
+              error: 'stealth_init_error',
+              message: err.message
+            }
+          };
+        }
+        
+        // 🔴 Only rethrow fatal browser / CDP failures that require browser restart
+        if (isSessionError) {
+          console.warn(`⚠️ Session error detected, will retry: ${err.message}`);
+          throw err; // let cluster retry with new page/browser
         }
 
         // Non-fatal error → return safe response
+        console.warn(`⚠️ Task error (non-fatal): ${err.message}`);
         return {
           detected: false,
           detectionSource: {
@@ -156,9 +243,17 @@ class BrowserClusterService {
           }
         };
       } finally {
-        // Cluster-owned page cleanup
+        // ✅ FIX: Safer page cleanup with timeout protection
         if (page && !page.isClosed()) {
-          await page.close().catch(() => {});
+          try {
+            await Promise.race([
+              page.close(),
+              new Promise((resolve) => setTimeout(resolve, 2000))
+            ]);
+          } catch (closeError) {
+            // Ignore close errors - page might already be closed
+            console.warn(`⚠️ Page close warning (non-fatal): ${closeError.message}`);
+          }
         }
       }
     });
@@ -168,10 +263,20 @@ class BrowserClusterService {
     /* -------------------------------------------------- */
 
     this.cluster.on('taskerror', (err, data, willRetry) => {
+      // ✅ FIX: Better error logging with context
+      const errorType = err?.message?.includes('addScriptToEvaluateOnNewDocument') ? 'stealth_init' :
+                       err?.message?.includes('Session closed') ? 'session_closed' :
+                       err?.message?.includes('Target closed') ? 'target_closed' :
+                       err?.message?.includes('Protocol error') ? 'protocol_error' : 'unknown';
+      
       if (willRetry) {
-        console.warn(`⚠️ Cluster task error (retrying): ${err.message}`);
+        console.warn(`⚠️ Cluster task error [${errorType}] (retrying): ${err.message}`);
       } else {
-        console.error(`❌ Cluster task failed: ${err.message}`);
+        console.error(`❌ Cluster task failed [${errorType}] (no retry): ${err.message}`);
+        // Log stack trace for debugging
+        if (process.env.DEBUG_CLUSTER_ERRORS === 'true') {
+          console.error('Stack trace:', err.stack);
+        }
       }
     });
 
