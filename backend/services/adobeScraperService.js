@@ -1,6 +1,6 @@
 const chromium = require('@sparticuz/chromium');
-// ✅ Use cluster service for better memory/CPU management
-const browserPool = require('./browserClusterService');
+// ✅ Use browser pool service for better memory/CPU management
+const browserPool = require('./browserPoolService');
 const {
     extractDomainName,
     extractDomain,
@@ -303,23 +303,40 @@ class AdobeScraperService {
   
     /**
      * Lightweight detector to quickly determine if Adobe Target is present on a page
-     * Uses browser cluster service for stable browser lifecycle management.
+     * Uses browser pool service for stable browser lifecycle management.
      */
     async detectAdobeTargetPresence(url) {
         try {
-            return await browserPool.withBrowser(async ({ page }) => {
-              // Use the page directly from cluster
-              console.log('Avinas the url value->', url)
-              console.log('Avinas the page value->', page)
-              
-              // ✅ FIX: Verify page is ready before using it
-              if (!page || page.isClosed()) {
-                throw new Error('Page is closed or invalid');
-              }
-              
-              return await this.detectAdobeTargetPresenceWithSharedPage(page, url);
+            return await browserPool.withBrowser(async (browser) => {
+                let page = null;
+
+                try {
+                    page = await createPage(browser);
+
+                    // Track page usage for restart logic
+                    try {
+                        const pageCount = browserPool.incrementPageCount(browser);
+                        console.log(`📄 [AdobeScraper] Browser page count: ${pageCount}`);
+                    } catch (e) {
+                        console.warn('⚠️ [AdobeScraper] Failed to increment page count:', e.message);
+                    }
+
+                    if (!page || page.isClosed()) {
+                        throw new Error('Page is closed or invalid');
+                    }
+
+                    return await this.detectAdobeTargetPresenceWithSharedPage(page, url);
+                } finally {
+                    if (page) {
+                        try {
+                            await closePage(page);
+                        } catch (e) {
+                            console.warn('⚠️ [AdobeScraper] Error closing page after presence check:', e.message);
+                        }
+                    }
+                }
             });
-          } catch (error) {
+        } catch (error) {
             // ✅ FIX: Better error handling for session/stealth errors
             const isStealthError = error?.message?.includes('addScriptToEvaluateOnNewDocument') ||
                                  error?.message?.includes('evaluateOnNewDocument');
@@ -349,8 +366,7 @@ class AdobeScraperService {
               error.message
             );
             throw error;
-          }
-          
+        }
     }
     
     async detectAdobeTargetPresenceUsingPage(page) {
@@ -439,17 +455,35 @@ class AdobeScraperService {
 
         } else {
             // Case 2: Standalone call (Original scrapeAdobeTargetExperiments path).
-            // We enforce the stable pool wrapper here.
-            
-            return await browserPool.withBrowser(async ({ page }) => {
-                //await page.waitForTimeout(50);
-                return await this.scrapeExperimentsFromPage(url, {
-                  sharedPage: page,
-                  presenceOnly
-                });
-              });
-              
-              
+            // Use browser pool service to acquire a browser and manage page lifecycle.
+            return await browserPool.withBrowser(async (browser) => {
+                let page = null;
+
+                try {
+                    page = await createPage(browser);
+
+                    // Track page usage for restart logic
+                    try {
+                        const pageCount = browserPool.incrementPageCount(browser);
+                        console.log(`📄 [AdobeScraper] Browser page count (scrape): ${pageCount}`);
+                    } catch (e) {
+                        console.warn('⚠️ [AdobeScraper] Failed to increment page count (scrape):', e.message);
+                    }
+
+                    return await this.scrapeExperimentsFromPage(url, {
+                      sharedPage: page,
+                      presenceOnly
+                    });
+                } finally {
+                    if (page) {
+                        try {
+                            await closePage(page);
+                        } catch (e) {
+                            console.warn('⚠️ [AdobeScraper] Error closing page after scrape:', e.message);
+                        }
+                    }
+                }
+            });
         }
     }
 
@@ -2841,11 +2875,10 @@ class AdobeScraperService {
             // Distribute URLs across browsers (batches)
             const urlBatches = distributeUrlsAcrossBrowsers(urls, actualBrowserCount, 1);
 
-            // Process each browser's batch using the pool's stable wrapper
+            // Process each browser's batch using the pool wrapper
             const batchPromises = urlBatches.map((urlBatch) =>
-                browserPool.withBrowser(async ({ browser }) => {
+                browserPool.withBrowser(async (browser) => {
                   // Run the batch using a single browser instance
-                  // puppeteer-cluster manages lifecycle automatically
                   return this.processBrowserBatchSequential(browser, urlBatch);
                 })
               );
@@ -2854,16 +2887,15 @@ class AdobeScraperService {
 
             // Flatten results
             batchResults.forEach(result => {
-                                // [CRITICAL FIX] 
-                                // Only process fulfilled promises that return an array (from inner batch processing)
-                                if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-                                    results.push(...result.value);
-                                } else if (result.status === 'rejected') {
-                                    console.error('❌ Batch processing failed:', result.reason?.message || result.reason);
-                                    // NOTE: The URLs in this rejected batch failed catastrophically and are lost.
-                                    // They should be re-queued or marked as failed later. For now, log and skip.
-                                }
-                            });
+                // Only process fulfilled promises that return an array (from inner batch processing)
+                if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+                    results.push(...result.value);
+                } else if (result.status === 'rejected') {
+                    console.error('❌ Batch processing failed:', result.reason?.message || result.reason);
+                    // NOTE: The URLs in this rejected batch failed catastrophically and are lost.
+                    // They should be re-queued or marked as failed later. For now, log and skip.
+                }
+            });
 
         } catch (error) {
             console.error('Error in processUrlChunkSequential (Pool failure):', error);
@@ -3115,7 +3147,7 @@ class AdobeScraperService {
             const urlBatches = distributeUrlsAcrossBrowsers(urls, actualBrowserCount, 1);
 
             const batchPromises = urlBatches.map((urlBatch) =>
-                browserPool.withBrowser(async ({ browser }) => {
+                browserPool.withBrowser(async (browser) => {
                   try {
                     return await this.processBrowserBatchSequential(browser, urlBatch);
                   } catch (err) {

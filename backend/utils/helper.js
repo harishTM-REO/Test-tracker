@@ -594,8 +594,9 @@ const handleCookieConsent = async (page) => {
           console.log(`✅ Cookie consent accepted (${result.type})`);
           return result.type;
         }
-  
-        await page.waitForTimeout(250);
+
+        // ✅ FIX: Use Promise-based delay instead of page.waitForTimeout (not a valid Puppeteer method)
+        await new Promise(resolve => setTimeout(resolve, 250));
       }
   
       return 'not_found';
