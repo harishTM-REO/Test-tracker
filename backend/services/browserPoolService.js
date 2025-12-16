@@ -526,11 +526,25 @@ class BrowserPoolService {
             // Chromium spawns many child processes that might survive SIGKILL
             try {
               const { execSync } = require('child_process');
-              // Kill all chromium processes (aggressive cleanup)
-              execSync(`pkill -9 -f "chromium.*${browserPid}"`, { stdio: 'ignore' });
-              console.log(`   🧹 [scheduleAsyncRestart] Cleaned up all child processes for ${browserPid}`);
+
+              // Try multiple kill strategies (pkill might not exist in Railway)
+              const killCommands = [
+                `pkill -9 -f chromium || true`,  // Kill all chromium
+                `pkill -9 -P ${browserPid} || true`,  // Kill children of PID
+                `ps aux | grep chromium | grep -v grep | awk '{print $2}' | xargs -r kill -9 || true`  // Nuclear option
+              ];
+
+              for (const cmd of killCommands) {
+                try {
+                  execSync(cmd, { stdio: 'ignore', timeout: 2000 });
+                } catch (e) {
+                  // Continue trying other commands
+                }
+              }
+
+              console.log(`   🧹 [scheduleAsyncRestart] Cleaned up all child processes (multi-strategy)`);
             } catch (pkillErr) {
-              // Ignore - processes might already be dead
+              console.warn(`   ⚠️ [scheduleAsyncRestart] Process cleanup failed: ${pkillErr.message}`);
             }
           }
           
@@ -970,10 +984,22 @@ class BrowserPoolService {
             // ✅ ZOMBIE PROCESS FIX: Kill ALL child processes
             try {
               const { execSync } = require('child_process');
-              execSync(`pkill -9 -f "chromium.*${browserPid}"`, { stdio: 'ignore' });
-              console.log(`   🧹 [forceRestartBrowser] Cleaned up all child processes for ${browserPid}`);
+
+              const killCommands = [
+                `pkill -9 -f chromium || true`,
+                `pkill -9 -P ${browserPid} || true`,
+                `ps aux | grep chromium | grep -v grep | awk '{print $2}' | xargs -r kill -9 || true`
+              ];
+
+              for (const cmd of killCommands) {
+                try {
+                  execSync(cmd, { stdio: 'ignore', timeout: 2000 });
+                } catch (e) {}
+              }
+
+              console.log(`   🧹 [forceRestartBrowser] Cleaned up all child processes (multi-strategy)`);
             } catch (pkillErr) {
-              // Ignore - processes might already be dead
+              console.warn(`   ⚠️ [forceRestartBrowser] Process cleanup failed: ${pkillErr.message}`);
             }
           }
 
