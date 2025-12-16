@@ -4,8 +4,8 @@ const ABTastyValidationDocument = require('../../models/ABTastyValidationDocumen
 const Dataset = require('../../models/Dataset');
 const { isUrlReachable } = require('../../utils/urlValidator');
 const { handleCookieConsent, detectCaptcha, navigateToPage, createPage, closePage } = require('../../utils/helper');
-// const browserPool = require('../../adobe-targetscraping/services/browserPoolService'); // ✅ Import Browser Pool
-const browserPool = require('../../services/browserPoolService');
+// ✅ Use browser service (switches between pool/cluster based on USE_PUPPETEER_CLUSTER)
+const browserPool = require('../../services/browserService');
 
 // Timeout wrapper utility (matching Adobe implementation)
 const runWithTimeout = async (promiseOrFn, ms, label = 'operation') => {

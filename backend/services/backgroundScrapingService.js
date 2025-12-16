@@ -2,7 +2,7 @@
 const axios = require('axios');
 const Dataset = require('../models/Dataset');
 const jobQueue = require('./jobQueue');
-const browserPool = require('./browserPoolService'); // Import browser pool for resource management
+const browserPool = require('./browserService'); // ✅ Use browser service (switches between pool/cluster)
 
 class BackgroundScrapingService {
 

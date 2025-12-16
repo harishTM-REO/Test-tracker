@@ -1,6 +1,6 @@
 const chromium = require('@sparticuz/chromium');
-// ✅ Use browser pool service for better memory/CPU management
-const browserPool = require('./browserPoolService');
+// ✅ Use browser service (switches between pool/cluster based on USE_PUPPETEER_CLUSTER)
+const browserService = require('./browserService');
 const {
     extractDomainName,
     extractDomain,
@@ -42,7 +42,7 @@ const runWithTimeout = async (promiseOrFn, ms, label = 'operation') => {
 class AdobeScraperService {
 
     constructor() {
-        this.browserPool = browserPool;
+        this.browserPool = browserService;
     }
 
     /**

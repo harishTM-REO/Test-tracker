@@ -124,8 +124,20 @@ class BrowserClusterService {
       launchOptions.headless = chromium.headless;
     }
 
+    // ✅ COMPATIBILITY FIX: Use BROWSER mode for full backward compatibility
+    // BROWSER mode gives each task a full browser, services manage pages themselves
+    // This matches the old browserPoolService behavior where services call browser.newPage()
+    // Note: CONTEXT mode doesn't work well with services that call browser.newPage()
+    //       because newPage() creates pages in the default context, not the isolated context
+    const concurrencyModel = process.env.CLUSTER_CONCURRENCY_MODEL || 'BROWSER';
+    const concurrency = concurrencyModel === 'PAGE' ? Cluster.CONCURRENCY_PAGE :
+                       concurrencyModel === 'CONTEXT' ? Cluster.CONCURRENCY_CONTEXT :
+                       Cluster.CONCURRENCY_BROWSER; // Default to BROWSER
+
+    console.log(`🔧 Using concurrency model: ${concurrencyModel}`);
+
     this.cluster = await Cluster.launch({
-      concurrency: Cluster.CONCURRENCY_PAGE,
+      concurrency: concurrency,
       maxConcurrency: this.poolSize,
       puppeteer,
       puppeteerOptions: launchOptions,
@@ -139,78 +151,28 @@ class BrowserClusterService {
     /* TASK HANDLER (REGISTER ONCE)                       */
     /* -------------------------------------------------- */
 
+    // ✅ BROWSER MODE: Cluster passes page from new browser, services need browser
     this.cluster.task(async ({ page, data }) => {
-      const TASK_TIMEOUT = parseInt(process.env.TASK_TIMEOUT, 10) || 45000;
+      const TASK_TIMEOUT = parseInt(process.env.TASK_TIMEOUT, 10) || 120000;
 
       try {
-        // ✅ FIX: Wait for page to be fully ready before using it
-        // This allows stealth plugin to finish initialization before we use the page
-        let pageReady = false;
-        let attempts = 0;
-        const maxAttempts = 5;
-        
-        while (!pageReady && attempts < maxAttempts) {
-          try {
-            // Check if page is still valid
-            if (page.isClosed()) {
-              throw new Error('Page was closed before task execution');
-            }
-            
-            // Try to access page properties to ensure it's ready
-            await page.evaluate(() => true).catch(() => {
-              throw new Error('Page not ready');
-            });
-            
-            pageReady = true;
-          } catch (checkError) {
-            attempts++;
-            if (attempts >= maxAttempts) {
-              console.warn(`⚠️ Page readiness check failed after ${maxAttempts} attempts: ${checkError.message}`);
-              // If page is not ready, return error response instead of crashing
-              return {
-                detected: false,
-                detectionSource: {
-                  error: 'page_not_ready',
-                  message: checkError.message
-                }
-              };
-            }
-            // Wait a bit before retrying
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-        }
-
-        // ✅ FIX: Small delay to ensure stealth plugin has finished initialization
-        // This prevents race conditions where page closes before stealth scripts are injected
-        await new Promise(resolve => setTimeout(resolve, 50));
-
-        // Always reset page state
-        try {
-          await page.goto('about:blank', { 
-            waitUntil: 'domcontentloaded',
-            timeout: 5000 
-          }).catch(() => {});
-        } catch (navError) {
-          // If navigation fails, page might be in bad state - return error
-          if (
-            navError?.message?.includes('Target closed') ||
-            navError?.message?.includes('Session closed') ||
-            navError?.message?.includes('Protocol error')
-          ) {
-            return {
-              detected: false,
-              detectionSource: {
-                error: 'page_navigation_failed',
-                message: navError.message
-              }
-            };
-          }
-        }
-
+        // Get browser from the page provided by cluster
         const browser = await page.browser();
 
+        // Close the auto-created page since services create their own pages
+        try {
+          await page.close();
+        } catch (closeErr) {
+          console.warn(`⚠️ Could not close auto-created page: ${closeErr.message}`);
+        }
+
+        // ✅ FIX: Small delay to ensure browser is ready
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        // ✅ COMPATIBILITY FIX: Pass browser to match old browserPoolService API
+        // Old services expect: withBrowser(async (browser) => {...})
         const result = await withTimeout(
-          data.fn({ page, browser }),
+          data.fn(browser),
           TASK_TIMEOUT
         );
 
@@ -220,57 +182,22 @@ class BrowserClusterService {
         };
       } catch (err) {
         // ✅ FIX: Better error categorization
-        const isStealthInitError = 
-          err?.message?.includes('addScriptToEvaluateOnNewDocument') ||
-          err?.message?.includes('evaluateOnNewDocument') ||
-          err?.message?.includes('Requesting main frame too early');
-        
-        const isSessionError = 
+        const isSessionError =
           err?.message?.includes('Protocol error') ||
           err?.message?.includes('Target closed') ||
           err?.message?.includes('Session closed') ||
           err?.message?.includes('Browser has been closed') ||
           err?.message?.includes('TargetCloseError');
-        
-        // ✅ FIX: Stealth plugin errors are often recoverable - don't crash the worker
-        if (isStealthInitError) {
-          console.warn(`⚠️ Stealth plugin initialization error (non-fatal): ${err.message}`);
-          return {
-            detected: false,
-            detectionSource: {
-              error: 'stealth_init_error',
-              message: err.message
-            }
-          };
-        }
-        
-        // 🔴 Only rethrow fatal browser / CDP failures that require browser restart
+
+        // 🔴 Rethrow fatal browser / CDP failures that require browser restart
         if (isSessionError) {
-          console.warn(`⚠️ Session error detected, will retry: ${err.message}`);
-          throw err; // let cluster retry with new page/browser
+          console.warn(`⚠️ Session error detected, cluster will retry: ${err.message}`);
+          throw err; // let cluster retry with new browser
         }
 
-        // Non-fatal error → return safe response
-        console.warn(`⚠️ Task error (non-fatal): ${err.message}`);
-        return {
-          detected: false,
-          detectionSource: {
-            error: err?.message || 'task_error'
-          }
-        };
-      } finally {
-        // ✅ FIX: Safer page cleanup with timeout protection
-        if (page && !page.isClosed()) {
-          try {
-            await Promise.race([
-              page.close(),
-              new Promise((resolve) => setTimeout(resolve, 2000))
-            ]);
-          } catch (closeError) {
-            // Ignore close errors - page might already be closed
-            console.warn(`⚠️ Page close warning (non-fatal): ${closeError.message}`);
-          }
-        }
+        // Non-fatal error → log and rethrow so service can handle it
+        console.warn(`⚠️ Task error: ${err.message}`);
+        throw err; // Let the service handle the error
       }
     });
 
@@ -326,6 +253,81 @@ class BrowserClusterService {
   async withBrowser(fn) {
     await this.initialize();
     return this.cluster.execute({ fn });
+  }
+
+  /**
+   * Launch a standalone browser (not managed by cluster)
+   * For backward compatibility with code that uses launchBrowser()
+   * Note: These browsers are NOT managed by the cluster and must be closed manually
+   */
+  async launchBrowser() {
+    const maxRetries = 3;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          const retryDelay = attempt * 2000;
+          console.log(`   🔄 Retry attempt ${attempt}/${maxRetries} after ${retryDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+
+        const browserOptions = await buildPuppeteerLaunchOptions({
+          headless: 'new',
+          ignoreHTTPSErrors: true,
+          protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT, 10) || 120000,
+          timeout: parseInt(process.env.LAUNCH_TIMEOUT, 10) || 30000,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-blink-features=AutomationControlled',
+            '--window-size=1366,768',
+            '--mute-audio',
+            '--disable-sync',
+            '--disable-default-apps'
+          ]
+        });
+
+        // AWS Lambda compatibility
+        if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
+          browserOptions.executablePath = chromium.executablePath;
+          browserOptions.args = [...chromium.args, ...(browserOptions.args || [])];
+          browserOptions.headless = chromium.headless;
+        }
+
+        const browser = await puppeteer.launch(browserOptions);
+
+        // Stabilize browser with a test page
+        try {
+          const page = await browser.newPage();
+          await page.goto('about:blank', { timeout: 5000 });
+          await page.close();
+          console.log('✅ Standalone browser launched and stabilized');
+        } catch (stabError) {
+          console.warn(`⚠️ Failed to stabilize browser: ${stabError.message}`);
+        }
+
+        return browser;
+
+      } catch (error) {
+        lastError = error;
+        const isRetryable = error.message?.includes('socket hang up') ||
+                           error.message?.includes('ECONNRESET') ||
+                           error.message?.includes('Protocol error') ||
+                           error.message?.includes('Target closed');
+
+        if (isRetryable && attempt < maxRetries) {
+          console.warn(`   ⚠️ Browser launch failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
+        } else {
+          console.error(`   ❌ Failed to launch browser (attempt ${attempt}/${maxRetries}):`, error.message);
+          throw error;
+        }
+      }
+    }
+
+    throw lastError || new Error('Failed to launch browser after all retries');
   }
 
   /**

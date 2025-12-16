@@ -38,7 +38,7 @@ try {
 }
 // const ExperimentService = require('./experimentService'); // Comment out if not available
 const AbTastyResult = require('../models/AbTastyResult');
-const browserPool = require('./browserPoolService'); // Import browser pool service
+const browserPool = require('./browserService'); // ✅ Use browser service (switches between pool/cluster)
 const CheckpointService = require('./checkpointService'); // Import checkpoint service
 const urlSanitizer = require('./urlSanitizerService'); // Import URL sanitizer
 const retryLogic = require('./retryLogic'); // Import retry logic for failed URLs

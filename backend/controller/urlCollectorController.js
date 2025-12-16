@@ -807,7 +807,7 @@ async function liveCrawl(req, res) {
         console.log(`🎭 Launching Puppeteer browser for ${url}...`);
 
         // ✅ CHANGE 1: Use your Puppeteer Helper
-        const { launchBrowser } = require('../services/browserPoolService'); // Adjust path to where you put launchBrowser
+        const { launchBrowser } = require('../services/browserService'); // Use browser service selector
         browser = await launchBrowser();
 
         console.log(`✅ Browser launched`);
@@ -1075,7 +1075,7 @@ async function liveCrawlAndPrioritize(req, res) {
         console.log(`🎭 Launching Puppeteer browser for ${url}...`);
 
         // ✅ CHANGE 1: Import Helper
-        const { launchBrowser } = require('../services/browserPoolService'); 
+        const { launchBrowser } = require('../services/browserService'); 
         const urlPrioritizationService = require('../services/urlPrioritizationService');
 
         // ✅ CHANGE 2: Launch

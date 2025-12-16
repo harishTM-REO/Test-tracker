@@ -8,8 +8,8 @@ const OptimizelyValidationDocument = require(path.join(__dirname, '../../models/
 const Dataset = require(path.join(__dirname, '../../models/Dataset'));
 const AdobeScraperService = require(path.join(__dirname, '../../services/adobeScraperService'));
 const OptimizelyValidationService = require(path.join(__dirname, './optimizelyValidationService'));
-// ✅ Use browser pool service for validation memory/CPU management
-const browserPool = require(path.join(__dirname, '../../services/browserPoolService'));
+// ✅ Use browser service (switches between pool/cluster based on USE_PUPPETEER_CLUSTER)
+const browserPool = require(path.join(__dirname, '../../services/browserService'));
 const { 
     sanitizeWorkflowResult
 } = require(path.join(__dirname, '../../utils/adobeTargetResultSanitizer'));
