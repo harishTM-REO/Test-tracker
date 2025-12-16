@@ -450,49 +450,55 @@ class BrowserPoolService {
           
           // Close browser completely
           console.log(`   🔒 [scheduleAsyncRestart] STEP 3: Closing browser process...`);
-          await Promise.race([
-            browser.close(),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Browser close timeout')), 10000)
-            )
-          ]);
-          
-          // ✅ MEMORY TRACKING: Get browser process info before closing
+
+          // Get PID before closing for force-kill if needed
           let browserPid = null;
-          let browserProcessMemory = null;
           try {
             if (browser.process && typeof browser.process === 'function') {
               const proc = browser.process();
-              if (proc) {
-                browserPid = proc.pid;
-                // Try to get process memory (if available)
-                try {
-                  const memInfo = process.memoryUsage();
-                  browserProcessMemory = {
-                    rss: Math.round(memInfo.rss / 1024 / 1024), // Total OS memory
-                    heapUsed: Math.round(memInfo.heapUsed / 1024 / 1024),
-                    external: Math.round(memInfo.external / 1024 / 1024) // C++ objects (browser handles)
-                  };
-                } catch (e) {
-                  // Ignore if we can't get memory info
-                }
+              if (proc) browserPid = proc.pid;
+            }
+          } catch (e) {}
+
+          try {
+            await Promise.race([
+              browser.close(),
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Browser close timeout')), 10000)
+              )
+            ]);
+            console.log(`   ✅ [scheduleAsyncRestart] Browser closed gracefully (pid: ${browserPid || 'n/a'})`);
+          } catch (closeErr) {
+            console.warn(`   ⚠️  [scheduleAsyncRestart] Graceful close failed, force killing...`);
+            // Force kill the process
+            if (browserPid) {
+              try {
+                process.kill(browserPid, 'SIGKILL');
+                console.log(`   🔪 [scheduleAsyncRestart] Force killed browser process (pid: ${browserPid})`);
+              } catch (killErr) {
+                console.warn(`   ⚠️  [scheduleAsyncRestart] Could not kill process: ${killErr.message}`);
               }
             }
-          } catch (e) {
-            // Ignore if process info not available
           }
           
-          console.log(`   ✅ [scheduleAsyncRestart] Browser ${browserIndex + 1} closed completely${browserPid ? ` (pid: ${browserPid})` : ''}`);
-          
+          // ✅ MEMORY LEAK FIX: Force garbage collection immediately after browser close
+          console.log(`   🧹 [scheduleAsyncRestart] STEP 4: Forcing garbage collection...`);
+          if (global.gc) {
+            global.gc();
+            console.log(`   ✅ [scheduleAsyncRestart] Garbage collection triggered`);
+          } else {
+            console.warn(`   ⚠️  [scheduleAsyncRestart] Garbage collection not available (run with --expose-gc)`);
+          }
+
           // ✅ MEMORY OPTIMIZATION: Wait for OS to reclaim memory
           // Longer delay in constrained environments (Railway, production) for better memory reclamation
           const isRailway = process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID;
           const isProduction = process.env.NODE_ENV === 'production';
           const isConstrained = isRailway || (isProduction && !process.env.HIGH_RESOURCE_MODE);
-          
-          // Default: 2s for normal, 3s for constrained environments
+
+          // Default: 5s for normal, 8s for constrained environments (increased for memory leak fix)
           // Can be overridden with BROWSER_RESTART_MEMORY_DELAY_MS
-          const defaultDelay = isConstrained ? 3000 : 2000;
+          const defaultDelay = isConstrained ? 8000 : 5000;
           const memoryReclaimDelay = parseInt(process.env.BROWSER_RESTART_MEMORY_DELAY_MS) || defaultDelay;
           
           // Log memory before wait
@@ -500,27 +506,27 @@ class BrowserPoolService {
           const rssBeforeMB = Math.round(memBefore.rss / 1024 / 1024); // Actual OS memory
           const heapBeforeMB = Math.round(memBefore.heapUsed / 1024 / 1024);
           const externalBeforeMB = Math.round(memBefore.external / 1024 / 1024);
-          
+
           console.log(`   💾 [scheduleAsyncRestart] Memory BEFORE reclaim:`);
           console.log(`      RSS (OS): ${rssBeforeMB}MB | Heap: ${heapBeforeMB}MB | External: ${externalBeforeMB}MB`);
-          console.log(`   ⏳ [scheduleAsyncRestart] STEP 4: Waiting ${memoryReclaimDelay}ms for OS memory reclaim...`);
+          console.log(`   ⏳ [scheduleAsyncRestart] STEP 5: Waiting ${memoryReclaimDelay}ms for OS memory reclaim...`);
           await new Promise(resolve => setTimeout(resolve, memoryReclaimDelay));
-          
+
           // Log memory after wait
           const memAfter = process.memoryUsage();
           const rssAfterMB = Math.round(memAfter.rss / 1024 / 1024);
           const heapAfterMB = Math.round(memAfter.heapUsed / 1024 / 1024);
           const externalAfterMB = Math.round(memAfter.external / 1024 / 1024);
-          
+
           const rssFreedMB = rssBeforeMB - rssAfterMB;
           const heapFreedMB = heapBeforeMB - heapAfterMB;
           const externalFreedMB = externalBeforeMB - externalAfterMB;
-          
+
           console.log(`   💾 [scheduleAsyncRestart] Memory AFTER reclaim:`);
           console.log(`      RSS (OS): ${rssAfterMB}MB (${rssFreedMB > 0 ? `freed ${rssFreedMB}MB` : rssFreedMB < 0 ? `+${Math.abs(rssFreedMB)}MB` : 'no change'})`);
           console.log(`      Heap: ${heapAfterMB}MB (${heapFreedMB > 0 ? `freed ${heapFreedMB}MB` : heapFreedMB < 0 ? `+${Math.abs(heapFreedMB)}MB` : 'no change'})`);
           console.log(`      External: ${externalAfterMB}MB (${externalFreedMB > 0 ? `freed ${externalFreedMB}MB` : externalFreedMB < 0 ? `+${Math.abs(externalFreedMB)}MB` : 'no change'})`);
-          
+
           // ✅ IMPORTANT: RSS (Resident Set Size) is the REAL OS memory
           // Heap memory not dropping is NORMAL - Node.js keeps it for reuse
           // The actual memory freed is the browser process (100-500MB), which shows in RSS
@@ -530,18 +536,6 @@ class BrowserPoolService {
             console.log(`   ⚠️  [scheduleAsyncRestart] RSS increased by ${Math.abs(rssFreedMB)}MB (may be new browser launching)`);
           } else {
             console.log(`   ℹ️  [scheduleAsyncRestart] RSS unchanged (browser process may have already been cleaned up)`);
-          }
-          
-          // Force GC if available to see heap changes
-          if (global.gc) {
-            global.gc();
-            await new Promise(resolve => setTimeout(resolve, 100));
-            const memAfterGC = process.memoryUsage();
-            const heapAfterGCMB = Math.round(memAfterGC.heapUsed / 1024 / 1024);
-            const heapFreedByGCMB = heapAfterMB - heapAfterGCMB;
-            if (heapFreedByGCMB > 0) {
-              console.log(`   🧹 [scheduleAsyncRestart] After GC: Heap freed ${heapFreedByGCMB}MB (now ${heapAfterGCMB}MB)`);
-            }
           }
         } catch (e) {
           console.warn(`   ⚠️  [scheduleAsyncRestart] Error closing browser: ${e.message}`);
@@ -557,11 +551,11 @@ class BrowserPoolService {
         }
 
         // Mark as null during restart to prevent usage
-        console.log(`   🗑️  [scheduleAsyncRestart] STEP 5: Cleaning up browser references...`);
+        console.log(`   🗑️  [scheduleAsyncRestart] STEP 6: Cleaning up browser references...`);
         this.browsers[browserIndex] = null;
         this.pageCountPerBrowser.delete(browser);
         this.busyBrowsers.delete(browser);
-        
+
         // Remove from available browsers if it was there
         const availIdx = this.availableBrowsers.indexOf(browser);
         if (availIdx > -1) {
@@ -570,7 +564,7 @@ class BrowserPoolService {
         }
 
         // ✅ Launch completely fresh browser (like Optimizely approach)
-        console.log(`   🚀 [scheduleAsyncRestart] STEP 6: Launching fresh browser ${browserIndex + 1}...`);
+        console.log(`   🚀 [scheduleAsyncRestart] STEP 7: Launching fresh browser ${browserIndex + 1}...`);
         const newBrowser = await this.launchBrowser(browserIndex + 1);
         this.browsers[browserIndex] = newBrowser;
         this.pageCountPerBrowser.set(newBrowser, 0);
@@ -584,7 +578,7 @@ class BrowserPoolService {
 
         // Check if anyone is waiting for this new browser
         if (this.waitingQueue.length > 0 && this.availableBrowsers.length > 0) {
-             console.log(`   📋 [scheduleAsyncRestart] STEP 7: Assigning new browser to waiting request...`);
+             console.log(`   📋 [scheduleAsyncRestart] STEP 8: Assigning new browser to waiting request...`);
              const resolve = this.waitingQueue.shift();
              const b = this.availableBrowsers.pop();
              this.busyBrowsers.add(b);
