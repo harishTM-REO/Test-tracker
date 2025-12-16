@@ -1,498 +1,247 @@
 /**
- * Playwright Helper Functions with Stealth Support
- * Provides browser automation with anti-detection features
+ * Playwright Helper Functions
+ * Adapted from helper.js for Playwright compatibility
  */
-
-const { chromium } = require('playwright-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-
-// Add stealth plugin
-chromium.use(StealthPlugin());
 
 /**
- * Launch browser with Playwright and stealth features
- * @param {Object} options - Browser launch options
- * @returns {Promise<Object>} Playwright browser instance
+ * Create a new page with timeout protection
  */
-async function launchPlaywrightBrowser(options = {}) {
-  const maxRetries = 2;
-  let lastError;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+async function createPage(browser, maxAttempts = 2) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      console.log(`🚀 Launching Playwright browser (attempt ${attempt}/${maxRetries})`);
+      console.log(`[createPage] attempt ${attempt}/${maxAttempts} - creating page`);
 
-      const browserOptions = {
-        headless: 'new',
-        ...options,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-gpu',
-          '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-web-security',
-          '--allow-running-insecure-content',
-          // HTTP/2 protocol error fixes
-          '--disable-http2',
-          '--disable-features=VizServiceDisplay',
-          '--force-device-scale-factor=1',
-          '--disable-extensions',
-          '--disable-plugins',
-          ...(options.args || [])
-        ]
-      };
+      const page = await browser.newPage();
 
-      const browser = await chromium.launch(browserOptions);
-      console.log('✅ Playwright browser launched successfully');
-      return browser;
+      // Set default timeouts
+      page.setDefaultTimeout(parseInt(process.env.PAGE_SCRAPE_TIMEOUT) || 50000);
+      page.setDefaultNavigationTimeout(parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000);
+
+      // Set viewport
+      await page.setViewportSize({ width: 1920, height: 1080 });
+
+      console.log(`[createPage] ✅ Page created successfully`);
+      return page;
     } catch (error) {
-      lastError = error;
-      console.error(`❌ Browser launch attempt ${attempt} failed:`, error.message);
+      console.log(`[createPage] attempt ${attempt} failed: ${error.message}`);
 
-      if (attempt < maxRetries) {
-        console.log('Retrying browser launch...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      if (attempt < maxAttempts) {
+        console.log(`[createPage] timeout -> retrying after 500ms`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } else {
+        throw new Error(`CREATEPAGE_FAILED: ${error.message}`);
       }
     }
   }
-
-  console.error('All browser launch attempts failed');
-  throw new Error(`Failed to launch browser after ${maxRetries} attempts: ${lastError.message}`);
 }
 
 /**
- * Create new page with anti-detection measures
- * @param {Object} browser - Playwright browser instance
- * @param {Object} options - Page creation options
- * @returns {Promise<Object>} Playwright page instance
+ * Navigate to a page with retry logic
  */
-async function createPlaywrightPage(browser, options = {}) {
+async function navigateToPage(page, url, options = {}) {
+  const maxRetries = parseInt(process.env.NAVIGATION_MAX_RETRIES) || 2;
+  const timeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000;
+
+  const defaultOptions = {
+    waitUntil: 'domcontentloaded',
+    timeout: timeout,
+    ...options
+  };
+
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    try {
+      console.log(`[navigateToPage] Navigating to ${url} (attempt ${attempt}/${maxRetries + 1})`);
+
+      const response = await page.goto(url, defaultOptions);
+
+      console.log(`[navigateToPage] ✅ Navigation successful (status: ${response?.status()})`);
+      return response;
+    } catch (error) {
+      console.log(`[navigateToPage] Attempt ${attempt} failed: ${error.message}`);
+
+      if (attempt <= maxRetries) {
+        const delay = attempt * 1000;
+        console.log(`[navigateToPage] Retrying after ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
+/**
+ * Detect CAPTCHA on page
+ */
+async function detectCaptcha(page) {
   try {
-    console.log('📄 Creating new page...');
+    const captchaDetected = await page.evaluate(() => {
+      // Check for common CAPTCHA indicators
+      const captchaSelectors = [
+        'iframe[src*="recaptcha"]',
+        'iframe[src*="hcaptcha"]',
+        'iframe[src*="captcha"]',
+        '[class*="captcha"]',
+        '[id*="captcha"]',
+        '.g-recaptcha',
+        '#hcaptcha',
+        '.h-captcha'
+      ];
 
-    const context = await browser.newContext({
-      viewport: { width: 1440, height: 1024 },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      locale: 'en-US',
-      timezoneId: 'America/New_York',
-      ...options
-    });
-
-    const page = await context.newPage();
-
-    // Add additional stealth measures
-    await page.addInitScript(() => {
-      // Override navigator.webdriver
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
-      });
-
-      // Override navigator.plugins
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5],
-      });
-
-      // Override navigator.languages
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['en-US', 'en'],
-      });
-
-      // Mock chrome object
-      window.chrome = {
-        runtime: {},
-      };
-
-      // Override permissions
-      const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ?
-          Promise.resolve({ state: Notification.permission }) :
-          originalQuery(parameters)
-      );
-    });
-
-    console.log('✅ Page created successfully with stealth features');
-    return page;
-  } catch (error) {
-    console.error('❌ Error creating page:', error);
-    throw new Error(`Failed to create page: ${error.message}`);
-  }
-}
-
-/**
- * Navigate to URL with robust error handling
- * @param {Object} page - Playwright page instance
- * @param {string} url - URL to navigate to
- * @param {Object} options - Navigation options
- * @returns {Promise<void>}
- */
-async function navigateToPlaywrightPage(page, url, options = {}) {
-  const maxRetries = 2;
-  let lastError;
-
-  // Validate and normalize URL
-  const normalizedUrl = validateAndNormalizeUrl(url);
-  if (!normalizedUrl) {
-    throw new Error(`Invalid or unreachable URL: ${url}`);
-  }
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`🌐 Navigating to: ${normalizedUrl} (attempt ${attempt}/${maxRetries})`);
-
-      await page.goto(normalizedUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000,
-        ...options
-      });
-
-      console.log('✅ Page loaded successfully');
-      return;
-    } catch (error) {
-      lastError = error;
-      console.error(`❌ Navigation attempt ${attempt} failed:`, error.message);
-
-      // Handle different error types
-      if (error.message.includes('ERR_NAME_NOT_RESOLVED')) {
-        console.log('DNS resolution error detected');
-
-        if (attempt < maxRetries) {
-          const alternativeUrl = tryAlternativeUrl(normalizedUrl, attempt);
-          if (alternativeUrl && alternativeUrl !== normalizedUrl) {
-            console.log(`Trying alternative URL: ${alternativeUrl}`);
-            try {
-              await page.goto(alternativeUrl, {
-                waitUntil: 'domcontentloaded',
-                timeout: 30000
-              });
-              console.log('✅ Page loaded successfully with alternative URL');
-              return;
-            } catch (altError) {
-              console.error(`Alternative URL also failed: ${altError.message}`);
-            }
-          }
+      for (const selector of captchaSelectors) {
+        if (document.querySelector(selector)) {
+          return true;
         }
-      } else if (error.message.includes('net::ERR_CONNECTION')) {
-        console.log('Network connectivity error detected');
       }
 
-      if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      // Check for CAPTCHA keywords in page text
+      const bodyText = document.body?.innerText?.toLowerCase() || '';
+      const captchaKeywords = ['verify you are human', 'complete the captcha', 'prove you are not a robot'];
+
+      for (const keyword of captchaKeywords) {
+        if (bodyText.includes(keyword)) {
+          return true;
+        }
       }
+
+      return false;
+    });
+
+    if (captchaDetected) {
+      console.log('🤖 CAPTCHA detected on page');
     }
-  }
 
-  console.error('All navigation attempts failed');
-  throw new Error(`Failed to navigate to ${url} after ${maxRetries} attempts: ${lastError.message}`);
+    return captchaDetected;
+  } catch (error) {
+    console.warn('⚠️ Error detecting CAPTCHA:', error.message);
+    return false;
+  }
 }
 
 /**
  * Handle cookie consent banners
- * @param {Object} page - Playwright page instance
- * @returns {Promise<string>} Cookie type detected
  */
-async function handlePlaywrightCookieConsent(page) {
+async function handleCookieConsent(page) {
   try {
-    console.log('🍪 Handling cookie consent...');
+    const consentButtonSelectors = [
+      'button:has-text("Accept")',
+      'button:has-text("Accept all")',
+      'button:has-text("Agree")',
+      'button:has-text("OK")',
+      'button:has-text("I agree")',
+      'button:has-text("Allow all")',
+      '[id*="accept"]',
+      '[class*="accept"]',
+      '.cookie-accept',
+      '#cookie-accept',
+      '.consent-accept'
+    ];
 
-    const currentUrl = page.url();
+    for (const selector of consentButtonSelectors) {
+      try {
+        const button = await page.$(selector);
+        if (button) {
+          await button.click({ timeout: 2000 });
+          console.log(`✅ Clicked cookie consent button: ${selector}`);
+          await page.waitForTimeout(500);
+          return true;
+        }
+      } catch (error) {
+        // Continue to next selector
+      }
+    }
 
-    const cookieType = await Promise.race([
-      page.evaluate(() => {
-        return new Promise((resolve) => {
-          let cookieType = 'custom';
-
-          function acceptCookie(btn, interval) {
-            if (interval) {
-              clearInterval(interval);
-            }
-            btn.click();
-            console.log(`Clicked cookie consent button: ${btn.textContent}`);
-            resolve(cookieType);
-          }
-
-          const cookieProviderAcceptSelector = [
-            { cookieType: 'onetrust', cookieSelector: '#onetrust-accept-btn-handler' },
-            { cookieType: 'Cookie Bot', cookieSelector: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll' },
-            { cookieType: 'cookielaw', cookieSelector: '.cc-dismiss' },
-            { cookieType: 'gdpr', cookieSelector: '.gdpr-accept' },
-            { cookieType: 'consent-manager', cookieSelector: '[data-testid="consent-accept-all"]' },
-            { cookieType: 'evidon', cookieSelector: '[id="_evidon-accept-button"]' },
-            { cookieType: 'quantcast', cookieSelector: '.qc-cmp2-summary-buttons > button[mode="primary"]' },
-            { cookieType: 'iubenda', cookieSelector: '.iubenda-cs-accept-btn' }
-          ];
-
-          let attempts = 0;
-          const maxAttempts = 50;
-
-          let interval = setInterval(() => {
-            attempts++;
-
-            if (attempts > maxAttempts) {
-              clearInterval(interval);
-
-              // Multi-layer cookie consent detection
-              let found = false;
-
-              // Layer 1: Specific cookie container selectors
-              const specificCookieSelectors = [
-                '[class*="cookie"] button[class*="accept"]',
-                '[class*="consent"] button[class*="accept"]',
-                '[class*="cookie"] button[class*="allow"]',
-                '[class*="consent"] button[class*="allow"]',
-                '[id*="cookie"] button',
-                '[class*="banner"] button[class*="accept"]',
-                '[class*="privacy"] button[class*="accept"]'
-              ];
-
-              for (const selector of specificCookieSelectors) {
-                if (found) break;
-                try {
-                  const element = document.querySelector(selector);
-                  if (element && element.offsetParent) {
-                    cookieType = 'pattern-matched';
-                    found = true;
-                    element.click();
-                    console.log(`Layer 1 - Clicked: ${selector}`);
-                    break;
-                  }
-                } catch (e) {
-                  // Continue to next selector
-                }
-              }
-
-              // Layer 2: Heuristic approach
-              if (!found) {
-                const allButtons = document.querySelectorAll('button, a[role="button"], div[role="button"]');
-                for (const button of allButtons) {
-                  if (found) break;
-                  const computedStyle = window.getComputedStyle(button);
-                  const isFixedOrAbsolute = ['fixed', 'absolute'].includes(computedStyle.position);
-
-                  if (isFixedOrAbsolute && button.offsetParent) {
-                    const text = button.textContent?.toLowerCase() || '';
-                    if (['accept', 'allow', 'agree', 'ok', 'got it'].some(term => text.includes(term))) {
-                      cookieType = 'heuristic';
-                      found = true;
-                      button.click();
-                      console.log(`Layer 2 - Clicked heuristic match: ${text}`);
-                      break;
-                    }
-                  }
-                }
-              }
-
-              resolve(found ? cookieType : 'not_found');
-              return;
-            }
-
-            for (const cookie of cookieProviderAcceptSelector) {
-              const element = document.querySelector(cookie.cookieSelector);
-              if (element && element.offsetParent) {
-                cookieType = cookie.cookieType;
-                acceptCookie(element, interval);
-                return;
-              }
-            }
-          }, 100);
-        });
-      }),
-      new Promise((resolve) => setTimeout(() => resolve('timeout'), 10000))
-    ]);
-
-    console.log(`✅ Cookie consent handled: ${cookieType}`);
-    return cookieType;
+    return false;
   } catch (error) {
-    console.warn('⚠️  Error handling cookie consent:', error.message);
-    return 'error';
+    console.warn('⚠️ Error handling cookie consent:', error.message);
+    return false;
   }
 }
 
 /**
- * Detect captcha on the page
- * @param {Object} page - Playwright page instance
- * @returns {Promise<Object>} Captcha detection result
+ * Close page safely
  */
-async function detectPlaywrightCaptcha(page) {
+async function closePage(page) {
+  if (!page || page.isClosed()) {
+    console.log('[closePage] Page already closed or null');
+    return;
+  }
+
   try {
-    console.log('🔍 Running captcha detection...');
-
-    const captchaResult = await page.evaluate(() => {
-      const selectors = [
-        '#g-recaptcha',
-        'div.g-recaptcha',
-        '[data-sitekey]',
-        '#h-captcha',
-        'div.h-captcha',
-        '.cf-turnstile',
-        '.frc-captcha',
-        '#captcha-container',
-        '[class*="captcha"]'
-      ];
-
-      const iframeKeywords = [
-        'recaptcha',
-        'hcaptcha',
-        'challenges.cloudflare.com',
-        'arkoselabs'
-      ];
-
-      const textKeywords = [
-        'verify you are human',
-        'prove you\'re not a robot',
-        'security check',
-        'are you a robot',
-        'just a moment...'
-      ];
-
-      // Check for specific selectors
-      for (const selector of selectors) {
-        const elements = document.querySelectorAll(selector);
-        for (const element of elements) {
-          const elementClasses = element.className || '';
-          const classString = typeof elementClasses === 'string' ? elementClasses : (elementClasses.baseVal || '');
-          const lowerClassString = classString.toLowerCase();
-
-          // Skip notify-related elements
-          if (lowerClassString.includes('notify') || lowerClassString.includes('grecaptcha')) {
-            continue;
-          }
-
-          return { detected: true, reason: `Found selector: ${selector}` };
-        }
-      }
-
-      // Check iframe sources
-      for (const iframe of document.querySelectorAll('iframe')) {
-        const src = iframe.src || '';
-        if (iframeKeywords.some(keyword => src.includes(keyword))) {
-          return { detected: true, reason: `Found iframe with src: ${src}` };
-        }
-      }
-
-      // Check for keywords in page text
-      const bodyText = document.body.innerText.toLowerCase();
-      for (const keyword of textKeywords) {
-        if (bodyText.includes(keyword)) {
-          return { detected: true, reason: `Found text keyword: "${keyword}"` };
-        }
-      }
-
-      return { detected: false, reason: 'No captcha indicators found' };
-    });
-
-    if (captchaResult.detected) {
-      console.warn(`⚠️  CAPTCHA detected! Reason: ${captchaResult.reason}`);
-    } else {
-      console.log('✅ No captcha detected');
-    }
-
-    return captchaResult;
+    await page.close();
+    console.log('[closePage] ✅ Page closed successfully');
   } catch (error) {
-    console.error('❌ Error during captcha detection:', error.message);
-    return { detected: false, reason: 'Error in detection function' };
+    console.warn(`[closePage] ⚠️ Error closing page: ${error.message}`);
   }
 }
 
 /**
  * Close browser safely
- * @param {Object} browser - Playwright browser instance
- * @returns {Promise<void>}
  */
-async function closePlaywrightBrowser(browser) {
+async function closeBrowser(browser) {
+  if (!browser) {
+    console.log('[closeBrowser] Browser is null');
+    return;
+  }
+
   try {
-    if (browser) {
-      await browser.close();
-      console.log('✅ Browser closed successfully');
-    }
+    await browser.close();
+    console.log('[closeBrowser] ✅ Browser closed successfully');
   } catch (error) {
-    console.error('❌ Error closing browser:', error);
+    console.warn(`[closeBrowser] ⚠️ Error closing browser: ${error.message}`);
   }
 }
 
 /**
- * Validate and normalize URL
- * @param {string} url - URL to validate
- * @returns {string|null} Normalized URL or null if invalid
+ * Extract domain name from URL
  */
-function validateAndNormalizeUrl(url) {
+function extractDomainName(url) {
   try {
     const urlObj = new URL(url);
-
-    if (!urlObj.protocol) {
-      urlObj.protocol = 'https:';
-    }
-
-    if (!urlObj.hostname || urlObj.hostname.length < 3) {
-      console.error(`Invalid hostname: ${urlObj.hostname}`);
-      return null;
-    }
-
-    return urlObj.toString();
+    return urlObj.hostname;
   } catch (error) {
-    console.error(`URL validation failed for ${url}:`, error.message);
-
-    try {
-      let fixedUrl = url;
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        fixedUrl = 'https://' + url;
-      }
-
-      const fixedUrlObj = new URL(fixedUrl);
-      console.log(`Fixed URL: ${fixedUrl}`);
-      return fixedUrlObj.toString();
-    } catch (fixError) {
-      console.error(`Could not fix URL ${url}:`, fixError.message);
-      return null;
-    }
+    console.warn(`⚠️ Error extracting domain from ${url}:`, error.message);
+    return url;
   }
 }
 
 /**
- * Try alternative URL formats
- * @param {string} url - Original URL
- * @param {number} attempt - Current attempt number
- * @returns {string|null} Alternative URL or null
+ * Extract domain (protocol + hostname)
  */
-function tryAlternativeUrl(url, attempt) {
+function extractDomain(url) {
   try {
     const urlObj = new URL(url);
-
-    switch (attempt) {
-      case 1:
-        if (urlObj.hostname.startsWith('www.')) {
-          urlObj.hostname = urlObj.hostname.substring(4);
-          return urlObj.toString();
-        } else if (!urlObj.hostname.startsWith('www.')) {
-          urlObj.hostname = 'www.' + urlObj.hostname;
-          return urlObj.toString();
-        }
-        break;
-
-      case 2:
-        if (urlObj.protocol === 'https:') {
-          urlObj.protocol = 'http:';
-          return urlObj.toString();
-        }
-        break;
-
-      default:
-        return null;
-    }
-
-    return null;
+    return `${urlObj.protocol}//${urlObj.hostname}`;
   } catch (error) {
-    console.error(`Error creating alternative URL:`, error.message);
-    return null;
+    console.warn(`⚠️ Error extracting domain from ${url}:`, error.message);
+    return url;
+  }
+}
+
+/**
+ * Normalize URL
+ */
+function normalizeUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    // Remove trailing slash
+    let normalized = urlObj.href.replace(/\/+$/, '');
+    // Convert to lowercase
+    normalized = normalized.toLowerCase();
+    return normalized;
+  } catch (error) {
+    return url;
   }
 }
 
 module.exports = {
-  launchPlaywrightBrowser,
-  createPlaywrightPage,
-  navigateToPlaywrightPage,
-  handlePlaywrightCookieConsent,
-  detectPlaywrightCaptcha,
-  closePlaywrightBrowser
+  createPage,
+  navigateToPage,
+  detectCaptcha,
+  handleCookieConsent,
+  closePage,
+  closeBrowser,
+  extractDomainName,
+  extractDomain,
+  normalizeUrl
 };

@@ -3,8 +3,9 @@ const ABTastyValidationResult = require('../../models/ABTastyValidationResult');
 const ABTastyValidationDocument = require('../../models/ABTastyValidationDocument');
 const Dataset = require('../../models/Dataset');
 const { isUrlReachable } = require('../../utils/urlValidator');
-const { handleCookieConsent, detectCaptcha, navigateToPage, createPage, closePage } = require('../../utils/helper');
-// ✅ Use browser service (switches between pool/cluster based on USE_PUPPETEER_CLUSTER)
+// Playwright browser functions
+const { handleCookieConsent, detectCaptcha, navigateToPage, createPage, closePage } = require('../../utils/playwrightHelper');
+// ✅ Use browser service (now supports Playwright!)
 const browserPool = require('../../services/browserService');
 
 // Timeout wrapper utility (matching Adobe implementation)

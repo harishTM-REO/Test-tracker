@@ -1,16 +1,22 @@
 const chromium = require('@sparticuz/chromium');
-// ✅ Use browser service (switches between pool/cluster based on USE_PUPPETEER_CLUSTER)
+// ✅ Use browser service (now supports Playwright!)
 const browserService = require('./browserService');
+
+// Non-browser utilities
 const {
     extractDomainName,
     extractDomain,
+    httpCheck
+} = require('../utils/helper');
+
+// Playwright browser functions
+const {
     detectCaptcha,
     handleCookieConsent,
     closePage,
     createPage,
-    navigateToPage,
-    httpCheck
-} = require('../utils/helper');
+    navigateToPage
+} = require('../utils/playwrightHelper');
 
 // Import batch processing helpers for advanced batch operations
 const {

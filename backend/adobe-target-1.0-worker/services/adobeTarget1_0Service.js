@@ -15,7 +15,8 @@ const {
 } = require(path.join(__dirname, '../../utils/adobeTargetResultSanitizer'));
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
 const chromium = require('@sparticuz/chromium');
-const { createPage, closePage, buildPuppeteerLaunchOptions } = require(path.join(__dirname, '../../utils/helper'));
+const { buildPuppeteerLaunchOptions } = require(path.join(__dirname, '../../utils/helper'));
+const { createPage, closePage } = require(path.join(__dirname, '../../utils/playwrightHelper'));
 const { isUrlReachable } = require(path.join(__dirname, '../../utils/urlValidator'));
 const { 
     performMemoryCleanup,
