@@ -116,13 +116,30 @@ class ABTastyValidationService {
 
         if ((b + 1) < batches && (b + 1) % BATCH_SIZE === 0) {
             console.log(`\n\n♻️  [MEMORY REFRESH] Triggering full browser pool restart after Batch ${b + 1} to free ${process.env.MEMORY_THRESHOLD_MB}MB.`);
-            
+
             // 1. Shutdown the memory-leaky Chromium process
             await browserPool.closeAll();
-            
-            // 2. Start a fresh, clean Chromium process
+
+            // 2. ✅ MEMORY LEAK FIX: Force garbage collection after closing all browsers
+            console.log(`   🧹 [MEMORY REFRESH] Forcing garbage collection...`);
+            if (global.gc) {
+              global.gc();
+              console.log(`   ✅ [MEMORY REFRESH] Garbage collection completed`);
+            } else {
+              console.warn(`   ⚠️  [MEMORY REFRESH] GC not available (enable with NODE_OPTIONS=--expose-gc)`);
+            }
+
+            // 3. Wait for memory reclaim (longer delay after full pool shutdown)
+            const memBefore = process.memoryUsage();
+            console.log(`   💾 [MEMORY REFRESH] Memory before wait: ${Math.round(memBefore.rss / 1024 / 1024)}MB RSS`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            const memAfter = process.memoryUsage();
+            const memFreed = Math.round(memBefore.rss / 1024 / 1024) - Math.round(memAfter.rss / 1024 / 1024);
+            console.log(`   💾 [MEMORY REFRESH] Memory after wait: ${Math.round(memAfter.rss / 1024 / 1024)}MB RSS (freed ${memFreed}MB)`);
+
+            // 4. Start a fresh, clean Chromium process
             await browserPool.initialize();
-            
+
             console.log(`✅ Browser pool successfully restarted. Continuing with next batch.`);
         }
         if (progressCallback) {

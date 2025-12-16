@@ -469,13 +469,22 @@ class BrowserPoolService {
             ]);
             console.log(`   ✅ [scheduleAsyncRestart] Browser closed gracefully (pid: ${browserPid || 'n/a'})`);
           } catch (closeErr) {
-            console.warn(`   ⚠️  [scheduleAsyncRestart] Graceful close failed, force killing...`);
-            // Force kill the process
-            if (browserPid) {
-              try {
-                process.kill(browserPid, 'SIGKILL');
-                console.log(`   🔪 [scheduleAsyncRestart] Force killed browser process (pid: ${browserPid})`);
-              } catch (killErr) {
+            console.warn(`   ⚠️  [scheduleAsyncRestart] Graceful close failed: ${closeErr.message}`);
+          }
+
+          // ✅ MEMORY LEAK FIX: ALWAYS force-kill the process to ensure it's truly dead
+          // Even if close() succeeds, the process might still be running
+          if (browserPid) {
+            try {
+              // Wait 500ms for graceful shutdown, then force-kill
+              await new Promise(resolve => setTimeout(resolve, 500));
+              process.kill(browserPid, 'SIGKILL');
+              console.log(`   🔪 [scheduleAsyncRestart] Force killed browser process (pid: ${browserPid})`);
+            } catch (killErr) {
+              // ENOENT or ESRCH means process already dead - this is fine
+              if (killErr.code === 'ESRCH' || killErr.code === 'ENOENT') {
+                console.log(`   ✅ [scheduleAsyncRestart] Process ${browserPid} already terminated`);
+              } else {
                 console.warn(`   ⚠️  [scheduleAsyncRestart] Could not kill process: ${killErr.message}`);
               }
             }
@@ -865,8 +874,17 @@ class BrowserPoolService {
       if (this.browserAcquisitionTimes) this.browserAcquisitionTimes.delete(browser);
   
       // ✅ MEMORY OPTIMIZATION: Fully close browser (close all pages first)
+      let browserPid = null;
       try {
         if (browser) {
+          // Get PID before closing
+          try {
+            if (browser.process && typeof browser.process === 'function') {
+              const proc = browser.process();
+              if (proc) browserPid = proc.pid;
+            }
+          } catch (e) {}
+
           // Close all pages first
           try {
             const pages = await browser.pages();
@@ -880,36 +898,46 @@ class BrowserPoolService {
           } catch (e) {
             // Ignore if we can't get pages
           }
-          
+
           // Close browser completely
-          await Promise.race([
-            browser.close(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 10000))
-          ]);
-          
+          try {
+            await Promise.race([
+              browser.close(),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 10000))
+            ]);
+          } catch (closeError) {
+            console.warn(`⚠️  Graceful close failed: ${closeError.message}`);
+          }
+
+          // ✅ MEMORY LEAK FIX: ALWAYS force-kill the process
+          if (browserPid) {
+            try {
+              await new Promise(resolve => setTimeout(resolve, 500));
+              process.kill(browserPid, 'SIGKILL');
+              console.log(`   🔪 [forceRestartBrowser] Force killed browser process (pid: ${browserPid})`);
+            } catch (killErr) {
+              if (killErr.code === 'ESRCH' || killErr.code === 'ENOENT') {
+                console.log(`   ✅ [forceRestartBrowser] Process ${browserPid} already terminated`);
+              } else {
+                console.warn(`   ⚠️  [forceRestartBrowser] Could not kill process: ${killErr.message}`);
+              }
+            }
+          }
+
           // ✅ MEMORY OPTIMIZATION: Wait for OS to reclaim memory (same logic as scheduleAsyncRestart)
           const isRailway = process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID;
           const isProduction = process.env.NODE_ENV === 'production';
           const isConstrained = isRailway || (isProduction && !process.env.HIGH_RESOURCE_MODE);
           const defaultDelay = isConstrained ? 3000 : 2000;
           const memoryReclaimDelay = parseInt(process.env.BROWSER_RESTART_MEMORY_DELAY_MS) || defaultDelay;
-          
+
           await new Promise(resolve => setTimeout(resolve, memoryReclaimDelay));
-          
+
           this.stats.totalBrowsersClosed = (this.stats.totalBrowsersClosed || 0) + 1;
           console.log(`✅ Old browser ${browserIndex + 1} closed completely (waited ${memoryReclaimDelay}ms for memory reclaim)`);
         }
       } catch (closeError) {
-        console.warn(`⚠️  Could not gracefully close browser ${browserIndex + 1}: ${closeError.message}`);
-        // Try force kill
-        try {
-          if (browser.process && browser.process()) {
-            browser.process().kill('SIGKILL');
-            console.log(`   🔪 Force killed browser process`);
-          }
-        } catch (killError) {
-          // Ignore kill errors
-        }
+        console.warn(`⚠️  Error during browser close: ${closeError.message}`);
       }
   
       this.browsers[browserIndex] = null;
