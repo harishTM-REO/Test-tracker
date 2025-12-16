@@ -104,6 +104,13 @@ class BrowserPoolService {
   
       for (let i = 0; i < this.poolSize; i++) {
         try {
+          // ✅ SOCKET HANG UP FIX: Add delay between browser launches to prevent resource exhaustion
+          if (i > 0) {
+            const delayMs = parseInt(process.env.BROWSER_LAUNCH_STAGGER_MS) || 3000;
+            console.log(`   ⏳ Waiting ${delayMs}ms before launching browser ${i + 1}...`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+          }
+
           const launchTimeoutMs = parseInt(process.env.LAUNCH_TIMEOUT) || 60000; // Increased to 60s
           const browser = await Promise.race([
             this.launchBrowser(i + 1),
@@ -111,12 +118,12 @@ class BrowserPoolService {
               setTimeout(() => reject(new Error(`launchBrowser timeout after ${launchTimeoutMs}ms`)), launchTimeoutMs)
             )
           ]);
-  
+
           this.pageCountPerBrowser.set(browser, 0);
           this.browsers.push(browser);
           this.availableBrowsers.push(browser);
           this.stats.totalBrowsersCreated = (this.stats.totalBrowsersCreated || 0) + 1;
-  
+
           const pid = browser.process && typeof browser.process === 'function' ? (browser.process()?.pid || 'n/a') : 'n/a';
           console.log(`   ✅ Browser ${i + 1}/${this.poolSize} launched successfully (pid: ${pid})`);
         } catch (error) {
@@ -138,7 +145,17 @@ class BrowserPoolService {
   }
   
   async launchBrowser() {
-    try {
+    const maxRetries = 3;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          const retryDelay = attempt * 2000; // 2s, 4s, 6s
+          console.log(`   🔄 Retry attempt ${attempt}/${maxRetries} after ${retryDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+
         // 2. Use the helper to get the robust base args
         // Only pass overrides here
         const browserOptions = await buildPuppeteerLaunchOptions({
@@ -209,11 +226,27 @@ class BrowserPoolService {
 
         return browser;
 
-    } catch (error) {
-        console.error('Failed to launch browser in AdobeTarget1_0Service:', error);
-        throw error;
+      } catch (error) {
+        lastError = error;
+        const isRetryable = error.message?.includes('socket hang up') ||
+                           error.message?.includes('ECONNRESET') ||
+                           error.message?.includes('Protocol error') ||
+                           error.message?.includes('Target closed');
+
+        if (isRetryable && attempt < maxRetries) {
+          console.warn(`   ⚠️ Browser launch failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
+          // Will retry after delay
+        } else {
+          console.error(`   ❌ Failed to launch browser (attempt ${attempt}/${maxRetries}):`, error.message);
+          throw error;
+        }
+      }
     }
-}
+
+    // If we get here, all retries failed
+    console.error('Failed to launch browser after all retries:', lastError);
+    throw lastError;
+  }
 
   async acquireBrowser() {
     return new Promise(async (resolve, reject) => {
@@ -487,6 +520,17 @@ class BrowserPoolService {
               } else {
                 console.warn(`   ⚠️  [scheduleAsyncRestart] Could not kill process: ${killErr.message}`);
               }
+            }
+
+            // ✅ ZOMBIE PROCESS FIX: Kill ALL child processes of the browser
+            // Chromium spawns many child processes that might survive SIGKILL
+            try {
+              const { execSync } = require('child_process');
+              // Kill all chromium processes (aggressive cleanup)
+              execSync(`pkill -9 -f "chromium.*${browserPid}"`, { stdio: 'ignore' });
+              console.log(`   🧹 [scheduleAsyncRestart] Cleaned up all child processes for ${browserPid}`);
+            } catch (pkillErr) {
+              // Ignore - processes might already be dead
             }
           }
           
@@ -921,6 +965,15 @@ class BrowserPoolService {
               } else {
                 console.warn(`   ⚠️  [forceRestartBrowser] Could not kill process: ${killErr.message}`);
               }
+            }
+
+            // ✅ ZOMBIE PROCESS FIX: Kill ALL child processes
+            try {
+              const { execSync } = require('child_process');
+              execSync(`pkill -9 -f "chromium.*${browserPid}"`, { stdio: 'ignore' });
+              console.log(`   🧹 [forceRestartBrowser] Cleaned up all child processes for ${browserPid}`);
+            } catch (pkillErr) {
+              // Ignore - processes might already be dead
             }
           }
 
