@@ -53,6 +53,10 @@ class BrowserPoolService {
     // This creates the saw-tooth memory pattern by restarting browsers more frequently
     this.maxPagesBeforeRestart = parseInt(process.env.MAX_PAGES_BEFORE_RESTART) || 15;
 
+    // ✅ DEADLOCK FIX: Prevent simultaneous browser restarts
+    this.browsersCurrentlyRestarting = new Set(); // Track which browsers are restarting
+    this.restartLock = false; // Global lock to serialize restarts
+
     // Pool lifecycle tracking
     this.poolCreatedAt = null;
     this.totalUrlsProcessed = 0;
@@ -144,27 +148,43 @@ class BrowserPoolService {
             // When browsers are under memory pressure, they respond slower to CDP commands
             // Higher timeout prevents false "stuck browser" detections during memory cleanup
             protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 120000, // Increased from 60000 to 120000 (2 minutes)
-            timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000,
+            timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 60000, // ✅ DEADLOCK FIX: Increased from 30s to 60s for constrained environments
             args: [
                 // Only pass args that are specific to this service
-                '--no-sandbox', 
+                '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage', // Helps if /dev/shm is small
     '--disable-gpu',
-    
+
     // SAFE BROWSER/STEALTH FLAGS
     '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     '--mute-audio',
     '--no-first-run',
     '--window-size=1366,768',
     '--disable-blink-features=AutomationControlled',
-    
+
     // Tweak to manage resources without inducing deadlocks
     '--disable-sync',
     '--disable-default-apps',
-    '--disable-software-rasterizer', 
+    '--disable-software-rasterizer',
     '--disable-accelerated-2d-canvas',
     '--disable-features=VizServiceDisplay',
+
+    // ✅ CONTAINER RESOURCE OPTIMIZATION (reduces thread/process usage)
+    '--disable-background-networking',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-breakpad', // Disable crash reporting
+    '--disable-component-extensions-with-background-pages',
+    '--disable-extensions',
+    '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+    '--disable-ipc-flooding-protection',
+    '--disable-hang-monitor',
+    '--disable-prompt-on-repost',
+    '--disable-domain-reliability',
+    '--no-zygote', // Reduces process forking
+    '--renderer-process-limit=1', // Limit renderer processes
             ]
         });
 
@@ -389,7 +409,7 @@ class BrowserPoolService {
     console.log(`\n${'='.repeat(60)}`);
     console.log(`🔄 [scheduleAsyncRestart] CALLED - Browser page count: ${pageCount}/${effectiveLimit}`);
     console.log(`${'='.repeat(60)}\n`);
-    
+
     setTimeout(async () => {
       try {
         const browserIndex = this.browsers.indexOf(browser);
@@ -397,6 +417,18 @@ class BrowserPoolService {
           console.warn(`⚠️  [scheduleAsyncRestart] Browser not found in pool array, skipping restart`);
           return;
         }
+
+        // ✅ DEADLOCK FIX: Wait if another browser is currently restarting
+        // This prevents both browsers from restarting simultaneously and exhausting resources
+        while (this.restartLock) {
+          console.log(`   ⏳ [scheduleAsyncRestart] Waiting for other browser restart to complete...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+
+        // Acquire restart lock
+        this.restartLock = true;
+        this.browsersCurrentlyRestarting.add(browser);
+        console.log(`   🔒 [scheduleAsyncRestart] Restart lock acquired for browser ${browserIndex + 1}`);
 
         console.log(`🔧 [scheduleAsyncRestart] STEP 1: Closing browser ${browserIndex + 1} due to page limit (${this.pageCountPerBrowser.get(browser)}/${effectiveLimit})...`);
 
@@ -549,7 +581,7 @@ class BrowserPoolService {
         console.log(`✅ [scheduleAsyncRestart] Browser ${browserIndex + 1} replaced with fresh instance (memory cleared)`);
         console.log(`   📊 [scheduleAsyncRestart] Stats: Restarts=${this.stats.totalBrowserRestarts}, Closed=${this.stats.totalBrowsersClosed}`);
         console.log(`${'='.repeat(60)}\n`);
-        
+
         // Check if anyone is waiting for this new browser
         if (this.waitingQueue.length > 0 && this.availableBrowsers.length > 0) {
              console.log(`   📋 [scheduleAsyncRestart] STEP 7: Assigning new browser to waiting request...`);
@@ -562,10 +594,20 @@ class BrowserPoolService {
              console.log(`   ✅ [scheduleAsyncRestart] New browser assigned to waiting request`);
         }
 
+        // ✅ DEADLOCK FIX: Release restart lock
+        this.browsersCurrentlyRestarting.delete(browser);
+        this.restartLock = false;
+        console.log(`   🔓 [scheduleAsyncRestart] Restart lock released for browser ${browserIndex + 1}`);
+
       } catch (error) {
         console.error(`\n❌ [scheduleAsyncRestart] FAILED to replace browser: ${error.message}`);
         console.error(`   Stack: ${error.stack}`);
         console.error(`${'='.repeat(60)}\n`);
+
+        // ✅ DEADLOCK FIX: Release lock even on error to prevent permanent deadlock
+        this.browsersCurrentlyRestarting.delete(browser);
+        this.restartLock = false;
+        console.log(`   🔓 [scheduleAsyncRestart] Restart lock released (after error)`);
       }
     }, 0);
   }
