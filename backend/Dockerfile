@@ -1,8 +1,7 @@
 # Use a lightweight Node.js image (aligns with engines >=20)
 FROM node:20-bookworm-slim
 
-# 1. Install Chromium and required Linux libraries manually
-# This guarantees the browser exists at /usr/bin/chromium
+# 1. Install system dependencies for both Puppeteer and Playwright
 RUN apt-get update && apt-get install -y \
     chromium \
     libnss3 \
@@ -17,13 +16,19 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     libgbm1 \
     libasound2 \
+    libxshmfence1 \
+    libglu1-mesa \
     procps \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Set Environment Variables explicitly
+# 2. Set Environment Variables
+# Puppeteer configuration (fallback)
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+
+# Playwright configuration
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
 ENV NODE_ENV=production
 
 # 3. Setup App Directory
@@ -35,7 +40,10 @@ COPY package*.json ./
 # Run install (and ignore the postinstall script if it still exists)
 RUN npm ci --omit=dev --ignore-scripts
 
-# 5. Copy the rest of your code
+# 5. Install Playwright browsers (Chromium only to save space)
+RUN npx playwright install --with-deps chromium
+
+# 6. Copy the rest of your code
 COPY . .
 
 # 6. Start the server (use node directly to avoid nodemon dev dependency)
