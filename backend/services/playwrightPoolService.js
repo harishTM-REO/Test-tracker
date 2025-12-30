@@ -18,7 +18,7 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 chromium.use(StealthPlugin());
 
 class PlaywrightPoolService {
-  constructor(poolSize = 5) {
+  constructor(poolSize = 2) {
     this.poolSize = poolSize;
     this.browsers = [];
     this.availableBrowsers = [];
@@ -333,5 +333,5 @@ class PlaywrightPoolService {
 }
 
 // Singleton export
-const poolSize = parseInt(process.env.PLAYWRIGHT_POOL_SIZE) || 5;
+const poolSize = parseInt(process.env.PLAYWRIGHT_POOL_SIZE) || 2;
 module.exports = new PlaywrightPoolService(poolSize);

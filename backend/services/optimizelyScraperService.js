@@ -1692,7 +1692,7 @@ class OptimizelyScraperService {
     const adaptiveOptions = jobQueue.getAdaptiveScrapeOptions();
 
     // Get pool size from env and ensure concurrent doesn't exceed it
-    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
     const envConcurrent = parseInt(process.env.CONCURRENT_URLS) || poolSize;
     
     const {
@@ -2035,7 +2035,7 @@ class OptimizelyScraperService {
    */
   async processUrlChunk(urls, options = {}) {
     // Get pool size and ensure concurrent respects it
-    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 3;
+    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
     const envConcurrent = parseInt(process.env.CONCURRENT_URLS) || poolSize;
     const { concurrent = Math.min(envConcurrent, poolSize), maxTabs = 1 } = options;
     const results = [];

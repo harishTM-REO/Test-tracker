@@ -2869,9 +2869,9 @@ class AdobeScraperService {
      * Uses browser cluster service to manage browser lifecycle automatically.
      */
     async processUrlChunkSequential(urls, options = {}) {
-        const poolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
-                         parseInt(process.env.BROWSER_POOL_SIZE) || 3;
-        const { concurrent = Math.min(poolSize, 5) } = options;
+        const poolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) ||
+                         parseInt(process.env.BROWSER_POOL_SIZE) || 2;
+        const { concurrent = Math.min(poolSize, 2) } = options;
         const results = [];
 
         try {
@@ -3140,9 +3140,9 @@ class AdobeScraperService {
      * Uses browser cluster service to manage browser lifecycle automatically.
      */
     async processUrlChunkSequential(urls, options = {}) {
-        const poolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) || 
-                         parseInt(process.env.BROWSER_POOL_SIZE) || 3;
-        const { concurrent = Math.min(poolSize, 5) } = options;
+        const poolSize = parseInt(process.env.ADOBE_SCRAPING_BROWSER_POOL_SIZE) ||
+                         parseInt(process.env.BROWSER_POOL_SIZE) || 2;
+        const { concurrent = Math.min(poolSize, 2) } = options;
         const results = [];
 
         try {
