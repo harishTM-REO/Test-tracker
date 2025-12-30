@@ -313,7 +313,7 @@ class AdobeScraperService {
      */
     async detectAdobeTargetPresence(url) {
         try {
-            return await browserPool.withBrowser(async (browser) => {
+            return await this.browserPool.withBrowser(async (browser) => {
                 let page = null;
 
                 try {
@@ -321,7 +321,7 @@ class AdobeScraperService {
 
                     // Track page usage for restart logic
                     try {
-                        const pageCount = browserPool.incrementPageCount(browser);
+                        const pageCount = this.browserPool.incrementPageCount(browser);
                         console.log(`📄 [AdobeScraper] Browser page count: ${pageCount}`);
                     } catch (e) {
                         console.warn('⚠️ [AdobeScraper] Failed to increment page count:', e.message);
@@ -462,7 +462,7 @@ class AdobeScraperService {
         } else {
             // Case 2: Standalone call (Original scrapeAdobeTargetExperiments path).
             // Use browser pool service to acquire a browser and manage page lifecycle.
-            return await browserPool.withBrowser(async (browser) => {
+            return await this.browserPool.withBrowser(async (browser) => {
                 let page = null;
 
                 try {
@@ -470,7 +470,7 @@ class AdobeScraperService {
 
                     // Track page usage for restart logic
                     try {
-                        const pageCount = browserPool.incrementPageCount(browser);
+                        const pageCount = this.browserPool.incrementPageCount(browser);
                         console.log(`📄 [AdobeScraper] Browser page count (scrape): ${pageCount}`);
                     } catch (e) {
                         console.warn('⚠️ [AdobeScraper] Failed to increment page count (scrape):', e.message);
@@ -2883,7 +2883,7 @@ class AdobeScraperService {
 
             // Process each browser's batch using the pool wrapper
             const batchPromises = urlBatches.map((urlBatch) =>
-                browserPool.withBrowser(async (browser) => {
+                this.browserPool.withBrowser(async (browser) => {
                   // Run the batch using a single browser instance
                   return this.processBrowserBatchSequential(browser, urlBatch);
                 })
@@ -3153,7 +3153,7 @@ class AdobeScraperService {
             const urlBatches = distributeUrlsAcrossBrowsers(urls, actualBrowserCount, 1);
 
             const batchPromises = urlBatches.map((urlBatch) =>
-                browserPool.withBrowser(async (browser) => {
+                this.browserPool.withBrowser(async (browser) => {
                   try {
                     return await this.processBrowserBatchSequential(browser, urlBatch);
                   } catch (err) {

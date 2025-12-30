@@ -212,13 +212,10 @@ class PlaywrightPoolService {
     this.stats.totalReleases++;
     this.busyBrowsers.delete(browser);
 
-    // Increment page count
+    // Check if browser needs restart (page count is incremented separately via incrementPageCount)
     const currentCount = this.pageCountPerBrowser.get(browser) || 0;
-    this.pageCountPerBrowser.set(browser, currentCount + 1);
-
-    // Check if browser needs restart
-    if (currentCount + 1 >= this.maxPagesBeforeRestart) {
-      console.log(`🔄 Browser reached page limit (${currentCount + 1}/${this.maxPagesBeforeRestart}), scheduling restart...`);
+    if (currentCount >= this.maxPagesBeforeRestart) {
+      console.log(`🔄 Browser reached page limit (${currentCount}/${this.maxPagesBeforeRestart}), scheduling restart...`);
       this.scheduleAsyncRestart(browser).catch(err => {
         console.error('❌ Failed to restart browser:', err);
       });
@@ -233,6 +230,24 @@ class PlaywrightPoolService {
     } else {
       this.availableBrowsers.push(browser);
     }
+  }
+
+  /**
+   * Increment page count for a browser (for compatibility with browserPoolService)
+   * @param {Browser} browser - The browser instance
+   * @returns {number} The new page count
+   */
+  incrementPageCount(browser) {
+    const currentCount = this.pageCountPerBrowser.get(browser) || 0;
+    const newCount = currentCount + 1;
+    this.pageCountPerBrowser.set(browser, newCount);
+
+    // Log progress periodically
+    if (newCount % 10 === 0 || newCount >= this.maxPagesBeforeRestart * 0.8) {
+      console.log(`📊 Browser page count: ${newCount}/${this.maxPagesBeforeRestart}`);
+    }
+
+    return newCount;
   }
 
   async scheduleAsyncRestart(browser) {
