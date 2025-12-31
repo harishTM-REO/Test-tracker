@@ -13,12 +13,23 @@ async function createPage(browser, maxAttempts = 2) {
 
       const page = await browser.newPage();
 
-      // Set default timeouts
-      page.setDefaultTimeout(parseInt(process.env.PAGE_SCRAPE_TIMEOUT) || 50000);
-      page.setDefaultNavigationTimeout(parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000);
+      // Set default timeouts (compatible with both Puppeteer and Playwright)
+      if (typeof page.setDefaultTimeout === 'function') {
+        page.setDefaultTimeout(parseInt(process.env.PAGE_SCRAPE_TIMEOUT) || 50000);
+      }
+      if (typeof page.setDefaultNavigationTimeout === 'function') {
+        page.setDefaultNavigationTimeout(parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000);
+      }
 
-      // Set viewport
-      await page.setViewportSize({ width: 1920, height: 1080 });
+      // Set viewport (compatible with both Puppeteer and Playwright)
+      const viewportConfig = { width: 1920, height: 1080 };
+      if (typeof page.setViewportSize === 'function') {
+        // Playwright
+        await page.setViewportSize(viewportConfig);
+      } else if (typeof page.setViewport === 'function') {
+        // Puppeteer
+        await page.setViewport(viewportConfig);
+      }
 
       console.log(`[createPage] ✅ Page created successfully`);
       return page;
@@ -143,7 +154,8 @@ async function handleCookieConsent(page) {
         if (button) {
           await button.click({ timeout: 2000 });
           console.log(`✅ Clicked cookie consent button: ${selector}`);
-          await page.waitForTimeout(500);
+          // Wait 500ms (compatible with both Puppeteer and Playwright)
+          await new Promise(resolve => setTimeout(resolve, 500));
           return true;
         }
       } catch (error) {
@@ -162,9 +174,19 @@ async function handleCookieConsent(page) {
  * Close page safely
  */
 async function closePage(page) {
-  if (!page || page.isClosed()) {
-    console.log('[closePage] Page already closed or null');
+  if (!page) {
+    console.log('[closePage] Page is null');
     return;
+  }
+
+  // Check if page is already closed (compatible with both)
+  try {
+    if (typeof page.isClosed === 'function' && page.isClosed()) {
+      console.log('[closePage] Page already closed');
+      return;
+    }
+  } catch (e) {
+    // If isClosed check fails, try to close anyway
   }
 
   try {

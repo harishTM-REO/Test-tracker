@@ -16,7 +16,7 @@ const storage = multer.memoryStorage(); // Store file in memory
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 30 * 1024 * 1024, // 30MB limit
+    fileSize: parseInt(process.env.MAX_UPLOAD_SIZE_MB || 100) * 1024 * 1024, // Default: 100MB (configurable via env)
   },
   fileFilter: (req, file, cb) => {
     // Only allow xlsx files

@@ -181,8 +181,22 @@ class PlaywrightPoolService {
     try {
       const result = await fn(browser);
       return result;
+    } catch (error) {
+      console.error(`❌ Error in withBrowser function:`, error.message);
+      throw error; // Re-throw after logging
     } finally {
-      this.releaseBrowser(browser);
+      // CRITICAL: Ensure browser is ALWAYS released, even if releaseBrowser throws
+      try {
+        this.releaseBrowser(browser);
+      } catch (releaseError) {
+        console.error(`❌ CRITICAL: Failed to release browser in finally block:`, releaseError.message);
+        // Last resort: manually add browser back to available pool
+        if (this.isManagedBrowser(browser)) {
+          this.busyBrowsers.delete(browser);
+          this.availableBrowsers.push(browser);
+          console.error(`🔧 Emergency recovery: Browser forcibly returned to pool`);
+        }
+      }
     }
   }
 
@@ -197,10 +211,25 @@ class PlaywrightPoolService {
       return browser;
     }
 
-    // Wait for a browser to become available
-    return new Promise((resolve) => {
+    // Wait for a browser to become available with timeout protection
+    const ACQUIRE_TIMEOUT = parseInt(process.env.BROWSER_ACQUIRE_TIMEOUT) || 300000; // 5 minutes default
+
+    const waitPromise = new Promise((resolve) => {
       this.waitingQueue.push(resolve);
     });
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => {
+        // Log pool state for debugging
+        const poolStats = this.getStats();
+        console.error(`\n❌ BROWSER ACQUISITION TIMEOUT after ${ACQUIRE_TIMEOUT}ms`);
+        console.error(`📊 Pool State: Available=${poolStats.availableBrowsers}, Busy=${poolStats.busyBrowsers}, Waiting=${poolStats.waitingRequests}`);
+        console.error(`🔍 Browser Page Counts:`, poolStats.browserPageCounts);
+        reject(new Error(`Browser acquisition timeout - all ${this.poolSize} browsers stuck for ${ACQUIRE_TIMEOUT}ms. Pool may be deadlocked.`));
+      }, ACQUIRE_TIMEOUT)
+    );
+
+    return Promise.race([waitPromise, timeoutPromise]);
   }
 
   releaseBrowser(browser) {
@@ -217,18 +246,30 @@ class PlaywrightPoolService {
     if (currentCount >= this.maxPagesBeforeRestart) {
       console.log(`🔄 Browser reached page limit (${currentCount}/${this.maxPagesBeforeRestart}), scheduling restart...`);
       this.scheduleAsyncRestart(browser).catch(err => {
-        console.error('❌ Failed to restart browser:', err);
+        console.error('❌ CRITICAL: Failed to restart browser:', err);
+        console.error('🔧 Attempting recovery by returning browser to pool anyway...');
+        // SAFETY NET: If restart fails, return browser to pool to prevent deadlock
+        this.returnBrowserToPool(browser);
       });
       return;
     }
 
     // Return browser to pool
+    this.returnBrowserToPool(browser);
+  }
+
+  /**
+   * Helper method to return browser to pool (extracted for reuse in error recovery)
+   */
+  returnBrowserToPool(browser) {
     if (this.waitingQueue.length > 0) {
       const resolve = this.waitingQueue.shift();
       this.busyBrowsers.add(browser);
+      console.log(`🔄 Returning browser to waiting request (queue size: ${this.waitingQueue.length})`);
       resolve(browser);
     } else {
       this.availableBrowsers.push(browser);
+      console.log(`✅ Browser returned to pool (available: ${this.availableBrowsers.length}/${this.poolSize})`);
     }
   }
 

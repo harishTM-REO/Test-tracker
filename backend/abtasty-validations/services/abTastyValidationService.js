@@ -88,9 +88,17 @@ class ABTastyValidationService {
 
         console.log(`\n📦 PROCESSING BATCH ${b + 1}/${batches} (${chunk.length} URLs)`);
 
+        // Log browser pool health before processing
+        const poolStatsBefore = browserPool.getStats();
+        console.log(`📊 Pool Health (before): Available=${poolStatsBefore.availableBrowsers}/${poolStatsBefore.poolSize}, Busy=${poolStatsBefore.busyBrowsers}, Waiting=${poolStatsBefore.waitingRequests}`);
+
         // ✅ Use the Pool-Enabled Processor
         // This distributes the chunk across available browsers in the pool
         const chunkResults = await this.processValidationChunk(chunk, { concurrency: CONCURRENCY });
+
+        // Log browser pool health after processing
+        const poolStatsAfter = browserPool.getStats();
+        console.log(`📊 Pool Health (after): Available=${poolStatsAfter.availableBrowsers}/${poolStatsAfter.poolSize}, Busy=${poolStatsAfter.busyBrowsers}, Waiting=${poolStatsAfter.waitingRequests}`);
 
         // Collect results
         for (const res of chunkResults) {
@@ -147,9 +155,25 @@ class ABTastyValidationService {
              try { await progressCallback(progress); } catch (e) { console.warn('Progress callback error:', e.message); }
         }
 
-        // Optional: Save intermediate results to DB here if desired
-        // (For now, we save final results at the end to match your previous logic, 
-        // but adding intermediate saves is recommended for large jobs)
+        // 🔒 CRITICAL: Save intermediate results every N batches to prevent data loss
+        const SAVE_INTERVAL = parseInt(process.env.ABTASTY_SAVE_INTERVAL) || 5; // Save every 5 batches
+        if ((b + 1) % SAVE_INTERVAL === 0 || (b + 1) === batches) {
+          try {
+            console.log(`\n💾 Saving intermediate results (batch ${b + 1}/${batches})...`);
+            await this.saveIntermediateResults(
+              datasetId,
+              validationResult._id,
+              results,
+              projectIds,
+              processedSoFar,
+              total
+            );
+            console.log(`✅ Intermediate save completed (${processedSoFar}/${total} URLs)`);
+          } catch (saveError) {
+            console.error(`❌ CRITICAL: Failed to save intermediate results:`, saveError.message);
+            console.error(`⚠️  Continuing processing, but data may be lost if process crashes...`);
+          }
+        }
       }
 
       // Save final documents
@@ -533,6 +557,61 @@ class ABTastyValidationService {
            return { detected: false };
        });
      } catch(e) { return { detected: false }; }
+  }
+
+  /**
+   * Save intermediate results to DB (called periodically during processing)
+   * Updates the validation result with current progress
+   */
+  async saveIntermediateResults(datasetId, resultId, results, projectIds, processedUrls, totalUrls) {
+    try {
+      const detectionRate = processedUrls > 0 ? (results.positive.length / processedUrls) * 100 : 0;
+
+      // Update Result Record with current progress
+      await ABTastyValidationResult.findByIdAndUpdate(resultId, {
+        status: 'in_progress',
+        lastSavedAt: new Date(),
+        processedUrls: processedUrls,
+        positiveUrls: results.positive.map(r => r.url),
+        negativeUrls: results.negative.map(r => r.url),
+        failedUrls: results.failed.map(r => r.url),
+        summary: {
+          totalUrls: totalUrls,
+          processedUrls: processedUrls,
+          positiveCount: results.positive.length,
+          negativeCount: results.negative.length,
+          failedCount: results.failed.length,
+          detectionRate,
+          uniqueProjectIds: Array.from(projectIds),
+          projectIdCount: projectIds.size,
+          lastSavedAt: new Date()
+        }
+      });
+
+      // Update Dataset with current progress
+      await Dataset.findByIdAndUpdate(datasetId, {
+        'abTastyValidation.status': 'in_progress',
+        'abTastyValidation.progress': {
+          processedUrls: processedUrls,
+          totalUrls: totalUrls,
+          percentage: Math.round((processedUrls / totalUrls) * 100)
+        },
+        'abTastyValidation.summary': {
+          totalUrls: totalUrls,
+          processedUrls: processedUrls,
+          positiveCount: results.positive.length,
+          negativeCount: results.negative.length,
+          failedCount: results.failed.length,
+          detectionRate,
+          uniqueProjectIds: Array.from(projectIds),
+          projectIdCount: projectIds.size
+        }
+      });
+
+    } catch (error) {
+      console.error(`❌ Error saving intermediate results:`, error.message);
+      throw error; // Re-throw so caller can handle
+    }
   }
 
   /**

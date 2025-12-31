@@ -145,12 +145,26 @@ class JobQueue {
 
     console.log(`Starting job ${pendingJob.id} of type ${pendingJob.type}`);
 
-    // Run the worker in the background
+    // Run the worker in the background with timeout protection
     setImmediate(async () => {
       try {
-        const result = await worker(pendingJob.data, (progress, partialResult) => {
+        // Worker execution timeout (default: 48 hours)
+        const workerTimeoutHours = parseInt(process.env.WORKER_EXECUTION_TIMEOUT_HOURS) || 48;
+        const workerTimeoutMs = workerTimeoutHours * 60 * 60 * 1000;
+
+        const workerPromise = worker(pendingJob.data, (progress, partialResult) => {
           this.updateJobProgress(pendingJob.id, progress, partialResult);
         });
+
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`Worker execution timeout after ${workerTimeoutHours} hours`));
+          }, workerTimeoutMs);
+        });
+
+        // Race between worker completion and timeout
+        const result = await Promise.race([workerPromise, timeoutPromise]);
+
         this.completeJob(pendingJob.id, result);
         console.log(`Job ${pendingJob.id} completed successfully`);
       } catch (error) {
@@ -172,19 +186,24 @@ class JobQueue {
    */
   cleanup() {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+    // Configurable job timeout (default 24 hours for large datasets)
+    const jobTimeoutHours = parseInt(process.env.JOB_TIMEOUT_HOURS) || 24;
+    const jobTimeoutMs = jobTimeoutHours * 60 * 60 * 1000;
+    const jobTimeoutAgo = new Date(Date.now() - jobTimeoutMs);
+
     const jobsToDelete = [];
     const stuckJobs = [];
 
     for (const [jobId, job] of this.jobs) {
       // Clean up old completed/failed jobs
-      if ((job.status === 'completed' || job.status === 'failed') && 
+      if ((job.status === 'completed' || job.status === 'failed') &&
           job.completedAt && job.completedAt < oneHourAgo) {
         jobsToDelete.push(jobId);
       }
-      
-      // Check for stuck running jobs (running for more than 2 hours)
-      if (job.status === 'running' && job.startedAt && job.startedAt < twoHoursAgo) {
+
+      // Check for stuck running jobs (configurable timeout)
+      if (job.status === 'running' && job.startedAt && job.startedAt < jobTimeoutAgo) {
         stuckJobs.push(jobId);
       }
     }
@@ -193,17 +212,18 @@ class JobQueue {
     jobsToDelete.forEach(jobId => this.jobs.delete(jobId));
     
     // Handle stuck jobs
+    const jobTimeoutHours = parseInt(process.env.JOB_TIMEOUT_HOURS) || 24;
     stuckJobs.forEach(async (jobId) => {
-      console.error(`Marking stuck job ${jobId} as failed (running for >2 hours)`);
-      await this.failJob(jobId, 'Job timeout - running for more than 2 hours');
+      console.error(`Marking stuck job ${jobId} as failed (running for >${jobTimeoutHours} hours)`);
+      await this.failJob(jobId, `Job timeout - running for more than ${jobTimeoutHours} hours`);
     });
-    
+
     if (jobsToDelete.length > 0) {
       console.log(`Cleaned up ${jobsToDelete.length} old jobs`);
     }
-    
+
     if (stuckJobs.length > 0) {
-      console.log(`Failed ${stuckJobs.length} stuck jobs due to timeout`);
+      console.log(`Failed ${stuckJobs.length} stuck jobs due to timeout (${jobTimeoutHours}h limit)`);
     }
   }
 
@@ -262,9 +282,15 @@ class JobQueue {
 // Create singleton instance
 const jobQueue = new JobQueue();
 
-// Clean up old jobs every 30 minutes
+// Clean up old jobs at configurable interval (default: 150 minutes = 2.5 hours)
+const cleanupIntervalMinutes = parseInt(process.env.JOB_CLEANUP_INTERVAL_MINUTES) || 150;
 setInterval(() => {
+  console.log(`⏰ Running job queue cleanup (interval: ${cleanupIntervalMinutes}min)...`);
   jobQueue.cleanup();
-}, 150 * 60 * 1000);
+}, cleanupIntervalMinutes * 60 * 1000);
+
+console.log(`✅ Job queue cleanup scheduled every ${cleanupIntervalMinutes} minutes`);
+console.log(`✅ Worker timeout: ${parseInt(process.env.WORKER_EXECUTION_TIMEOUT_HOURS) || 48} hours`);
+console.log(`✅ Job timeout: ${parseInt(process.env.JOB_TIMEOUT_HOURS) || 24} hours`);
 
 module.exports = jobQueue;

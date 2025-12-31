@@ -97,6 +97,14 @@ app.listen(port, async () => {
   } catch (error) {
     console.error('❌ Failed to initialize ABTasty Validation Service:', error.message);
   }
+
+  // Start job cleanup interval (every 30 minutes)
+  const cleanupIntervalMinutes = parseInt(process.env.JOB_CLEANUP_INTERVAL_MINUTES) || 30;
+  setInterval(() => {
+    console.log(`⏰ Running job queue cleanup (interval: ${cleanupIntervalMinutes}min)...`);
+    jobQueue.cleanup();
+  }, cleanupIntervalMinutes * 60 * 1000);
+  console.log(`✅ Job cleanup scheduled every ${cleanupIntervalMinutes} minutes`);
 });
 
 module.exports = app;
