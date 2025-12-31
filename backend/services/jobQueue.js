@@ -210,9 +210,8 @@ class JobQueue {
 
     // Clean up old jobs
     jobsToDelete.forEach(jobId => this.jobs.delete(jobId));
-    
-    // Handle stuck jobs
-    const jobTimeoutHours = parseInt(process.env.JOB_TIMEOUT_HOURS) || 24;
+
+    // Handle stuck jobs (jobTimeoutHours already declared above at line 191)
     stuckJobs.forEach(async (jobId) => {
       console.error(`Marking stuck job ${jobId} as failed (running for >${jobTimeoutHours} hours)`);
       await this.failJob(jobId, `Job timeout - running for more than ${jobTimeoutHours} hours`);
