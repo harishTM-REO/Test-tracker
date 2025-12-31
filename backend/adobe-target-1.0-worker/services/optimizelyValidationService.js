@@ -355,9 +355,9 @@ class OptimizelyValidationService {
       }
 
       // 3. CAPTCHA DETECTION
-      let captchaCheck = { detected: false };
+      let captchaDetected = false;
       try {
-          captchaCheck = await runWithTimeout(
+          captchaDetected = await runWithTimeout(
               () => detectCaptcha(page),
               5000,
               'detectCaptcha'
@@ -369,7 +369,8 @@ class OptimizelyValidationService {
           }
       }
 
-      if (captchaCheck?.detected) {
+      // FIX: detectCaptcha returns boolean, not object with .detected property
+      if (captchaDetected) {
          console.log(`   🚫 Captcha detected on ${url}`);
          result.status = 'failed';
          result.error = 'Captcha detected';

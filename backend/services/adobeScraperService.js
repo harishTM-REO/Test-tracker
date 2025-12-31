@@ -157,16 +157,16 @@ class AdobeScraperService {
           /* ======================================================
            * 4. CAPTCHA DETECTION
            * ====================================================== */
-          let captchaCheck = { detected: false };
+          let captchaDetected = false;
           try {
-            captchaCheck = await runWithTimeout(
+            captchaDetected = await runWithTimeout(
               () => detectCaptcha(sharedPage),
               5000,
               'detectCaptcha'
             );
           } catch (e) {
             console.warn(`⚠️ Captcha detection warning: ${e.message}`);
-      
+
             if (
               e.message.includes('Target closed') ||
               e.message.includes('Session closed')
@@ -174,13 +174,14 @@ class AdobeScraperService {
               throw e;
             }
           }
-      
-          if (captchaCheck?.detected) {
+
+          // FIX: detectCaptcha returns boolean, not object with .detected property
+          if (captchaDetected) {
             console.log(`🚫 Captcha detected on ${url}`);
             return {
               detected: false,
               captchaDetected: true,
-              captchaStatus: captchaCheck.reason,
+              captchaStatus: 'Captcha detected',
               httpStatusCode: null,
               detectionSource: { captchaBlocked: true }
             };
