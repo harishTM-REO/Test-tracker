@@ -185,16 +185,6 @@ app.listen(port, async () => {
     );
     // Don't crash the server, but log the error
   }
-
-  // Start periodic cleanup for stuck scraping jobs
-  // ❌ DISABLED - Background cleanup interval has been disabled
-  // setInterval(async () => {
-  //   try {
-  //     await BackgroundScrapingService.checkPendingJobs();
-  //   } catch (error) {
-  //     console.error('Error in periodic scraping cleanup:', error);
-  //   }
-  // }, 10 * 60 * 1000); // Check every 10 minutes
 });
 
 app.get("/getWebsites", async (req, res) => {
