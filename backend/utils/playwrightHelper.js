@@ -36,6 +36,16 @@ async function createPage(browser, maxAttempts = 2) {
     } catch (error) {
       console.log(`[createPage] attempt ${attempt} failed: ${error.message}`);
 
+      // ✅ FIX: If browser is dead/crashed, fail immediately without retry
+      const isBrowserDead = error.message?.includes('Target page, context or browser has been closed') ||
+                           error.message?.includes('Browser has been closed') ||
+                           error.message?.includes('Session closed');
+
+      if (isBrowserDead) {
+        console.error(`[createPage] ❌ Browser is dead/crashed - cannot recover`);
+        throw new Error(`BROWSER_DEAD: ${error.message}`);
+      }
+
       if (attempt < maxAttempts) {
         console.log(`[createPage] timeout -> retrying after 500ms`);
         await new Promise(resolve => setTimeout(resolve, 500));

@@ -155,8 +155,355 @@ class AdobeTarget1_0Service {
         }
     }
 
-    // ... [performScraping, performReScraping, prioritizeUrl, categorizeUrls, scrapeTop25Urls methods remain unchanged] ...
-    // Note: Ensure sanitizeWorkflowResult is used correctly where needed.
+    /**
+     * Main Adobe Target 1.0 scraping workflow
+     * Processes URLs through: Prioritization → Categorization → Top 25 Scraping
+     */
+    async performScraping(jobData, progressCallback) {
+        const { datasetId, datasetName, urls, options = {} } = jobData;
+
+        try {
+            console.log(`\n🎯 Starting Adobe Target 1.0 workflow for: ${datasetName}`);
+            console.log(`📊 Processing ${urls.length} URLs from dataset\n`);
+
+            const startTime = new Date();
+
+            // Create result document
+            let result = await AdobeTarget1_0Result.create({
+                datasetId: datasetId,
+                datasetName: datasetName,
+                originalUrlsCount: urls.length,
+                startedAt: startTime,
+                status: 'in_progress',
+                batchNumber: options.batchNumber || 1,
+                totalBatches: options.totalBatches || 1,
+                overallStats: {
+                    totalOriginalUrls: urls.length,
+                    successfulPrioritizations: 0,
+                    failedPrioritizations: 0,
+                    successfulCategorizations: 0,
+                    failedCategorizations: 0,
+                    totalTop25UrlsProcessed: 0,
+                    totalTop25UrlsSuccessful: 0,
+                    totalTop25UrlsFailed: 0,
+                    adobeTargetDetectedCount: 0,
+                    totalExperimentsFound: 0
+                },
+                urlWorkflowResults: []
+            });
+
+            progressCallback(5, { message: 'Starting workflow for each URL' });
+
+            // Process each URL sequentially
+            for (let i = 0; i < urls.length; i++) {
+                const originalUrl = urls[i];
+                const progress = 5 + Math.floor((i / urls.length) * 85);
+
+                console.log(`\n📍 Processing URL ${i + 1}/${urls.length}: ${originalUrl}`);
+                progressCallback(progress, {
+                    message: `Processing URL ${i + 1}/${urls.length}`,
+                    currentUrl: originalUrl
+                });
+
+                try {
+                    // Step 1: Prioritize URL
+                    console.log(`  ➤ Step 1: Prioritizing URL...`);
+                    const prioritizationResult = await this.prioritizeUrl(originalUrl);
+
+                    // Step 2: Categorize URLs
+                    console.log(`  ➤ Step 2: Categorizing prioritized URLs...`);
+                    const categorizationResult = await this.categorizeUrls(prioritizationResult);
+
+                    // Step 3: Scrape Adobe Target from top 25
+                    console.log(`  ➤ Step 3: Scraping Adobe Target from top 25 URLs...`);
+                    const scrapingResults = await this.scrapeTop25Urls(categorizationResult, options);
+
+                    // Create workflow result entry
+                    const workflowResult = {
+                        originalUrl: originalUrl,
+                        prioritizationResult: prioritizationResult,
+                        categorizationResult: categorizationResult,
+                        topUrlsScrapingResults: scrapingResults.results,
+                        summary: scrapingResults.summary,
+                        status: 'completed',
+                        completedAt: new Date()
+                    };
+
+                    // Update overall stats
+                    result.overallStats.successfulPrioritizations += prioritizationResult.prioritizationSuccess ? 1 : 0;
+                    result.overallStats.failedPrioritizations += prioritizationResult.prioritizationSuccess ? 0 : 1;
+                    result.overallStats.successfulCategorizations += categorizationResult.categorizationSuccess ? 1 : 0;
+                    result.overallStats.failedCategorizations += categorizationResult.categorizationSuccess ? 0 : 1;
+                    result.overallStats.totalTop25UrlsProcessed += scrapingResults.summary.totalTop25Urls;
+                    result.overallStats.totalTop25UrlsSuccessful += scrapingResults.summary.successfulScrapedUrls;
+                    result.overallStats.totalTop25UrlsFailed += scrapingResults.summary.failedScrapedUrls;
+                    result.overallStats.adobeTargetDetectedCount += scrapingResults.summary.adobeTargetDetectedInTop25;
+                    result.overallStats.totalExperimentsFound += scrapingResults.summary.totalExperimentsInTop25;
+
+                    result.urlWorkflowResults.push(workflowResult);
+
+                    console.log(`  ✅ URL ${i + 1} completed: ${scrapingResults.summary.successfulScrapedUrls}/${scrapingResults.summary.totalTop25Urls} top URLs scraped successfully`);
+
+                } catch (error) {
+                    console.error(`  ❌ Error processing URL ${i + 1}: ${error.message}`);
+
+                    // Create failure workflow result entry
+                    const failureResult = {
+                        originalUrl: originalUrl,
+                        status: 'failed',
+                        error: error.message,
+                        completedAt: new Date()
+                    };
+
+                    result.overallStats.failedPrioritizations += 1;
+                    result.urlWorkflowResults.push(failureResult);
+
+                    // Continue with next URL even if this one fails
+                    continue;
+                }
+            }
+
+            // Calculate duration
+            const endTime = new Date();
+            const durationMs = endTime - startTime;
+            const durationMinutes = Math.floor(durationMs / 60000);
+            const durationSeconds = Math.floor((durationMs % 60000) / 1000);
+            result.duration = `${durationMinutes}m ${durationSeconds}s`;
+            result.completedAt = endTime;
+            result.status = 'completed';
+
+            // Save final result
+            await result.save();
+
+            console.log(`\n${'='.repeat(60)}`);
+            console.log(`📊 Adobe Target 1.0 Workflow Completed`);
+            console.log(`${'='.repeat(60)}`);
+            console.log(`✅ Duration: ${result.duration}`);
+            console.log(`✅ Original URLs: ${result.originalUrlsCount}`);
+            console.log(`✅ Successful Prioritizations: ${result.overallStats.successfulPrioritizations}`);
+            console.log(`✅ Successful Categorizations: ${result.overallStats.successfulCategorizations}`);
+            console.log(`✅ Total Top 25 URLs Processed: ${result.overallStats.totalTop25UrlsProcessed}`);
+            console.log(`✅ Adobe Target Detected: ${result.overallStats.adobeTargetDetectedCount}`);
+            console.log(`✅ Total Experiments Found: ${result.overallStats.totalExperimentsFound}`);
+            console.log(`${'='.repeat(60)}\n`);
+
+            progressCallback(100, { message: 'Workflow completed successfully' });
+
+            return {
+                success: true,
+                message: 'Adobe Target 1.0 workflow completed',
+                resultId: result._id,
+                summary: result.getSummary()
+            };
+
+        } catch (error) {
+            console.error(`❌ Error in AT 1.0 workflow:`, error);
+
+            // Mark dataset as failed
+            try {
+                const dataset = await Dataset.findById(datasetId);
+                if (dataset) {
+                    await dataset.failScraping(error.message);
+                }
+            } catch (updateError) {
+                console.error('Error updating dataset status:', updateError.message);
+            }
+
+            throw error;
+        }
+    }
+
+    /**
+     * Re-scraping workflow - scrapes experiments from existing top 25 URLs
+     */
+    async performReScraping(jobData, progressCallback) {
+        // TODO: Implement re-scraping logic
+        throw new Error('Re-scraping not yet implemented');
+    }
+
+    /**
+     * Step 1: Prioritize a single URL
+     */
+    async prioritizeUrl(url) {
+        try {
+            console.log(`    🔗 Sending to prioritization endpoint: ${url}`);
+
+            const response = await axios.post(
+                `${this.urlCollectorBaseUrl}/live-crawl-and-prioritize`,
+                { url: url, timeout: 60000 },
+                { timeout: 120000 }
+            );
+
+            if (response.data.success) {
+                console.log(`    ✅ Prioritization success: ${response.data.totalPrioritized} URLs prioritized from ${response.data.totalUrlsCollected} collected`);
+                return {
+                    originalUrl: url,
+                    totalUrlsCollected: response.data.totalUrlsCollected,
+                    totalPrioritized: response.data.totalPrioritized,
+                    prioritizedUrls: response.data.prioritizedUrls,
+                    prioritizationSuccess: true,
+                    prioritizedAt: new Date(),
+                    metadata: response.data.metadata
+                };
+            } else {
+                throw new Error(response.data.message || 'Prioritization failed');
+            }
+
+        } catch (error) {
+            console.error(`    ❌ Prioritization failed for ${url}:`, error.message);
+            return {
+                originalUrl: url,
+                prioritizationSuccess: false,
+                prioritizationError: error.message,
+                prioritizedAt: new Date()
+            };
+        }
+    }
+
+    /**
+     * Step 2: Categorize the prioritized URLs and get top 25
+     */
+    async categorizeUrls(prioritizationResult) {
+        try {
+            if (!prioritizationResult.prioritizationSuccess) {
+                return {
+                    originalUrl: prioritizationResult.originalUrl,
+                    categorizationSuccess: false,
+                    categorizationError: 'Prioritization failed, skipping categorization'
+                };
+            }
+
+            console.log(`    🔗 Sending to categorization endpoint...`);
+
+            const response = await axios.post(
+                `${this.urlCollectorBaseUrl}/categorize-urls-dynamic`,
+                { prioritizedUrls: prioritizationResult.prioritizedUrls },
+                { timeout: 120000 }
+            );
+
+            if (response.data.success) {
+                const top25 = response.data.data?.prioritizedTop25 || [];
+                console.log(`    ✅ Categorization success: ${top25.length} URLs in top 25`);
+
+                return {
+                    originalUrl: prioritizationResult.originalUrl,
+                    categorizationSuccess: true,
+                    totalCategories: response.data.data?.categories?.length || 0,
+                    categories: response.data.data?.categories || [],
+                    prioritizedTop25: top25,
+                    detectedDomainType: response.data.data?.summary?.detectedDomainType,
+                    categorizedAt: new Date(),
+                    metadata: response.data.metadata
+                };
+            } else {
+                throw new Error(response.data.message || 'Categorization failed');
+            }
+
+        } catch (error) {
+            console.error(`    ❌ Categorization failed:`, error.message);
+            return {
+                originalUrl: prioritizationResult.originalUrl,
+                categorizationSuccess: false,
+                categorizationError: error.message,
+                categorizedAt: new Date()
+            };
+        }
+    }
+
+    /**
+     * Step 3: Scrape Adobe Target from top 25 URLs with concurrency control
+     */
+    async scrapeTop25Urls(categorizationResult, options = {}) {
+        const concurrency = options.concurrency || 4; // 4 concurrent URLs
+        const results = [];
+        let summary = {
+            totalTop25Urls: 0,
+            successfulScrapedUrls: 0,
+            failedScrapedUrls: 0,
+            adobeTargetDetectedInTop25: 0,
+            totalExperimentsInTop25: 0
+        };
+
+        try {
+            if (!categorizationResult.categorizationSuccess) {
+                console.log(`    ❌ Categorization failed, skipping scraping`);
+                return { results, summary };
+            }
+
+            const top25Urls = categorizationResult.prioritizedTop25 || [];
+            summary.totalTop25Urls = top25Urls.length;
+
+            if (top25Urls.length === 0) {
+                console.log(`    ⚠️  No top 25 URLs to scrape`);
+                return { results, summary };
+            }
+
+            console.log(`    🚀 Scraping Adobe Target from ${top25Urls.length} URLs (${concurrency} concurrent)...`);
+
+            // Process URLs with concurrency control
+            for (let i = 0; i < top25Urls.length; i += concurrency) {
+                const batch = top25Urls.slice(i, i + concurrency);
+                console.log(`    📍 Scraping batch ${Math.floor(i / concurrency) + 1}/${Math.ceil(top25Urls.length / concurrency)}: URLs ${i + 1}-${Math.min(i + concurrency, top25Urls.length)}`);
+
+                const batchPromises = batch.map(urlItem =>
+                    AdobeScraperService.scrapeAdobeTargetExperiments(urlItem.url)
+                        .then(scrapingResult => ({
+                            url: urlItem.url,
+                            category: urlItem.category,
+                            priority: urlItem.priority,
+                            success: true,
+                            adobeTargetDetected: scrapingResult.success && scrapingResult.data?.adobeTarget?.detected,
+                            experimentCount: scrapingResult.data?.adobeTarget?.experimentCount || 0,
+                            experiments: scrapingResult.data?.adobeTarget?.experiments || [],
+                            version: scrapingResult.data?.adobeTarget?.version,
+                            activityNames: scrapingResult.data?.adobeTarget?.activityNames || [],
+                            activityIds: scrapingResult.data?.adobeTarget?.activityIds || [],
+                            mboxData: scrapingResult.data?.adobeTarget?.mboxData,
+                            scrapedAt: new Date()
+                        }))
+                        .catch(error => ({
+                            url: urlItem.url,
+                            category: urlItem.category,
+                            priority: urlItem.priority,
+                            success: false,
+                            adobeTargetDetected: false,
+                            error: error.message,
+                            scrapedAt: new Date()
+                        }))
+                );
+
+                const batchResults = await Promise.all(batchPromises);
+                results.push(...batchResults);
+
+                // Update summary
+                batchResults.forEach(result => {
+                    if (result.success) {
+                        summary.successfulScrapedUrls += 1;
+                        if (result.adobeTargetDetected) {
+                            summary.adobeTargetDetectedInTop25 += 1;
+                            summary.totalExperimentsInTop25 += result.experimentCount;
+                        }
+                    } else {
+                        summary.failedScrapedUrls += 1;
+                    }
+                });
+
+                // Delay between batches for resource recovery
+                if (i + concurrency < top25Urls.length) {
+                    const delayMs = 2000;
+                    console.log(`    ⏱️  Waiting ${delayMs}ms between batches...`);
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                }
+            }
+
+            console.log(`    ✅ Scraping complete: ${summary.successfulScrapedUrls}/${summary.totalTop25Urls} URLs succeeded`);
+
+        } catch (error) {
+            console.error(`    ❌ Error during scraping:`, error.message);
+        }
+
+        return { results, summary };
+    }
 
     // --------------------------------------------------------------------------
     // ✅ VALIDATION WORKFLOW UPDATE

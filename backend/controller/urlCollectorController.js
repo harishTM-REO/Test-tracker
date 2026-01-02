@@ -796,9 +796,24 @@ async function liveCrawl(req, res) {
         let { url, timeout } = req.body;
         console.log(`🎯 Received live crawl request for: ${url}`);
 
-        // ... [Keep Validation Logic] ...
+        // Validate URL parameter
+        if (!url) {
+            return res.status(400).json({
+                success: false,
+                message: 'URL parameter is required',
+                example: '{ "url": "https://example.com/", "timeout": 60000 }'
+            });
+        }
+
+        // Normalize and validate URL format
         const normalizedUrl = normalizeUrl(url);
-        // ... [Keep Validation Logic] ...
+        if (!normalizedUrl) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid URL format. Provide URL in format: example.com, www.example.com, or https://example.com',
+                provided: url
+            });
+        }
         url = normalizedUrl;
 
         const pageTimeout = parseInt(timeout) || 60000;
@@ -806,25 +821,34 @@ async function liveCrawl(req, res) {
 
         console.log(`🎭 Launching Puppeteer browser for ${url}...`);
 
-        // ✅ CHANGE 1: Use your Puppeteer Helper
-        const { launchBrowser } = require('../services/browserService'); // Use browser service selector
-        browser = await launchBrowser();
+        // Use browser service
+        const browserService = require('../services/browserService');
+        browser = await browserService.launchBrowser();
 
         console.log(`✅ Browser launched`);
 
         const page = await browser.newPage();
-        // ✅ CHANGE 2: Set Viewport
-        await page.setViewport({ width: 1366, height: 768 });
+
+        // Set viewport - compatible with both Puppeteer and Playwright
+        if (typeof page.setViewport === 'function') {
+            await page.setViewport({ width: 1366, height: 768 });
+        } else if (typeof page.setViewportSize === 'function') {
+            await page.setViewportSize({ width: 1366, height: 768 });
+        }
 
         console.log(`📄 New page created, navigating to ${url}...`);
 
-        // ✅ CHANGE 3: Navigation Strategy
+        // Navigation - compatible with both Puppeteer and Playwright
         try {
             await page.goto(url, { waitUntil: 'networkidle2', timeout: pageTimeout });
             console.log(`✅ Page loaded successfully with networkidle2`);
         } catch (error) {
             console.log(`⚠️ Networkidle timeout, falling back to domcontentloaded: ${error.message}`);
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: pageTimeout });
+            try {
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: pageTimeout });
+            } catch (error2) {
+                await page.goto(url, { waitUntil: 'load', timeout: pageTimeout });
+            }
         }
 
         console.log(`⏳ Waiting for JavaScript execution...`);
@@ -871,9 +895,21 @@ async function liveCrawl(req, res) {
         });
 
     } catch (error) {
-        console.error('Error in liveCrawl controller:', error);
-        if (browser) await browser.close();
-        res.status(500).json({ success: false, message: 'Live crawl failed', error: error.message });
+        console.error('❌ Error in liveCrawl controller:', error);
+        console.error('Error stack:', error.stack);
+        if (browser) {
+            try {
+                await browser.close();
+            } catch (closeError) {
+                console.error('Error closing browser:', closeError.message);
+            }
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Live crawl failed',
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
     }
 }
 
@@ -1064,9 +1100,24 @@ async function liveCrawlAndPrioritize(req, res) {
         let { url, timeout } = req.body;
         console.log(`🎯 Received live crawl + prioritize request for: ${url}`);
 
-        // ... [Keep Validation Logic] ...
+        // Validate URL parameter
+        if (!url) {
+            return res.status(400).json({
+                success: false,
+                message: 'URL parameter is required',
+                example: '{ "url": "https://example.com/", "timeout": 30000 }'
+            });
+        }
+
+        // Normalize and validate URL format
         const normalizedUrl = normalizeUrl(url);
-        // ... [Keep Validation Logic] ...
+        if (!normalizedUrl) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid URL format. Provide URL in format: example.com, www.example.com, or https://example.com',
+                provided: url
+            });
+        }
         url = normalizedUrl;
 
         const pageTimeout = parseInt(timeout) || 60000;
@@ -1074,22 +1125,50 @@ async function liveCrawlAndPrioritize(req, res) {
 
         console.log(`🎭 Launching Puppeteer browser for ${url}...`);
 
-        // ✅ CHANGE 1: Import Helper
-        const { launchBrowser } = require('../services/browserService'); 
+        // Import services
+        const browserService = require('../services/browserService');
         const urlPrioritizationService = require('../services/urlPrioritizationService');
+        console.log('✅ Services imported');
 
-        // ✅ CHANGE 2: Launch
-        browser = await launchBrowser(); 
+        // Launch browser
+        console.log('⏳ Calling launchBrowser()...');
+        browser = await browserService.launchBrowser();
+        console.log('✅ Browser launched successfully');
 
+        console.log('⏳ Creating new page...');
         const page = await browser.newPage();
-        await page.setViewport({ width: 1366, height: 768 });
+        console.log('✅ Page created, type:', typeof page);
+        console.log('   Page methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(page)).slice(0, 10));
 
-        // ✅ CHANGE 3: Navigation
+        console.log('⏳ Setting viewport...');
+        // Check if it's Puppeteer or Playwright
+        if (typeof page.setViewport === 'function') {
+            // Puppeteer
+            await page.setViewport({ width: 1366, height: 768 });
+        } else if (typeof page.setViewportSize === 'function') {
+            // Playwright
+            await page.setViewportSize({ width: 1366, height: 768 });
+        } else {
+            console.warn('⚠️ Unknown page type, skipping viewport setting');
+        }
+        console.log('✅ Viewport set');
+
+        // Navigation - compatible with both Puppeteer and Playwright
+        console.log(`⏳ Navigating to ${url}...`);
         try {
+            // Try Puppeteer-style navigation first
             await page.goto(url, { waitUntil: 'networkidle2', timeout: pageTimeout });
+            console.log('✅ Page loaded with networkidle2');
         } catch (error) {
-            console.log(`⚠️ Networkidle timeout, falling back...`);
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: pageTimeout });
+            console.log(`⚠️ Networkidle timeout, falling back to domcontentloaded...`);
+            try {
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: pageTimeout });
+                console.log('✅ Page loaded with domcontentloaded');
+            } catch (error2) {
+                console.log(`⚠️ Trying Playwright-style navigation...`);
+                await page.goto(url, { waitUntil: 'load', timeout: pageTimeout });
+                console.log('✅ Page loaded with load event');
+            }
         }
 
         await new Promise(r => setTimeout(r, 2000));
@@ -1154,9 +1233,21 @@ async function liveCrawlAndPrioritize(req, res) {
         });
 
     } catch (error) {
-        console.error('Error in liveCrawlAndPrioritize:', error);
-        if (browser) await browser.close();
-        res.status(500).json({ success: false, message: 'Failed', error: error.message });
+        console.error('❌ Error in liveCrawlAndPrioritize:', error);
+        console.error('Error stack:', error.stack);
+        if (browser) {
+            try {
+                await browser.close();
+            } catch (closeError) {
+                console.error('Error closing browser:', closeError.message);
+            }
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Live crawl and prioritization failed',
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
     }
 }
 

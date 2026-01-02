@@ -1430,10 +1430,24 @@ URLDynamicCategorizationService.prototype.categorizeDynamically = function (prio
     const allUrls = this.extractAllUrls(prioritizedUrls || []);
 
     // Filter out technical / irrelevant paths (API, static, assets, etc.)
+    // Also filter out document files (PDFs, DOCs, etc.)
+    const documentExtensions = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar|7z|tar|gz|xml|json)$/i;
     const cleaned = allUrls.filter(u => {
         try {
             const path = this.normalizePath(u);
-            return !this.getTechnicalPatterns().some(pattern => pattern.test(path));
+
+            // Filter out technical patterns
+            if (this.getTechnicalPatterns().some(pattern => pattern.test(path))) {
+                return false;
+            }
+
+            // Filter out document files
+            if (documentExtensions.test(u)) {
+                console.log(`🗑️  Filtered out document file (dynamic): ${u}`);
+                return false;
+            }
+
+            return true;
         } catch {
             return false;
         }

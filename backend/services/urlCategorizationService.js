@@ -1622,16 +1622,34 @@ class UrlCategorizationService {
       }
     }
 
+    // Filter out document files (PDFs, DOCs, etc.) before returning results
+    // These files cannot be scraped for Adobe Target experiments
+    const totalBeforeFilter = results.length;
+    const filteredResults = results.filter(result => {
+      // Exclude document files (category: OTHER, subCategory: file_download)
+      if (result.category === this.categories.OTHER && result.subCategory === 'file_download') {
+        console.log(`🗑️  Filtered out document file: ${result.url}`);
+        return false;
+      }
+      return true;
+    });
+
+    const filteredCount = totalBeforeFilter - filteredResults.length;
+    if (filteredCount > 0) {
+      console.log(`\n📌 Filtered out ${filteredCount} document file(s) (PDFs, DOCs, etc.)`);
+    }
+
     // Generate summary statistics
-    const summary = this.generateSummary(results);
+    const summary = this.generateSummary(filteredResults);
 
     console.log(`✅ Batch categorization completed!`);
     console.log(`📊 Summary:`, summary);
 
     return {
-      results,
+      results: filteredResults,
       summary,
       totalUrls: urls.length,
+      totalFiltered: filteredCount,
       timestamp: new Date().toISOString()
     };
   }
@@ -1998,13 +2016,32 @@ Always focus on pages in the critical user conversion funnel. Categorize each UR
 
       console.log(`📊 Transformed ${results.length} URLs from OpenAI response`);
 
+      // Filter out document files (PDFs, DOCs, etc.) before returning results
+      const totalBeforeFilter = results.length;
+      const filteredResults = results.filter(result => {
+        // Check if the URL ends with document extensions
+        const url = result.url || '';
+        const documentExtensions = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar|7z|tar|gz|xml|json)$/i;
+        if (documentExtensions.test(url)) {
+          console.log(`🗑️  Filtered out document file from OpenAI results: ${url}`);
+          return false;
+        }
+        return true;
+      });
+
+      const filteredCount = totalBeforeFilter - filteredResults.length;
+      if (filteredCount > 0) {
+        console.log(`\n📌 Filtered out ${filteredCount} document file(s) from OpenAI results`);
+      }
+
       // Generate summary
-      const summary = this.generateSummary(results);
+      const summary = this.generateSummary(filteredResults);
 
       return {
-        results: results,
+        results: filteredResults,
         summary: summary,
         totalUrls: results.length,
+        totalFiltered: filteredCount,
         timestamp: new Date().toISOString(),
         openAIFallback: true,
         domainType: openaiResult.domain_type || openaiResult.site_type || 'unknown'

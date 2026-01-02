@@ -207,6 +207,38 @@ class PlaywrightPoolService {
 
     if (this.availableBrowsers.length > 0) {
       const browser = this.availableBrowsers.shift();
+
+      // ✅ FIX: Check if browser is still connected before using it
+      try {
+        if (!browser.isConnected || !browser.isConnected()) {
+          console.warn('⚠️ Dead browser detected in pool, replacing...');
+          // Remove from pool and launch a new one
+          const browserIndex = this.browsers.indexOf(browser);
+          if (browserIndex !== -1) {
+            this.browsers[browserIndex] = await this.launchBrowser();
+            const newBrowser = this.browsers[browserIndex];
+            this.pageCountPerBrowser.set(newBrowser, 0);
+            this.busyBrowsers.add(newBrowser);
+            this.stats.totalBrowserRestarts = (this.stats.totalBrowserRestarts || 0) + 1;
+            return newBrowser;
+          }
+        }
+      } catch (checkError) {
+        console.warn('⚠️ Error checking browser health, replacing...', checkError.message);
+        const browserIndex = this.browsers.indexOf(browser);
+        if (browserIndex !== -1) {
+          try {
+            await browser.close().catch(() => {});
+          } catch {}
+          this.browsers[browserIndex] = await this.launchBrowser();
+          const newBrowser = this.browsers[browserIndex];
+          this.pageCountPerBrowser.set(newBrowser, 0);
+          this.busyBrowsers.add(newBrowser);
+          this.stats.totalBrowserRestarts = (this.stats.totalBrowserRestarts || 0) + 1;
+          return newBrowser;
+        }
+      }
+
       this.busyBrowsers.add(browser);
       return browser;
     }
