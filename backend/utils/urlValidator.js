@@ -1,3 +1,41 @@
+
+const axios = require('axios');
+
+async function isUrlReachable(url) {
+    try {
+        const response = await axios.head(url, {
+            timeout: 5000,
+            maxRedirects: 3,
+            validateStatus: () => true // handle manually
+        });
+
+        // Treat 2xx, 3xx, and 403 as reachable
+        if ([200, 301, 302, 403].includes(response.status)) {
+            return true;
+        }
+
+        return false;
+
+    } catch (headError) {
+        // Fallback to lightweight GET
+        try {
+            const response = await axios.get(url, {
+                timeout: 5000,
+                maxRedirects: 3,
+                headers: {
+                    Range: 'bytes=0-0' // fetch minimal content
+                },
+                validateStatus: () => true
+            });
+
+            return [200, 301, 302, 403].includes(response.status);
+
+        } catch (getError) {
+            return false;
+        }
+    }
+}
+
 /**
  * URL Validation and Sanitization Utilities
  * Shared across all controllers to avoid code duplication
@@ -155,32 +193,41 @@ function validateAndSanitize(url) {
  * @returns {Promise<boolean>} True if URL is reachable, false otherwise
  */
 async function isUrlReachable(url) {
-  try {
-    const axios = require('axios');
-
-    // Quick HEAD request with short timeout
-    const response = await axios.head(url, {
-      timeout: 5000, // 5 second timeout for quick fail
-      maxRedirects: 3,
-      validateStatus: (status) => status < 500 // Accept any status < 500
-    });
-
-    return response.status < 400; // 2xx and 3xx are good
-  } catch (error) {
-    // If HEAD fails, try GET with just head
     try {
-      const axios = require('axios');
-      const response = await axios.get(url, {
-        timeout: 5000,
-        maxRedirects: 3,
-        maxContentLength: 1024, // Only fetch 1KB to check if reachable
-        validateStatus: (status) => status < 500
-      });
-      return response.status < 400;
-    } catch (getError) {
-      return false;
+
+        console.log('the status code -> 1')
+        const response = await axios.head(url, {
+            timeout: 5000,
+            maxRedirects: 3,
+            validateStatus: () => true // handle manually
+        });
+        console.log('the status code -> ', response)
+        // Treat 2xx, 3xx, and 403 as reachable
+        if ([200, 301, 302, 403].includes(response.status)) {
+            return true;
+        }
+
+        return false;
+
+    } catch (headError) {
+        // Fallback to lightweight GET
+        try {
+            const response = await axios.get(url, {
+                timeout: 5000,
+                maxRedirects: 3,
+                headers: {
+                    Range: 'bytes=0-0' // fetch minimal content
+                },
+                validateStatus: () => true
+            });
+
+            console.log('the status catch code -> ', response.status)
+            return [200, 301, 302, 403].includes(response.status);
+
+        } catch (getError) {
+            return false;
+        }
     }
-  }
 }
 
 module.exports = {

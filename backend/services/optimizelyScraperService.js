@@ -156,8 +156,9 @@ class OptimizelyScraperService {
       // Quick reachability check before attempting to scrape
       console.log(`⏱️  Checking if URL is reachable...`);
       const isReachable = await isUrlReachable(url);
-      if (!isReachable) {
-        console.warn(`⚠️  URL is not reachable: ${url}`);
+      console.log('is url reachable ? => ', isReachable)
+        if (!isReachable) {
+        console.warn(`⚠️  URL is not reachable 1: ${url}`);
         return {
           success: false,
           error: 'URL is not reachable',
@@ -316,19 +317,39 @@ class OptimizelyScraperService {
         )
       ]);
 
-      // Set smaller viewport as in your working code
-      await page.setViewport({ width: 1080, height: 1024 });
+      // Set smaller viewport (compatible with both Puppeteer and Playwright)
+      const viewportConfig = { width: 1080, height: 1024 };
+      if (typeof page.setViewportSize === 'function') {
+        // Playwright
+        await page.setViewportSize(viewportConfig);
+      } else if (typeof page.setViewport === 'function') {
+        // Puppeteer
+        await page.setViewport(viewportConfig);
+      }
 
-      // Your optimized request interception
-      await page.setRequestInterception(true);
-      page.on('request', (req) => {
-        const resourceType = req.resourceType();
-        if (['image', 'stylesheet', 'font'].includes(resourceType)) {
-          req.abort();
-        } else {
-          req.continue();
-        }
-      });
+      // Request interception (compatible with both Puppeteer and Playwright)
+      if (typeof page.route === 'function') {
+        // Playwright
+        await page.route('**/*', (route) => {
+          const resourceType = route.request().resourceType();
+          if (['image', 'stylesheet', 'font'].includes(resourceType)) {
+            route.abort();
+          } else {
+            route.continue();
+          }
+        });
+      } else if (typeof page.setRequestInterception === 'function') {
+        // Puppeteer
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+          const resourceType = req.resourceType();
+          if (['image', 'stylesheet', 'font'].includes(resourceType)) {
+            req.abort();
+          } else {
+            req.continue();
+          }
+        });
+      }
 
       console.log('Page configured successfully');
       return page;
@@ -1116,6 +1137,7 @@ class OptimizelyScraperService {
       // Create and configure page
       try {
         page = await this.createPage(browser);
+
         // CRITICAL: Increment page count for resource tracking
         // This helps detect when browser memory accumulation requires restart
         if (shouldReleaseBrowser) {
@@ -2900,15 +2922,32 @@ class OptimizelyScraperService {
       console.log(`📊 [2/7] Browser acquired, creating new page...`);
       page = await browser.newPage();
 
-      // Set realistic user agent
+      // Set realistic user agent (compatible with both Puppeteer and Playwright)
       console.log(`📊 [3/7] Setting user agent and headers...`);
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-      await page.setViewport({ width: 1080, height: 1024 });
-      await page.setExtraHTTPHeaders({
+      const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+      if (typeof page.setUserAgent === 'function') {
+        await page.setUserAgent(userAgent);
+      }
+
+      // Set viewport (compatible with both Puppeteer and Playwright)
+      const viewportConfig = { width: 1080, height: 1024 };
+      if (typeof page.setViewportSize === 'function') {
+        // Playwright
+        await page.setViewportSize(viewportConfig);
+      } else if (typeof page.setViewport === 'function') {
+        // Puppeteer
+        await page.setViewport(viewportConfig);
+      }
+
+      // Set extra headers (compatible with both Puppeteer and Playwright)
+      const headers = {
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Referer': 'https://www.google.com/'
-      });
+      };
+      if (typeof page.setExtraHTTPHeaders === 'function') {
+        await page.setExtraHTTPHeaders(headers);
+      }
 
       let httpStatusCode = null;
       let pageLoaded = false;

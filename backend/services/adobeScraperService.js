@@ -206,20 +206,34 @@ class AdobeScraperService {
            * ====================================================== */
           if (process.env.ENABLE_REQUEST_INTERCEPTION === 'true') {
             try {
-              await sharedPage.setRequestInterception(true);
-      
-              requestHandler = req => {
-                if (!req || req._interceptionHandled) return;
-      
-                const type = req.resourceType();
-                if (type === 'image' || type === 'font') {
-                  req.abort('blockedbyclient').catch(() => {});
-                } else {
-                  req.continue().catch(() => {});
-                }
-              };
-      
-              sharedPage.on('request', requestHandler);
+              // Request interception (compatible with both Puppeteer and Playwright)
+              if (typeof sharedPage.route === 'function') {
+                // Playwright
+                await sharedPage.route('**/*', (route) => {
+                  const type = route.request().resourceType();
+                  if (type === 'image' || type === 'font') {
+                    route.abort().catch(() => {});
+                  } else {
+                    route.continue().catch(() => {});
+                  }
+                });
+              } else if (typeof sharedPage.setRequestInterception === 'function') {
+                // Puppeteer
+                await sharedPage.setRequestInterception(true);
+
+                requestHandler = req => {
+                  if (!req || req._interceptionHandled) return;
+
+                  const type = req.resourceType();
+                  if (type === 'image' || type === 'font') {
+                    req.abort('blockedbyclient').catch(() => {});
+                  } else {
+                    req.continue().catch(() => {});
+                  }
+                };
+
+                sharedPage.on('request', requestHandler);
+              }
             } catch (e) {
               console.warn(`⚠️ Interception setup failed: ${e.message}`);
             }
@@ -300,7 +314,10 @@ class AdobeScraperService {
           if (requestHandler) {
             try {
               sharedPage.off('request', requestHandler);
-              await sharedPage.setRequestInterception(false).catch(() => {});
+              // Only disable request interception for Puppeteer
+              if (typeof sharedPage.setRequestInterception === 'function') {
+                await sharedPage.setRequestInterception(false).catch(() => {});
+              }
             } catch (_) {}
           }
         }

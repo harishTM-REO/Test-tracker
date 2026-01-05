@@ -270,8 +270,15 @@ class AbTastyScraperService {
         )
       ]);
 
-      // Set smaller viewport as in your working code
-      await page.setViewport({ width: 800, height: 600 });
+      // Set smaller viewport (compatible with both Puppeteer and Playwright)
+      const viewportConfig = { width: 800, height: 600 };
+      if (typeof page.setViewportSize === 'function') {
+        // Playwright
+        await page.setViewportSize(viewportConfig);
+      } else if (typeof page.setViewport === 'function') {
+        // Puppeteer
+        await page.setViewport(viewportConfig);
+      }
 
       // IMPORTANT: Keep JavaScript ENABLED but with strict request blocking
       // Many sites require minimal JS for data to appear
