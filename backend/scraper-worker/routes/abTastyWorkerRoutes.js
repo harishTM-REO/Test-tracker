@@ -20,7 +20,6 @@ router.get('/scrape', async (req, res) => {
 
     // Validate URL parameter
     if (!url) {
-      console.warn('[ABTasty] No URL parameter provided');
       return res.status(400).json({
         success: false,
         message: 'URL parameter is required',
