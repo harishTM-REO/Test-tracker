@@ -213,30 +213,38 @@ class AdobeScraperService {
           }
       
           /* ======================================================
-           * 6. OPTIONAL REQUEST INTERCEPTION (OFF BY DEFAULT)
+           * 6. REQUEST INTERCEPTION TO REDUCE MEMORY PRESSURE
            * ====================================================== */
-          if (process.env.ENABLE_REQUEST_INTERCEPTION === 'true') {
+          // Enable by default to prevent browser crashes from heavy resources
+          const enableInterception = process.env.ENABLE_REQUEST_INTERCEPTION !== 'false';
+
+          if (enableInterception) {
             try {
               // Request interception (compatible with both Puppeteer and Playwright)
               if (typeof sharedPage.route === 'function') {
-                // Playwright
+                // Playwright - Block unnecessary resources
                 await sharedPage.route('**/*', (route) => {
                   const type = route.request().resourceType();
-                  if (type === 'image' || type === 'font') {
+                  const blockedTypes = ['image', 'font', 'media', 'stylesheet'];
+
+                  if (blockedTypes.includes(type)) {
                     route.abort().catch(() => {});
                   } else {
                     route.continue().catch(() => {});
                   }
                 });
+                console.log('✅ Resource blocking enabled (Playwright): images, fonts, media, stylesheets');
               } else if (typeof sharedPage.setRequestInterception === 'function') {
-                // Puppeteer
+                // Puppeteer - Block unnecessary resources
                 await sharedPage.setRequestInterception(true);
 
                 requestHandler = req => {
                   if (!req || req._interceptionHandled) return;
 
                   const type = req.resourceType();
-                  if (type === 'image' || type === 'font') {
+                  const blockedTypes = ['image', 'font', 'media', 'stylesheet'];
+
+                  if (blockedTypes.includes(type)) {
                     req.abort('blockedbyclient').catch(() => {});
                   } else {
                     req.continue().catch(() => {});
@@ -244,6 +252,7 @@ class AdobeScraperService {
                 };
 
                 sharedPage.on('request', requestHandler);
+                console.log('✅ Resource blocking enabled (Puppeteer): images, fonts, media, stylesheets');
               }
             } catch (e) {
               console.warn(`⚠️ Interception setup failed: ${e.message}`);
@@ -522,10 +531,22 @@ class AdobeScraperService {
 
             } catch (error) {
                 // CRITICAL: Propagate ALL fatal browser/session errors up.
-                const browserSessionErrors = ['Connection closed', 'Target closed', 'Protocol error', 'Session closed', 'Browser has been closed', 'PAGE_CREATION_TIMEOUT', 'Navigation timeout'];
+                const browserSessionErrors = [
+                    'Connection closed',
+                    'Target closed',
+                    'Target crashed',
+                    'Protocol error',
+                    'Session closed',
+                    'Browser has been closed',
+                    'PAGE_CREATION_TIMEOUT',
+                    'Navigation timeout'
+                ];
                 const isBrowserSessionError = browserSessionErrors.some(msg => error.message.includes(msg));
-                
+
                 if (isBrowserSessionError) {
+                    console.error(`🔴 Browser session error detected: ${error.message}`);
+                    console.log('💡 Tip: This error often occurs due to memory pressure from heavy pages.');
+                    console.log('💡 Resource blocking is enabled by default to prevent this.');
                     throw error; // Propagate up to processBrowserBatchSequential -> browser cluster service
                 }
                 throw error; // Propagate non-fatal errors like network failures
@@ -653,27 +674,39 @@ class AdobeScraperService {
                 mboxPromise = setup.promise;
                 cleanup = setup.cleanup;
             }
-            const experimentData = await page.evaluate(() => {
-                return new Promise((resolve) => {
-                    const check = () => {
-                        try {
-                            if (window.adobe && window.adobe.target) {
-                                const version = parseInt(window.adobe.target.VERSION) || null;
-                                return { experiments: [], hasAdobeTarget: true, adobeTargetVersion: version, adobeTargetObject: {} };
-                            }
-                        } catch(e) {}
-                        return null;
-                    };
-                    const result = check();
-                    if (result) { resolve(result); return; }
-                    let attempts = 0;
-                    const interval = setInterval(() => {
-                        attempts++;
-                        const res = check();
-                        if (res) { clearInterval(interval); resolve(res); }
-                        else if (attempts > 10) { clearInterval(interval); resolve({ hasAdobeTarget: false, experiments: [], experimentCount: 0 }); }
-                    }, 200);
-                });
+
+            // Add timeout to page.evaluate to prevent hanging on crashed tabs
+            const evaluateTimeout = 10000; // 10 seconds
+            const experimentData = await Promise.race([
+                page.evaluate(() => {
+                    return new Promise((resolve) => {
+                        const check = () => {
+                            try {
+                                if (window.adobe && window.adobe.target) {
+                                    const version = parseInt(window.adobe.target.VERSION) || null;
+                                    return { experiments: [], hasAdobeTarget: true, adobeTargetVersion: version, adobeTargetObject: {} };
+                                }
+                            } catch(e) {}
+                            return null;
+                        };
+                        const result = check();
+                        if (result) { resolve(result); return; }
+                        let attempts = 0;
+                        const interval = setInterval(() => {
+                            attempts++;
+                            const res = check();
+                            if (res) { clearInterval(interval); resolve(res); }
+                            else if (attempts > 10) { clearInterval(interval); resolve({ hasAdobeTarget: false, experiments: [], experimentCount: 0 }); }
+                        }, 200);
+                    });
+                }),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Page evaluate timeout - browser may have crashed')), evaluateTimeout)
+                )
+            ]).catch(error => {
+                // If evaluate fails (e.g., browser crashed), return default data
+                console.warn(`⚠️ Page evaluate failed: ${error.message}`);
+                return { hasAdobeTarget: false, experiments: [], experimentCount: 0 };
             });
             if (mboxPromise) {
                 try {
