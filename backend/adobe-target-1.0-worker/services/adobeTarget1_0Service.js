@@ -1,4 +1,3 @@
-const axios = require('axios');
 const path = require('path');
 const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
 const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/AdobeTargetValidationResult'));
@@ -24,6 +23,7 @@ const {
     ensureDBConnection,
     monitorDBHealth
 } = require(path.join(__dirname, '../../services/utils/batchProcessingHelpers'));
+const { urlPrioritizationService, urlDynamicCategorizationService, normalizeUrl } = require('./urlProcessingService');
 
 // Lazy-load ESM-only p-queue
 const PQueue = require('p-queue');
@@ -81,8 +81,6 @@ try {
 
 class AdobeTarget1_0Service {
     constructor() {
-        this.backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
-        this.urlCollectorBaseUrl = `${this.backendUrl}/api/url-collector`;
     }
 
     async launchBrowser() {
@@ -342,33 +340,105 @@ class AdobeTarget1_0Service {
         throw new Error('Re-scraping not yet implemented');
     }
 
+    async _liveCrawl(url, timeout) {
+        let browser;
+        try {
+            const normalizedUrl = normalizeUrl(url);
+            if (!normalizedUrl) {
+                throw new Error(`Invalid URL for live crawl: ${url}`);
+            }
+
+            const pageTimeout = parseInt(timeout) || 60000;
+
+            browser = await this.launchBrowser();
+            const page = await browser.newPage();
+
+            if (typeof page.setViewport === 'function') {
+                await page.setViewport({ width: 1366, height: 768 });
+            }
+
+            try {
+                await page.goto(normalizedUrl, { waitUntil: 'networkidle2', timeout: pageTimeout });
+            } catch (error) {
+                console.log(`⚠️ Networkidle timeout for ${url}, falling back to domcontentloaded.`);
+                await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: pageTimeout });
+            }
+
+            await new Promise(r => setTimeout(r, 2000));
+
+            // Scroll the page
+            await page.evaluate(async () => {
+                await new Promise((resolve) => {
+                    let totalHeight = 0;
+                    const distance = 100;
+                    const timer = setInterval(() => {
+                        const scrollHeight = document.body.scrollHeight;
+                        window.scrollBy(0, distance);
+                        totalHeight += distance;
+                        if (totalHeight >= scrollHeight) {
+                            clearInterval(timer);
+                            resolve();
+                        }
+                    }, 100);
+                });
+            });
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            const urls = await page.evaluate(() => {
+                const links = new Set();
+                const anchors = document.querySelectorAll('a[href]');
+                const origin = window.location.origin;
+
+                anchors.forEach(anchor => {
+                    let href = anchor.getAttribute('href');
+                    if (!href || href.trim() === '' || href.startsWith('#') || href.startsWith('javascript:')) return;
+
+                    try {
+                        const absoluteUrl = new URL(href, origin).href;
+                        links.add(absoluteUrl);
+                    } catch(e) {
+                        // ignore invalid urls
+                    }
+                });
+                return [...links];
+            });
+
+            return urls;
+
+        } catch (error) {
+            console.error(`❌ Error in _liveCrawl for ${url}:`, error.message);
+            throw error; // Re-throw to be caught by prioritizeUrl
+        } finally {
+            if (browser) {
+                await browser.close();
+            }
+        }
+    }
+
     /**
      * Step 1: Prioritize a single URL
      */
     async prioritizeUrl(url) {
         try {
-            console.log(`    🔗 Sending to prioritization endpoint: ${url}`);
+            console.log(`    ➤ Step 1a: Live-crawling ${url} to gather URLs...`);
+            const collectedUrls = await this._liveCrawl(url, 60000);
+            console.log(`    ➤ Step 1b: Prioritizing ${collectedUrls.length} collected URLs...`);
 
-            const response = await axios.post(
-                `${this.urlCollectorBaseUrl}/live-crawl-and-prioritize`,
-                { url: url, timeout: 60000 },
-                { timeout: 120000 }
-            );
+            const prioritizationResult = urlPrioritizationService.prioritizeUrls(collectedUrls);
 
-            if (response.data.success) {
-                console.log(`    ✅ Prioritization success: ${response.data.totalPrioritized} URLs prioritized from ${response.data.totalUrlsCollected} collected`);
-                return {
-                    originalUrl: url,
-                    totalUrlsCollected: response.data.totalUrlsCollected,
-                    totalPrioritized: response.data.totalPrioritized,
-                    prioritizedUrls: response.data.prioritizedUrls,
-                    prioritizationSuccess: true,
-                    prioritizedAt: new Date(),
-                    metadata: response.data.metadata
-                };
-            } else {
-                throw new Error(response.data.message || 'Prioritization failed');
-            }
+            console.log(`    ✅ Prioritization success: ${prioritizationResult.prioritizedUrls.length} URLs prioritized from ${collectedUrls.length} collected`);
+            return {
+                originalUrl: url,
+                totalUrlsCollected: collectedUrls.length,
+                totalPrioritized: prioritizationResult.prioritizedUrls.length,
+                prioritizedUrls: prioritizationResult.prioritizedUrls,
+                prioritizationSuccess: true,
+                prioritizedAt: new Date(),
+                metadata: {
+                    localesDetected: prioritizationResult.localesDetected
+                }
+            };
 
         } catch (error) {
             console.error(`    ❌ Prioritization failed for ${url}:`, error.message);
@@ -394,30 +464,26 @@ class AdobeTarget1_0Service {
                 };
             }
 
-            console.log(`    🔗 Sending to categorization endpoint...`);
+            console.log(`    ➤ Step 2: Categorizing ${prioritizationResult.prioritizedUrls.length} prioritized URLs...`);
 
-            const response = await axios.post(
-                `${this.urlCollectorBaseUrl}/categorize-urls-dynamic`,
-                { prioritizedUrls: prioritizationResult.prioritizedUrls },
-                { timeout: 120000 }
-            );
+            const categorizationResult = urlDynamicCategorizationService.categorizeDynamically(prioritizationResult.prioritizedUrls);
 
-            if (response.data.success) {
-                const top25 = response.data.data?.prioritizedTop25 || [];
+            if (categorizationResult.success) {
+                const top25 = categorizationResult.prioritizedTop25 || [];
                 console.log(`    ✅ Categorization success: ${top25.length} URLs in top 25`);
 
                 return {
                     originalUrl: prioritizationResult.originalUrl,
                     categorizationSuccess: true,
-                    totalCategories: response.data.data?.categories?.length || 0,
-                    categories: response.data.data?.categories || [],
+                    totalCategories: categorizationResult.categories?.length || 0,
+                    categories: categorizationResult.categories || [],
                     prioritizedTop25: top25,
-                    detectedDomainType: response.data.data?.summary?.detectedDomainType,
+                    detectedDomainType: categorizationResult.summary?.detectedDomainType,
                     categorizedAt: new Date(),
-                    metadata: response.data.metadata
+                    metadata: categorizationResult.quality
                 };
             } else {
-                throw new Error(response.data.message || 'Categorization failed');
+                throw new Error(categorizationResult.message || 'Categorization failed');
             }
 
         } catch (error) {
