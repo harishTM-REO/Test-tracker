@@ -617,7 +617,6 @@ class AdobeScraperService {
                 if (resolved) return;
                 try {
                     const responseUrl = response.url();
-                    console.log('[Network]', response.request().method(), responseUrl);
                     if (responseUrl.includes('/v1/delivery') || responseUrl.includes('/mbox/')) {
                         console.log(`🎯 Found Adobe Target response: ${responseUrl}`);
                         if (response.request().method() !== 'OPTIONS' && response.ok()) {
