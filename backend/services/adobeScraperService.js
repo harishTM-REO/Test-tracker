@@ -143,19 +143,16 @@ class AdobeScraperService {
           /* ======================================================
            * 2. SAFE NAVIGATION (Cluster-safe)
            * ====================================================== */
-          try {
-            await sharedPage.goto(url, {
-              waitUntil: 'domcontentloaded',
-              timeout: 20000
-            });
-          } catch (navError) {
-            console.warn(`⚠️ Navigation failed for ${url}: ${navError.message}`);
-      
-            // 🔑 CRITICAL: Reset page state to avoid "main frame too early"
-            await sharedPage.goto('about:blank').catch(() => {});
-      
-            throw navError;
-          }
+          // Fire-and-forget navigation - we only care about network requests, not page load
+          sharedPage.goto(url, { waitUntil: 'commit', timeout: 10000 }).catch(() => {
+            // Ignore navigation errors - we only need the network request
+          });
+
+          // Wait for Adobe Target network request OR 1.5s timeout (whichever comes first)
+          await Promise.race([
+            networkListenerPromise,
+            new Promise(resolve => setTimeout(resolve, 1500))
+          ]);
       
           /* ======================================================
            * 3. MAIN FRAME READINESS GUARD (VERY IMPORTANT)
@@ -513,14 +510,18 @@ class AdobeScraperService {
             try {
                 // Navigate to the URL to trigger Adobe Target requests
                 console.log(`🌐 Navigating to: ${url}`);
-                await sharedPage.goto(url, {
-                    waitUntil: 'domcontentloaded',
-                    timeout: 30000
-                });
-                console.log('✅ Navigation complete');
 
-                // Wait a bit for Adobe Target to load
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                // Fire-and-forget navigation - we only care about network requests, not page load
+                sharedPage.goto(url, { waitUntil: 'commit', timeout: 10000 }).catch(() => {
+                    // Ignore navigation errors - we only need the network request
+                });
+
+                // Wait for Adobe Target network request OR 1.5s timeout (whichever comes first)
+                await Promise.race([
+                    networkListenerPromise,
+                    new Promise(resolve => setTimeout(resolve, 1500))
+                ]);
+                console.log('✅ Navigation complete');
 
                 // Now extract the data
                 const experimentData = await this.extractAdobeTargetData(sharedPage, networkListenerPromise);
