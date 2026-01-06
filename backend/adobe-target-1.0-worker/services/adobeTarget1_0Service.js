@@ -168,6 +168,13 @@ class AdobeTarget1_0Service {
 
             const startTime = new Date();
 
+            // Fetch and update dataset status to in_progress
+            let dataset = await Dataset.findById(datasetId);
+            if (dataset) {
+                await dataset.startScraping();
+                console.log('✅ Dataset status updated to in_progress');
+            }
+
             // Create result document
             let result = await AdobeTarget1_0Result.create({
                 datasetId: datasetId,
@@ -274,6 +281,20 @@ class AdobeTarget1_0Service {
 
             // Save final result
             await result.save();
+
+            // Update dataset status to completed with stats
+            dataset = await Dataset.findById(datasetId);
+            if (dataset) {
+                await dataset.completeScraping({
+                    totalUrls: urls.length,
+                    processedUrls: result.overallStats.totalTop25UrlsProcessed,
+                    successfulScans: result.overallStats.totalTop25UrlsSuccessful,
+                    failedScans: result.overallStats.totalTop25UrlsFailed,
+                    adobeTargetDetected: result.overallStats.adobeTargetDetectedCount,
+                    totalExperiments: result.overallStats.totalExperimentsFound
+                });
+                console.log('✅ Dataset status updated to completed');
+            }
 
             console.log(`\n${'='.repeat(60)}`);
             console.log(`📊 Adobe Target 1.0 Workflow Completed`);
@@ -416,13 +437,34 @@ class AdobeTarget1_0Service {
     async scrapeTop25Urls(categorizationResult, options = {}) {
         const concurrency = options.concurrency || 4; // 4 concurrent URLs
         const results = [];
+
+        // Enhanced summary with all required fields
         let summary = {
             totalTop25Urls: 0,
             successfulScrapedUrls: 0,
             failedScrapedUrls: 0,
             adobeTargetDetectedInTop25: 0,
-            totalExperimentsInTop25: 0
+            totalExperimentsInTop25: 0,
+            uniqueExperimentIds: [],
+            uniqueExperimentCount: 0,
+            uniqueActivityIds: [],
+            uniqueActivityCount: 0,
+            uniqueExperimentNames: [],
+            allActivityIds: [],
+            allActivityCount: 0,
+            seedUrl: null,
+            seedUrlScraped: false,
+            seedUrlSuccessful: false,
+            seedUrlAdobeTargetDetected: false,
+            seedUrlExperimentCount: 0,
+            seedUrlError: null
         };
+
+        // Use Sets to track unique values
+        const uniqueExperimentIdsSet = new Set();
+        const uniqueActivityIdsSet = new Set();
+        const uniqueExperimentNamesSet = new Set();
+        const allActivityIdsList = [];
 
         try {
             if (!categorizationResult.categorizationSuccess) {
@@ -447,20 +489,31 @@ class AdobeTarget1_0Service {
 
                 const batchPromises = batch.map(urlItem =>
                     AdobeScraperService.scrapeAdobeTargetExperiments(urlItem.url)
-                        .then(scrapingResult => ({
-                            url: urlItem.url,
-                            category: urlItem.category,
-                            priority: urlItem.priority,
-                            success: true,
-                            adobeTargetDetected: scrapingResult.success && scrapingResult.data?.adobeTarget?.detected,
-                            experimentCount: scrapingResult.data?.adobeTarget?.experimentCount || 0,
-                            experiments: scrapingResult.data?.adobeTarget?.experiments || [],
-                            version: scrapingResult.data?.adobeTarget?.version,
-                            activityNames: scrapingResult.data?.adobeTarget?.activityNames || [],
-                            activityIds: scrapingResult.data?.adobeTarget?.activityIds || [],
-                            mboxData: scrapingResult.data?.adobeTarget?.mboxData,
-                            scrapedAt: new Date()
-                        }))
+                        .then(scrapingResult => {
+                            // FIX: The scraper returns adobeTarget at top level, not in scrapingResult.data
+                            const adobeTargetData = scrapingResult.adobeTarget || {};
+
+                            console.log(`      📊 Result for ${urlItem.url}:`);
+                            console.log(`         Adobe Target Detected: ${adobeTargetData.detected}`);
+                            console.log(`         Experiment Count: ${adobeTargetData.experimentCount || 0}`);
+                            console.log(`         Activity Names: ${adobeTargetData.activityNames?.join(', ') || 'none'}`);
+                            console.log(`         Activity IDs: ${adobeTargetData.activityIds?.join(', ') || 'none'}`);
+
+                            return {
+                                url: urlItem.url,
+                                category: urlItem.category,
+                                priority: urlItem.priority,
+                                success: true,
+                                adobeTargetDetected: adobeTargetData.detected || false,
+                                experimentCount: adobeTargetData.experimentCount || 0,
+                                experiments: adobeTargetData.experiments || [],
+                                version: adobeTargetData.version,
+                                activityNames: adobeTargetData.activityNames || [],
+                                activityIds: adobeTargetData.activityIds || [],
+                                mboxData: adobeTargetData.mboxData,
+                                scrapedAt: new Date()
+                            };
+                        })
                         .catch(error => ({
                             url: urlItem.url,
                             category: urlItem.category,
@@ -475,16 +528,71 @@ class AdobeTarget1_0Service {
                 const batchResults = await Promise.all(batchPromises);
                 results.push(...batchResults);
 
-                // Update summary
+                // Update summary with enhanced tracking
                 batchResults.forEach(result => {
                     if (result.success) {
                         summary.successfulScrapedUrls += 1;
+
+                        // Track seed URL
+                        if (result.isSeedUrl) {
+                            summary.seedUrl = result.url;
+                            summary.seedUrlScraped = true;
+                            summary.seedUrlSuccessful = true;
+                            summary.seedUrlAdobeTargetDetected = result.adobeTargetDetected || false;
+                            summary.seedUrlExperimentCount = result.experimentCount || 0;
+                        }
+
                         if (result.adobeTargetDetected) {
                             summary.adobeTargetDetectedInTop25 += 1;
-                            summary.totalExperimentsInTop25 += result.experimentCount;
+                            summary.totalExperimentsInTop25 += result.experimentCount || 0;
+
+                            // Collect activity IDs (all occurrences)
+                            if (result.activityIds && Array.isArray(result.activityIds)) {
+                                result.activityIds.forEach(id => {
+                                    if (id) {
+                                        allActivityIdsList.push(id);
+                                        uniqueActivityIdsSet.add(id);
+                                    }
+                                });
+                            }
+
+                            // Collect activity names
+                            if (result.activityNames && Array.isArray(result.activityNames)) {
+                                result.activityNames.forEach(name => {
+                                    if (name) {
+                                        uniqueExperimentNamesSet.add(name);
+                                    }
+                                });
+                            }
+
+                            // Collect experiment IDs from experiments array
+                            if (result.experiments && Array.isArray(result.experiments)) {
+                                result.experiments.forEach(exp => {
+                                    if (exp.experimentId) {
+                                        uniqueExperimentIdsSet.add(exp.experimentId);
+                                    }
+                                    // Also track activity ID from experiment
+                                    if (exp.activityId) {
+                                        uniqueActivityIdsSet.add(exp.activityId);
+                                        allActivityIdsList.push(exp.activityId);
+                                    }
+                                    // Track experiment name
+                                    if (exp.activityName) {
+                                        uniqueExperimentNamesSet.add(exp.activityName);
+                                    }
+                                });
+                            }
                         }
                     } else {
                         summary.failedScrapedUrls += 1;
+
+                        // Track seed URL failure
+                        if (result.isSeedUrl) {
+                            summary.seedUrl = result.url;
+                            summary.seedUrlScraped = true;
+                            summary.seedUrlSuccessful = false;
+                            summary.seedUrlError = result.error || 'Unknown error';
+                        }
                     }
                 });
 
@@ -497,6 +605,21 @@ class AdobeTarget1_0Service {
             }
 
             console.log(`    ✅ Scraping complete: ${summary.successfulScrapedUrls}/${summary.totalTop25Urls} URLs succeeded`);
+
+            // Convert Sets to arrays and calculate final counts
+            summary.uniqueExperimentIds = Array.from(uniqueExperimentIdsSet);
+            summary.uniqueExperimentCount = summary.uniqueExperimentIds.length;
+            summary.uniqueActivityIds = Array.from(uniqueActivityIdsSet);
+            summary.uniqueActivityCount = summary.uniqueActivityIds.length;
+            summary.uniqueExperimentNames = Array.from(uniqueExperimentNamesSet);
+            summary.allActivityIds = allActivityIdsList;
+            summary.allActivityCount = allActivityIdsList.length;
+
+            console.log(`    📊 Experiment Summary:`);
+            console.log(`       Unique Activity IDs: ${summary.uniqueActivityCount}`);
+            console.log(`       Unique Experiment IDs: ${summary.uniqueExperimentCount}`);
+            console.log(`       Unique Experiment Names: ${summary.uniqueExperimentNames.length}`);
+            console.log(`       Total Activity IDs (all): ${summary.allActivityCount}`);
 
         } catch (error) {
             console.error(`    ❌ Error during scraping:`, error.message);

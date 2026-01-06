@@ -99,7 +99,11 @@ class AdobeScraperService {
       
         console.log('detectAdobeTargetPresenceWithSharedPage is called');
         console.log(`🔍 Validating Adobe Target presence: ${url}`);
-      
+
+        // Set up network listener BEFORE navigation to capture Adobe Target requests
+        let networkListenerSetup = null;
+        let networkListenerPromise = null;
+
         try {
           /* ======================================================
            * 1. PRE-FLIGHT CHECK (Fast fail)
@@ -109,7 +113,7 @@ class AdobeScraperService {
             const certIssue =
               preflightCheck.error &&
               preflightCheck.error.toLowerCase().includes('cert');
-      
+
             if (!preflightCheck.isValid && (certIssue || !preflightCheck.status)) {
               console.warn(`⚠️ Pre-flight issue for ${url}: ${preflightCheck.error}`);
               return {
@@ -128,7 +132,14 @@ class AdobeScraperService {
           } catch (e) {
             console.warn(`⚠️ Reachability pre-check warning: ${e.message}`);
           }
-      
+
+          /* ======================================================
+           * 1.5. SETUP NETWORK LISTENER (Before navigation!)
+           * ====================================================== */
+          networkListenerSetup = this.setupAdobeTargetNetworkListener(sharedPage);
+          networkListenerPromise = networkListenerSetup.promise;
+          console.log('✅ Network listener set up before navigation');
+
           /* ======================================================
            * 2. SAFE NAVIGATION (Cluster-safe)
            * ====================================================== */
@@ -253,14 +264,14 @@ class AdobeScraperService {
             );
           } catch (e) {
             console.warn(`⚠️ Detection timeout: ${e.message}`);
-      
+
             if (
               e.message.includes('Target closed') ||
               e.message.includes('Session closed')
             ) {
               throw e;
             }
-      
+
             return {
               detected: false,
               version: null,
@@ -271,13 +282,36 @@ class AdobeScraperService {
               detectionSource: { timeout: true }
             };
           }
-      
+
+          /* ======================================================
+           * 7.5. WAIT FOR NETWORK LISTENER DATA
+           * ====================================================== */
+          let mboxResponseData = null;
+          if (networkListenerPromise) {
+            try {
+              console.log('⏳ Waiting for Adobe Target network response...');
+              mboxResponseData = await Promise.race([
+                networkListenerPromise,
+                new Promise(r => setTimeout(() => r(null), 3000))
+              ]);
+              if (mboxResponseData) {
+                console.log('✅ Adobe Target network data captured!');
+                console.log('Activity Names:', mboxResponseData.activityNames);
+                console.log('Activity IDs:', mboxResponseData.activityIds);
+              } else {
+                console.log('⚠️ No Adobe Target network response captured');
+              }
+            } catch (e) {
+              console.warn('⚠️ Error capturing network data:', e.message);
+            }
+          }
+
           console.log(
             `${detectionResult.detected ? '✅' : '❌'} Adobe Target ${
               detectionResult.detected ? 'detected' : 'not detected'
             } on ${url}`
           );
-      
+
           return {
             detected: detectionResult.detected,
             version: detectionResult.version,
@@ -285,7 +319,10 @@ class AdobeScraperService {
             hasAdobeScript: detectionResult.hasAdobeScript,
             httpStatusCode: null,
             captchaDetected: false,
-            detectionSource: detectionResult.detectionSource
+            detectionSource: detectionResult.detectionSource,
+            mboxData: mboxResponseData,
+            activityNames: mboxResponseData?.activityNames || [],
+            activityIds: mboxResponseData?.activityIds || []
           };
       
         } catch (error) {
@@ -311,6 +348,17 @@ class AdobeScraperService {
           /* ======================================================
            * 8. CLEANUP
            * ====================================================== */
+          // Clean up network listener
+          if (networkListenerSetup && networkListenerSetup.cleanup) {
+            try {
+              networkListenerSetup.cleanup();
+              console.log('✅ Network listener cleaned up');
+            } catch (e) {
+              console.warn('⚠️ Error cleaning up network listener:', e.message);
+            }
+          }
+
+          // Clean up request handler
           if (requestHandler) {
             try {
               sharedPage.off('request', requestHandler);
@@ -448,16 +496,28 @@ class AdobeScraperService {
 
         if (sharedPage) {
             // Case 1: Used by Sequential Batch Processor (browser lifecycle managed externally)
-            
+
+            // Setup network listener BEFORE navigation
             const networkListenerSetup = this.setupAdobeTargetNetworkListener(sharedPage);
             const networkListenerPromise = networkListenerSetup.promise;
 
             try {
-                // We call the existing logic, which will use the acquired page.
+                // Navigate to the URL to trigger Adobe Target requests
+                console.log(`🌐 Navigating to: ${url}`);
+                await sharedPage.goto(url, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000
+                });
+                console.log('✅ Navigation complete');
+
+                // Wait a bit for Adobe Target to load
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                // Now extract the data
                 const experimentData = await this.extractAdobeTargetData(sharedPage, networkListenerPromise);
 
                 // ... (rest of the existing logic for captcha, cookies, etc. remains the same) ...
-                
+
                 return experimentData;
 
             } catch (error) {
@@ -513,7 +573,21 @@ class AdobeScraperService {
 
     setupAdobeTargetNetworkListener(page) {
         console.log("Setting up Adobe Target network listener...");
-        if (!page || typeof page.on !== 'function') return { promise: Promise.resolve(null), cleanup: () => {} };
+
+        // Check if page exists and has the 'on' method (works for both Puppeteer and Playwright)
+        if (!page) {
+            console.log("⚠️ No page object provided");
+            return { promise: Promise.resolve(null), cleanup: () => {} };
+        }
+
+        // More flexible check - Playwright page objects might have 'on' but typeof might not be 'function'
+        const hasOnMethod = page.on !== undefined && page.on !== null;
+        if (!hasOnMethod) {
+            console.log("⚠️ Page object does not have 'on' method");
+            return { promise: Promise.resolve(null), cleanup: () => {} };
+        }
+
+        console.log("✅ Page has 'on' method, setting up listener...");
         let responseHandler = null;
         const promise = new Promise((resolve) => {
             let resolved = false;
@@ -522,6 +596,7 @@ class AdobeScraperService {
                 if (resolved) return;
                 try {
                     const responseUrl = response.url();
+                    console.log('[Network]', response.request().method(), responseUrl);
                     if (responseUrl.includes('/v1/delivery') || responseUrl.includes('/mbox/')) {
                         console.log(`🎯 Found Adobe Target response: ${responseUrl}`);
                         if (response.request().method() !== 'OPTIONS' && response.ok()) {
