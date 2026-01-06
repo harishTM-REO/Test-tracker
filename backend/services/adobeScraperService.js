@@ -144,7 +144,7 @@ class AdobeScraperService {
            * 2. SAFE NAVIGATION (Cluster-safe)
            * ====================================================== */
           // Fire-and-forget navigation - we only care about network requests, not page load
-          sharedPage.goto(url, { waitUntil: 'commit', timeout: 10000 }).catch(() => {
+          sharedPage.goto(url, { waitUntil: 'commit', timeout: 10000, ignoreHTTPSErrors: true }).catch(() => {
             // Ignore navigation errors - we only need the network request
           });
 
@@ -220,16 +220,9 @@ class AdobeScraperService {
               // Request interception (compatible with both Puppeteer and Playwright)
               if (typeof sharedPage.route === 'function') {
                 // Playwright - Block unnecessary resources
-                await sharedPage.route('**/*', (route) => {
-                  const type = route.request().resourceType();
-                  const blockedTypes = ['image', 'font', 'media', 'stylesheet'];
-
-                  if (blockedTypes.includes(type)) {
-                    route.abort().catch(() => {});
-                  } else {
-                    route.continue().catch(() => {});
-                  }
-                });
+                  await sharedPage.route('**/*.{png,jpg,jpeg,gif,svg,woff,woff2,css,mp4,webm}', (route) => {
+                      route.abort().catch(() => {});
+                  });
                 console.log('✅ Resource blocking enabled (Playwright): images, fonts, media, stylesheets');
               } else if (typeof sharedPage.setRequestInterception === 'function') {
                 // Puppeteer - Block unnecessary resources
@@ -512,7 +505,7 @@ class AdobeScraperService {
                 console.log(`🌐 Navigating to: ${url}`);
 
                 // Fire-and-forget navigation - we only care about network requests, not page load
-                sharedPage.goto(url, { waitUntil: 'commit', timeout: 10000 }).catch(() => {
+                sharedPage.goto(url, { waitUntil: 'commit', timeout: 10000, ignoreHTTPSErrors: true }).catch(() => {
                     // Ignore navigation errors - we only need the network request
                 });
 
