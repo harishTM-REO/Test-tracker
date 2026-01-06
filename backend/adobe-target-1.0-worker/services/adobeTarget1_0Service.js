@@ -160,6 +160,7 @@ class AdobeTarget1_0Service {
     async performScraping(jobData, progressCallback) {
         const { datasetId, datasetName, urls, options = {} } = jobData;
 
+        const browser = await this.launchBrowser(); // Launch one browser for the whole job
         try {
             console.log(`\n🎯 Starting Adobe Target 1.0 workflow for: ${datasetName}`);
             console.log(`📊 Processing ${urls.length} URLs from dataset\n`);
@@ -213,7 +214,7 @@ class AdobeTarget1_0Service {
                 try {
                     // Step 1: Prioritize URL
                     console.log(`  ➤ Step 1: Prioritizing URL...`);
-                    const prioritizationResult = await this.prioritizeUrl(originalUrl);
+                    const prioritizationResult = await this.prioritizeUrl(originalUrl, browser);
 
                     // Step 2: Categorize URLs
                     console.log(`  ➤ Step 2: Categorizing prioritized URLs...`);
@@ -329,6 +330,10 @@ class AdobeTarget1_0Service {
             }
 
             throw error;
+        } finally {
+            if (browser) {
+                await browser.close();
+            }
         }
     }
 
@@ -340,8 +345,8 @@ class AdobeTarget1_0Service {
         throw new Error('Re-scraping not yet implemented');
     }
 
-    async _liveCrawl(url, timeout) {
-        let browser;
+    async _liveCrawl(url, timeout, browser) {
+        let page;
         try {
             const normalizedUrl = normalizeUrl(url);
             if (!normalizedUrl) {
@@ -350,8 +355,7 @@ class AdobeTarget1_0Service {
 
             const pageTimeout = parseInt(timeout) || 60000;
 
-            browser = await this.launchBrowser();
-            const page = await browser.newPage();
+            page = await browser.newPage();
 
             if (typeof page.setViewport === 'function') {
                 await page.setViewport({ width: 1366, height: 768 });
@@ -410,8 +414,8 @@ class AdobeTarget1_0Service {
             console.error(`❌ Error in _liveCrawl for ${url}:`, error.message);
             throw error; // Re-throw to be caught by prioritizeUrl
         } finally {
-            if (browser) {
-                await browser.close();
+            if (page && !page.isClosed()) {
+                await page.close();
             }
         }
     }
@@ -419,10 +423,10 @@ class AdobeTarget1_0Service {
     /**
      * Step 1: Prioritize a single URL
      */
-    async prioritizeUrl(url) {
+    async prioritizeUrl(url, browser) {
         try {
             console.log(`    ➤ Step 1a: Live-crawling ${url} to gather URLs...`);
-            const collectedUrls = await this._liveCrawl(url, 60000);
+            const collectedUrls = await this._liveCrawl(url, 60000, browser);
             console.log(`    ➤ Step 1b: Prioritizing ${collectedUrls.length} collected URLs...`);
 
             const prioritizationResult = urlPrioritizationService.prioritizeUrls(collectedUrls);
