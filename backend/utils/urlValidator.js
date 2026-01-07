@@ -195,13 +195,11 @@ function validateAndSanitize(url) {
 async function isUrlReachable(url) {
     try {
 
-        console.log('the status code -> 1')
         const response = await axios.head(url, {
             timeout: 5000,
             maxRedirects: 3,
             validateStatus: () => true // handle manually
         });
-        console.log('the status code -> ', response)
         // Treat 2xx, 3xx, and 403 as reachable
         if ([200, 301, 302, 403].includes(response.status)) {
             return true;
