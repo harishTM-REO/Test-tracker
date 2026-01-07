@@ -80,6 +80,9 @@ class ABTastyValidationService {
       const total = urls.length;
       const batches = Math.ceil(total / BATCH_SIZE);
 
+      // ✅ MEMORY OPTIMIZATION: Batch delay for memory recovery
+      const BATCH_DELAY = Number(process.env.BATCH_DELAY) || 1500;
+
       // Loop through batches
       for (let b = 0; b < batches; b++) {
         const startIdx = b * BATCH_SIZE;
@@ -87,6 +90,10 @@ class ABTastyValidationService {
         const chunk = urls.slice(startIdx, endIdx);
 
         console.log(`\n📦 PROCESSING BATCH ${b + 1}/${batches} (${chunk.length} URLs)`);
+
+        // ✅ MEMORY OPTIMIZATION: Log memory usage before batch
+        const memBeforeBatch = process.memoryUsage();
+        console.log(`💾 Memory (before batch): ${Math.round(memBeforeBatch.rss / 1024 / 1024)}MB RSS, ${Math.round(memBeforeBatch.heapUsed / 1024 / 1024)}MB Heap`);
 
         // Log browser pool health before processing
         const poolStatsBefore = browserPool.getStats();
@@ -111,6 +118,9 @@ class ABTastyValidationService {
             results.failed.push(res);
           }
         }
+
+        // ✅ MEMORY OPTIMIZATION: Clear chunk results immediately after processing
+        chunkResults.length = 0;
 
         // Update Progress
         const processedSoFar = results.positive.length + results.negative.length + results.failed.length;
@@ -160,6 +170,10 @@ class ABTastyValidationService {
         if ((b + 1) % SAVE_INTERVAL === 0 || (b + 1) === batches) {
           try {
             console.log(`\n💾 Saving intermediate results (batch ${b + 1}/${batches})...`);
+
+            const memBeforeSave = process.memoryUsage();
+            console.log(`💾 Memory (before save): ${Math.round(memBeforeSave.rss / 1024 / 1024)}MB RSS, ${Math.round(memBeforeSave.heapUsed / 1024 / 1024)}MB Heap`);
+
             await this.saveIntermediateResults(
               datasetId,
               validationResult._id,
@@ -169,25 +183,89 @@ class ABTastyValidationService {
               total
             );
             console.log(`✅ Intermediate save completed (${processedSoFar}/${total} URLs)`);
+
+            // ✅ MEMORY OPTIMIZATION: Aggressive cleanup after save
+            console.log(`🧹 Performing aggressive memory cleanup...`);
+
+            // Force garbage collection
+            if (global.gc) {
+              global.gc();
+              console.log(`   ✅ Garbage collection forced`);
+            } else {
+              console.warn(`   ⚠️  GC not available (enable with NODE_OPTIONS=--expose-gc)`);
+            }
+
+            // Log memory after GC
+            const memAfterGC = process.memoryUsage();
+            const memFreed = Math.round(memBeforeSave.heapUsed / 1024 / 1024) - Math.round(memAfterGC.heapUsed / 1024 / 1024);
+            console.log(`💾 Memory (after GC): ${Math.round(memAfterGC.rss / 1024 / 1024)}MB RSS, ${Math.round(memAfterGC.heapUsed / 1024 / 1024)}MB Heap (freed ${memFreed}MB)`);
+
+            // Add delay for memory recovery (only if not last batch)
+            if ((b + 1) < batches) {
+              console.log(`⏳ Waiting ${BATCH_DELAY}ms for memory recovery...`);
+              await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+            }
+
           } catch (saveError) {
             console.error(`❌ CRITICAL: Failed to save intermediate results:`, saveError.message);
             console.error(`⚠️  Continuing processing, but data may be lost if process crashes...`);
           }
+        } else {
+          // ✅ MEMORY OPTIMIZATION: Even if not saving, add small delay between batches
+          if ((b + 1) < batches) {
+            const shortDelay = Math.floor(BATCH_DELAY / 2);
+            console.log(`⏳ Waiting ${shortDelay}ms before next batch...`);
+            await new Promise(resolve => setTimeout(resolve, shortDelay));
+          }
         }
+
+        // ✅ MEMORY OPTIMIZATION: Log memory usage after batch completion
+        const memAfterBatch = process.memoryUsage();
+        console.log(`💾 Memory (after batch): ${Math.round(memAfterBatch.rss / 1024 / 1024)}MB RSS, ${Math.round(memAfterBatch.heapUsed / 1024 / 1024)}MB Heap`);
       }
 
       // Save final documents
+      console.log(`\n💾 Saving final results...`);
       await this.saveFinalResults(datasetId, datasetName, urls.length, results, validationResult._id, startTime, projectIds);
 
-      // Final status log
+      // Calculate final stats before cleanup
       const durationMs = Date.now() - startTime;
-      const detectionRate = urls.length > 0 ? (results.positive.length / urls.length) * 100 : 0;
-      
+      const finalPositiveCount = results.positive.length;
+      const finalNegativeCount = results.negative.length;
+      const finalFailedCount = results.failed.length;
+      const detectionRate = urls.length > 0 ? (finalPositiveCount / urls.length) * 100 : 0;
+      const uniqueProjectIds = Array.from(projectIds);
+      const projectIdCount = projectIds.size;
+
+      // ✅ MEMORY OPTIMIZATION: Final cleanup - clear all result arrays
+      console.log(`🧹 Performing final memory cleanup...`);
+      const memBeforeFinalCleanup = process.memoryUsage();
+      console.log(`💾 Memory (before final cleanup): ${Math.round(memBeforeFinalCleanup.rss / 1024 / 1024)}MB RSS, ${Math.round(memBeforeFinalCleanup.heapUsed / 1024 / 1024)}MB Heap`);
+
+      // Clear all results arrays
+      results.positive.length = 0;
+      results.negative.length = 0;
+      results.failed.length = 0;
+      projectIds.clear();
+
+      // Force final garbage collection
+      if (global.gc) {
+        global.gc();
+        console.log(`   ✅ Final garbage collection forced`);
+      }
+
+      const memAfterFinalCleanup = process.memoryUsage();
+      const finalMemFreed = Math.round(memBeforeFinalCleanup.heapUsed / 1024 / 1024) - Math.round(memAfterFinalCleanup.heapUsed / 1024 / 1024);
+      console.log(`💾 Memory (after final cleanup): ${Math.round(memAfterFinalCleanup.rss / 1024 / 1024)}MB RSS, ${Math.round(memAfterFinalCleanup.heapUsed / 1024 / 1024)}MB Heap (freed ${finalMemFreed}MB)`);
+
+      // Final status log
       console.log(`\n${'='.repeat(80)}`);
       console.log(`✅ ABTASTY VALIDATION COMPLETED`);
       console.log(`Duration: ${(durationMs / 1000).toFixed(2)}s`);
-      console.log(`Positive: ${results.positive.length}, Negative: ${results.negative.length}, Failed: ${results.failed.length}`);
+      console.log(`Average: ${((urls.length / (durationMs / 1000)) * 3600).toFixed(0)} URLs/hour`);
+      console.log(`Positive: ${finalPositiveCount}, Negative: ${finalNegativeCount}, Failed: ${finalFailedCount}`);
       console.log(`Detection Rate: ${detectionRate.toFixed(2)}%`);
+      console.log(`Peak Memory: ${Math.round(memBeforeFinalCleanup.rss / 1024 / 1024)}MB RSS`);
       console.log(`${'='.repeat(80)}\n`);
 
       return {
@@ -195,12 +273,12 @@ class ABTastyValidationService {
         resultId: validationResult._id,
         summary: {
             totalUrls: urls.length,
-            positiveCount: results.positive.length,
-            negativeCount: results.negative.length,
-            failedCount: results.failed.length,
+            positiveCount: finalPositiveCount,
+            negativeCount: finalNegativeCount,
+            failedCount: finalFailedCount,
             detectionRate,
-            uniqueProjectIds: Array.from(projectIds),
-            projectIdCount: projectIds.size
+            uniqueProjectIds: uniqueProjectIds,
+            projectIdCount: projectIdCount
         }
       };
 

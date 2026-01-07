@@ -60,7 +60,8 @@ async function createPage(browser, maxAttempts = 2) {
  * Navigate to a page with retry logic
  */
 async function navigateToPage(page, url, options = {}) {
-  const maxRetries = parseInt(process.env.NAVIGATION_MAX_RETRIES) || 2;
+  // const maxRetries = parseInt(process.env.NAVIGATION_MAX_RETRIES) || 2;
+  const maxRetries = 2;
   const timeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000;
 
   const defaultOptions = {
