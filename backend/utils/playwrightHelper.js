@@ -60,8 +60,8 @@ async function createPage(browser, maxAttempts = 2) {
  * Navigate to a page with retry logic
  */
 async function navigateToPage(page, url, options = {}) {
-  // const maxRetries = parseInt(process.env.NAVIGATION_MAX_RETRIES) || 2;
-  const maxRetries = 2;
+  // Extract maxRetries from options, default to 2 if not provided
+  const maxRetries = options.maxRetries !== undefined ? options.maxRetries : 2;
   const timeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000;
 
   const defaultOptions = {
@@ -69,6 +69,9 @@ async function navigateToPage(page, url, options = {}) {
     timeout: timeout,
     ...options
   };
+
+  // Remove maxRetries from navigation options to avoid passing it to page.goto
+  delete defaultOptions.maxRetries;
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     try {
@@ -80,6 +83,18 @@ async function navigateToPage(page, url, options = {}) {
       return response;
     } catch (error) {
       console.log(`[navigateToPage] Attempt ${attempt} failed: ${error.message}`);
+
+      // ✅ OPTIMIZATION: Don't retry on permanent connection errors
+      const isPermanentError = error.message.includes('ERR_CONNECTION_REFUSED') ||
+                              error.message.includes('ERR_NAME_NOT_RESOLVED') ||
+                              error.message.includes('ERR_ADDRESS_UNREACHABLE') ||
+                              error.message.includes('ERR_CONNECTION_TIMED_OUT') ||
+                              error.message.includes('net::ERR_');
+
+      if (isPermanentError) {
+        console.log(`[navigateToPage] ❌ Permanent connection error, failing immediately`);
+        throw error;
+      }
 
       if (attempt <= maxRetries) {
         const delay = attempt * 1000;

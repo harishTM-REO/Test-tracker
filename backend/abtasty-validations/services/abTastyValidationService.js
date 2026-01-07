@@ -2,7 +2,6 @@ const PQueue = require('p-queue').default; // Use default if using CommonJS/ESM 
 const ABTastyValidationResult = require('../../models/ABTastyValidationResult');
 const ABTastyValidationDocument = require('../../models/ABTastyValidationDocument');
 const Dataset = require('../../models/Dataset');
-const { isUrlReachable } = require('../../utils/urlValidator');
 // Playwright browser functions
 const { handleCookieConsent, detectCaptcha, navigateToPage, createPage, closePage } = require('../../utils/playwrightHelper');
 // ✅ Use browser service (now supports Playwright!)
@@ -321,15 +320,10 @@ class ABTastyValidationService {
         console.log(`\n🔸 [${idx + 1}/${urls.length}] Validating ${url}`);
 
         try {
-            // A. Reachability Check (Fast fail)
-            try {
-                await isUrlReachable(url);
-            } catch (e) {
-                console.log(`   ❌ URL unreachable: ${url}`);
-                return this._makeFailedResult(urlEntry, 'URL unreachable');
-            }
+            // ✅ OPTIMIZATION: Removed isUrlReachable() check to save time
+            // Browser navigation handles failures directly with retry logic
 
-            // B. Use Pool via validateUrlWithPool
+            // Use Pool via validateUrlWithPool
             return await this.validateUrlWithPool(url, urlEntry);
 
         } catch (error) {
@@ -415,7 +409,8 @@ class ABTastyValidationService {
        * 1. SAFE NAVIGATION (Cluster-safe)
        * ====================================================== */
       try {
-          await navigateToPage(page, url); // Uses helper with timeout
+          // ✅ OPTIMIZATION: Use only 1 retry (2 total attempts) to fail faster
+          await navigateToPage(page, url, { maxRetries: 1 });
           console.log(`   ✓ Page loaded`);
       } catch (navError) {
           console.warn(`   ⚠️ Navigation failed for ${url}: ${navError.message}`);
