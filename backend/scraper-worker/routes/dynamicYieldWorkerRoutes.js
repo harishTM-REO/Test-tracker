@@ -41,20 +41,21 @@ router.get('/scrape', async (req, res) => {
     console.log(`[Dynamic Yield] 🔍 Starting scrape for: ${url}`);
     const startTime = Date.now();
 
-    // Quick reachability check (5 second timeout)
-    console.log(`[Dynamic Yield] ⏱️  Checking if URL is reachable...`);
-    const isReachable = await isUrlReachable(url);
-    if (!isReachable) {
-      console.warn(`[Dynamic Yield] ⚠️  URL is not reachable: ${url}`);
-      return res.status(400).json({
-        success: false,
-        message: 'URL is not reachable',
-        url: url,
-        note: 'The URL returned 4xx/5xx status or is unreachable'
-      });
+    // ✅ OPTIONAL: Quick reachability check (disabled by default - browser handles this better)
+    const ENABLE_REACHABILITY_CHECK = process.env.ENABLE_DYNAMICYIELD_REACHABILITY_CHECK === 'true';
+
+    if (ENABLE_REACHABILITY_CHECK) {
+      console.log(`[Dynamic Yield] ⏱️  Checking if URL is reachable...`);
+      const isReachable = await isUrlReachable(url);
+      if (!isReachable) {
+        console.warn(`[Dynamic Yield] ⚠️  URL failed reachability check, but proceeding anyway...`);
+        // Don't block - browser might still succeed
+      } else {
+        console.log(`[Dynamic Yield] ✅ URL is reachable`);
+      }
     }
 
-    console.log(`[Dynamic Yield] ✅ URL is reachable, starting scrape...`);
+    console.log(`[Dynamic Yield] 🚀 Starting browser scrape...`);
 
     // Scrape the website using service
     const result = await DynamicYieldScraperService.scrapeDynamicYieldCampaigns(url, res);
