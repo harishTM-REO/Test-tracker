@@ -60,7 +60,8 @@ async function createPage(browser, maxAttempts = 2) {
  * Navigate to a page with retry logic
  */
 async function navigateToPage(page, url, options = {}) {
-  const maxRetries = parseInt(process.env.NAVIGATION_MAX_RETRIES) || 2;
+  // Extract maxRetries from options, default to 2 if not provided
+  const maxRetries = options.maxRetries !== undefined ? options.maxRetries : 2;
   const timeout = parseInt(process.env.PAGE_NAVIGATION_TIMEOUT) || 30000;
 
   const defaultOptions = {
@@ -68,6 +69,9 @@ async function navigateToPage(page, url, options = {}) {
     timeout: timeout,
     ...options
   };
+
+  // Remove maxRetries from navigation options to avoid passing it to page.goto
+  delete defaultOptions.maxRetries;
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     try {
@@ -79,6 +83,18 @@ async function navigateToPage(page, url, options = {}) {
       return response;
     } catch (error) {
       console.log(`[navigateToPage] Attempt ${attempt} failed: ${error.message}`);
+
+      // ✅ OPTIMIZATION: Don't retry on permanent connection errors
+      const isPermanentError = error.message.includes('ERR_CONNECTION_REFUSED') ||
+                              error.message.includes('ERR_NAME_NOT_RESOLVED') ||
+                              error.message.includes('ERR_ADDRESS_UNREACHABLE') ||
+                              error.message.includes('ERR_CONNECTION_TIMED_OUT') ||
+                              error.message.includes('net::ERR_');
+
+      if (isPermanentError) {
+        console.log(`[navigateToPage] ❌ Permanent connection error, failing immediately`);
+        throw error;
+      }
 
       if (attempt <= maxRetries) {
         const delay = attempt * 1000;
@@ -199,11 +215,47 @@ async function closePage(page) {
     // If isClosed check fails, try to close anyway
   }
 
-  try {
-    await page.close();
-    console.log('[closePage] ✅ Page closed successfully');
-  } catch (error) {
-    console.warn(`[closePage] ⚠️ Error closing page: ${error.message}`);
+  // ✅ ENHANCED: Multi-attempt page close with force-close for crashes
+  let attempts = 0;
+  const maxAttempts = 3;
+
+  while (attempts < maxAttempts) {
+    try {
+      // Attempt 1: Normal close
+      await Promise.race([
+        page.close(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 3000))
+      ]);
+      console.log('[closePage] ✅ Page closed successfully');
+      return;
+    } catch (error) {
+      attempts++;
+
+      // If this was the last attempt, log and give up
+      if (attempts >= maxAttempts) {
+        console.warn(`[closePage] ⚠️ Failed to close page after ${maxAttempts} attempts: ${error.message}`);
+
+        // ✅ LAST RESORT: Try force-closing via context
+        try {
+          const context = page.context();
+          if (context) {
+            const pages = context.pages();
+            const pageIndex = pages.indexOf(page);
+            if (pageIndex > -1) {
+              console.log('[closePage] 🔧 Attempting force-close via context...');
+              await context.close().catch(() => {});
+            }
+          }
+        } catch (forceError) {
+          console.warn(`[closePage] ⚠️ Force-close also failed: ${forceError.message}`);
+        }
+        return;
+      }
+
+      // Log retry attempt
+      console.warn(`[closePage] ⚠️ Attempt ${attempts} failed: ${error.message}, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
   }
 }
 

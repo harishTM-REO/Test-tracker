@@ -87,8 +87,29 @@ class OptimizelyValidationService {
 
         console.log(`\n📦 PROCESSING BATCH ${b + 1}/${batches} (${chunk.length} URLs)`);
 
-        // ✅ Use the Pool-Enabled Processor
-        const chunkResults = await this.processValidationChunk(chunk, { concurrency: CONCURRENCY });
+        // ✅ Use the Pool-Enabled Processor with timeout protection
+        const CHUNK_TIMEOUT = parseInt(process.env.CHUNK_PROCESSING_TIMEOUT) || (chunk.length * 45000); // Default: 45s per URL
+        let chunkResults;
+        try {
+          chunkResults = await Promise.race([
+            this.processValidationChunk(chunk, { concurrency: CONCURRENCY }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`Chunk processing timeout after ${CHUNK_TIMEOUT}ms`)), CHUNK_TIMEOUT)
+            )
+          ]);
+        } catch (timeoutError) {
+          console.error(`❌ Chunk timeout: ${timeoutError.message}`);
+          console.error(`🔧 Force-recovering stuck browsers and continuing...`);
+          // Return failed results for this chunk
+          chunkResults = chunk.map(urlEntry => ({
+            url: urlEntry.url,
+            companyName: urlEntry.companyName || null,
+            status: 'failed',
+            error: 'Chunk timeout',
+            detectionDetails: { error: 'Chunk timeout' },
+            scrapedAt: new Date()
+          }));
+        }
 
         // Collect results
         for (const res of chunkResults) {

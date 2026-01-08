@@ -617,15 +617,55 @@ const handleCookieConsent = async (page) => {
 
 const closePage = async (page, timeout = 5000) => {
     if (!page) return true;
+
+    // Check if already closed
     try {
-        if (page.isClosed && page.isClosed()) return true;
-        await Promise.race([page.close(), new Promise((resolve) => setTimeout(resolve, timeout))]);
-        console.log('Page closed successfully');
-        return true;
-    } catch (error) {
-        try { if (!page.isClosed()) await page.close({ runBeforeUnload: false }); } catch (e) {}
-        return true;
+        if (page.isClosed && page.isClosed()) {
+            console.log('Page already closed');
+            return true;
+        }
+    } catch (e) {
+        // If check fails, try to close anyway
     }
+
+    // ✅ ENHANCED: Multi-attempt page close with force-close for crashes
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (attempts < maxAttempts) {
+        try {
+            await Promise.race([
+                page.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), timeout))
+            ]);
+            console.log('Page closed successfully');
+            return true;
+        } catch (error) {
+            attempts++;
+
+            if (attempts >= maxAttempts) {
+                console.warn(`⚠️ Failed to close page after ${maxAttempts} attempts: ${error.message}`);
+
+                // ✅ LAST RESORT: Try force-close without beforeUnload
+                try {
+                    if (!page.isClosed()) {
+                        await page.close({ runBeforeUnload: false });
+                        console.log('Page force-closed successfully');
+                        return true;
+                    }
+                } catch (forceError) {
+                    console.warn(`⚠️ Force-close also failed: ${forceError.message}`);
+                }
+                return true; // Return true anyway to prevent blocking
+            }
+
+            // Retry after short delay
+            console.warn(`⚠️ Page close attempt ${attempts} failed: ${error.message}, retrying...`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+
+    return true;
 };
 
 const closeBrowser = async(browser) => {

@@ -74,8 +74,8 @@ class BrowserPoolService {
     const validationLimit = process.env.ADOBE_VALIDATION_MAX_PAGES_BEFORE_RESTART;
     if (validationLimit !== undefined && validationLimit !== '') {
       const parsedValidationLimit = parseInt(validationLimit);
-      const effectiveLimit = (!isNaN(parsedValidationLimit) && parsedValidationLimit > 0) 
-        ? parsedValidationLimit 
+      const effectiveLimit = (!isNaN(parsedValidationLimit) && parsedValidationLimit > 0)
+        ? parsedValidationLimit
         : this.maxPagesBeforeRestart;
       console.log(`🌐 BrowserPoolService initialized with pool size: ${poolSize}`);
       console.log(`   Default max pages before restart: ${this.maxPagesBeforeRestart}`);
@@ -84,6 +84,15 @@ class BrowserPoolService {
     } else {
       console.log(`🌐 BrowserPoolService initialized with pool size: ${poolSize}, max pages before restart: ${this.maxPagesBeforeRestart}`);
     }
+
+    // Initialize deadlock detection
+    this.lastActivityTimestamp = Date.now();
+
+    // Start deadlock watchdog (checks every 60s, triggers if idle >10min)
+    // Can be overridden with DEADLOCK_CHECK_INTERVAL_MS and DEADLOCK_IDLE_THRESHOLD_MS
+    const checkInterval = parseInt(process.env.DEADLOCK_CHECK_INTERVAL_MS) || 60000;
+    const idleThreshold = parseInt(process.env.DEADLOCK_IDLE_THRESHOLD_MS) || 180000; // Default: 3 min (reduced from 10 min)
+    this.startDeadlockWatchdog(checkInterval, idleThreshold);
   }
 
   isManagedBrowser(browser) {
@@ -396,7 +405,43 @@ class BrowserPoolService {
       const currentPageCount = this.pageCountPerBrowser.get(browser);
       console.log(`\n🔄 [releaseBrowser] Browser reached page limit (${currentPageCount}/${effectiveLimit}), scheduling restart...`);
       console.log(`   📍 [releaseBrowser] Calling scheduleAsyncRestart() now...`);
-      this.scheduleAsyncRestart(browser);
+      this.scheduleAsyncRestart(browser).catch(async (err) => {
+        console.error('❌ CRITICAL: Browser restart failed:', err);
+        console.error('🔧 Attempting emergency browser recovery...');
+
+        try {
+          // Check if browser is still usable
+          if (browser && browser.isConnected?.()) {
+            // Return browser to pool instead of losing it
+            if (!this.availableBrowsers.includes(browser)) {
+              this.availableBrowsers.push(browser);
+              console.log('✅ Browser returned to pool after restart failure');
+
+              // Give it to waiting requests
+              if (this.waitingQueue.length > 0) {
+                const resolve = this.waitingQueue.shift();
+                const rescuedBrowser = this.availableBrowsers.pop();
+                this.busyBrowsers.add(rescuedBrowser);
+                this.stats.totalAcquisitions++;
+                if (!this.browserAcquisitionTimes) this.browserAcquisitionTimes = new WeakMap();
+                this.browserAcquisitionTimes.set(rescuedBrowser, Date.now());
+                resolve(rescuedBrowser);
+                console.log('✅ Rescued browser assigned to waiting request');
+              }
+            }
+          } else {
+            // Browser is dead - force restart it
+            console.error('⚠️ Browser is dead, forcing replacement...');
+            await this.forceRestartBrowser(browser);
+          }
+        } catch (recoveryErr) {
+          console.error('💀 FATAL: Emergency recovery failed:', recoveryErr.message);
+          // Last resort: trigger pool health check
+          setTimeout(() => {
+            this.healthCheck().catch(e => console.error('Health check failed:', e));
+          }, 1000);
+        }
+      });
       console.log(`   ✅ [releaseBrowser] scheduleAsyncRestart() called (will execute asynchronously)\n`);
       
       if (this.waitingQueue.length > 0) {
@@ -428,10 +473,15 @@ class BrowserPoolService {
       console.log(`📋 Browser released to waiting request (remaining in queue: ${this.waitingQueue.length})`);
       resolve(browser);
     } else {
-      this.availableBrowsers.push(browser);
-      const pageCount = this.pageCountPerBrowser.get(browser) || 0;
-      const queueStatus = this.waitingQueue.length > 0 ? `queue: ${this.waitingQueue.length}` : 'ready';
-      console.log(`♻️  Browser returned to pool (${this.getStats().available}/${this.poolSize} available, pages used: ${pageCount}, ${queueStatus})`);
+      // ✅ FIX: Check for duplicates before adding to prevent pool count exceeding pool size
+      if (!this.availableBrowsers.includes(browser)) {
+        this.availableBrowsers.push(browser);
+        const pageCount = this.pageCountPerBrowser.get(browser) || 0;
+        const queueStatus = this.waitingQueue.length > 0 ? `queue: ${this.waitingQueue.length}` : 'ready';
+        console.log(`♻️  Browser returned to pool (${this.getStats().available}/${this.poolSize} available, pages used: ${pageCount}, ${queueStatus})`);
+      } else {
+        console.warn(`⚠️ Prevented duplicate browser return to pool (${this.getStats().available}/${this.poolSize} available)`);
+      }
     }
   }
 
@@ -718,26 +768,48 @@ class BrowserPoolService {
     } finally {
       // ✅ FIX: Release browser if it wasn't killed/restarted
       if (shouldRelease) {
-        try { 
-            this.releaseBrowser(browser); 
-        } catch (e) { 
-            console.error('releaseBrowser error:', e.message); 
-            // Fallback safety
+        try {
+            this.releaseBrowser(browser);
+        } catch (e) {
+            console.error('releaseBrowser error:', e.message);
+            // Fallback safety - ensure browser is returned to pool
             this.busyBrowsers.delete(browser);
+            // ✅ FIX: Check for duplicates before adding to prevent pool corruption
+            if (!this.availableBrowsers.includes(browser)) {
+              this.availableBrowsers.push(browser);
+              console.error(`🔧 Emergency recovery: Browser forcibly returned to pool`);
+            }
         }
       }
     }
   }
   
   getStats() {
+    // ✅ ENHANCED: Show actual page counts alongside tracked counts
     const browserPageCounts = {};
+    const actualPageCounts = {};
+
     for (let i = 0; i < this.browsers.length; i++) {
       if (!this.browsers[i]) {
           browserPageCounts[`browser_${i + 1}`] = 'RESTARTING';
+          actualPageCounts[`browser_${i + 1}`] = 'RESTARTING';
           continue;
       }
+
       const pageCount = this.pageCountPerBrowser.get(this.browsers[i]) || 0;
       browserPageCounts[`browser_${i + 1}`] = pageCount;
+
+      // Try to get actual page count
+      try {
+        const browser = this.browsers[i];
+        browser.pages().then(pages => {
+          actualPageCounts[`browser_${i + 1}`] = pages.length;
+        }).catch(() => {
+          actualPageCounts[`browser_${i + 1}`] = 'error';
+        });
+      } catch (e) {
+        actualPageCounts[`browser_${i + 1}`] = 'error';
+      }
     }
 
     return {
@@ -756,7 +828,8 @@ class BrowserPoolService {
       totalPoolRefreshes: this.stats.totalPoolRefreshes,
       maxPagesBeforeRestart: this.maxPagesBeforeRestart,
       effectiveMaxPagesBeforeRestart: this.getMaxPagesBeforeRestart(),
-      browserPageCounts: browserPageCounts
+      browserPageCounts: browserPageCounts,
+      actualPageCounts: actualPageCounts  // ✅ NEW: Shows real open pages
     };
   }
 
@@ -1045,7 +1118,209 @@ class BrowserPoolService {
       console.error(`❌ Unexpected error in forceRestartBrowser: ${error.message}`);
     }
   }
-  
+
+  /**
+   * Update activity timestamp to prevent false deadlock detection
+   */
+  updateActivity() {
+    this.lastActivityTimestamp = Date.now();
+  }
+
+  /**
+   * Watchdog: Detects and recovers from browser deadlocks
+   * Automatically started in constructor
+   */
+  startDeadlockWatchdog(checkIntervalMs = 60000, maxIdleTimeMs = 600000) {
+    console.log(`🔒 Starting deadlock watchdog (check every ${checkIntervalMs/1000}s, idle threshold: ${maxIdleTimeMs/1000}s)`);
+
+    setInterval(async () => {
+      const stats = this.getStats();
+      const now = Date.now();
+      const idleTime = now - this.lastActivityTimestamp;
+
+      // DEADLOCK DETECTION: Queue is full but nothing is processing
+      if (stats.waiting > 0 && stats.available === 0 && idleTime > maxIdleTimeMs) {
+        console.error('\n' + '='.repeat(80));
+        console.error('🚨 DEADLOCK DETECTED 🚨');
+        console.error('='.repeat(80));
+        console.error(`   Idle for: ${Math.round(idleTime/1000)}s (threshold: ${maxIdleTimeMs/1000}s)`);
+        console.error(`   Waiting requests: ${stats.waiting}`);
+        console.error(`   Available browsers: ${stats.available}`);
+        console.error(`   Busy browsers: ${stats.inUse}`);
+        console.error(`   Tracked page counts:`, stats.browserPageCounts);
+        console.error(`   Actual page counts:`, stats.actualPageCounts);
+        console.error('   Initiating emergency recovery...');
+        console.error('='.repeat(80) + '\n');
+
+        await this.recoverFromDeadlock();
+      }
+    }, checkIntervalMs);
+  }
+
+  /**
+   * Emergency recovery: Kill all browsers and rebuild pool
+   */
+  async recoverFromDeadlock() {
+    console.log('🔧 Step 1: Checking for page leaks and cleaning up browsers...');
+
+    const MAX_ALLOWED_PAGES = parseInt(process.env.PUPPETEER_MAX_ALLOWED_PAGES) || 3;
+
+    // Force-kill all browser processes
+    for (let i = 0; i < this.browsers.length; i++) {
+      const browser = this.browsers[i];
+      if (!browser) {
+        console.log(`   Browser ${i + 1}: Already null (skipping)`);
+        continue;
+      }
+
+      try {
+        // ✅ ENHANCED: Check for page leaks before killing
+        let actualPageCount = 0;
+        try {
+          const pages = await browser.pages();
+          actualPageCount = pages.length;
+          console.log(`   Browser ${i + 1}: ${actualPageCount} pages open`);
+
+          // Try to close leaked pages first
+          if (actualPageCount > MAX_ALLOWED_PAGES) {
+            console.log(`   ⚠️ Browser ${i + 1} has ${actualPageCount} leaked pages, closing...`);
+            let closedCount = 0;
+            for (const page of pages) {
+              try {
+                await page.close({ runBeforeUnload: false });
+                closedCount++;
+              } catch (e) {
+                console.warn(`   ⚠️ Failed to close page: ${e.message}`);
+              }
+            }
+            console.log(`   🗑️ Closed ${closedCount} pages on browser ${i + 1}`);
+          }
+        } catch (pageError) {
+          console.warn(`   ⚠️ Could not check pages for browser ${i + 1}: ${pageError.message}`);
+        }
+
+        // Get process ID
+        let pid = null;
+        try {
+          if (browser.process && typeof browser.process === 'function') {
+            const proc = browser.process();
+            if (proc) pid = proc.pid;
+          }
+        } catch (e) {}
+
+        // Close browser
+        try {
+          await Promise.race([
+            browser.close(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 5000))
+          ]);
+          console.log(`   ✅ Browser ${i + 1} closed gracefully`);
+        } catch (e) {
+          console.warn(`   ⚠️ Browser ${i + 1} close failed: ${e.message}`);
+        }
+
+        // Force-kill process
+        if (pid) {
+          try {
+            process.kill(pid, 'SIGKILL');
+            console.log(`   🔪 Killed browser ${i + 1} process (pid: ${pid})`);
+          } catch (killErr) {
+            if (killErr.code === 'ESRCH' || killErr.code === 'ENOENT') {
+              console.log(`   ✅ Browser ${i + 1} process already dead`);
+            } else {
+              console.warn(`   ⚠️ Failed to kill pid ${pid}: ${killErr.message}`);
+            }
+          }
+        }
+
+        this.browsers[i] = null;
+      } catch (e) {
+        console.error(`   ❌ Error killing browser ${i + 1}:`, e.message);
+      }
+    }
+
+    // Kill any orphaned chromium processes
+    try {
+      const { execSync } = require('child_process');
+      execSync('pkill -9 chromium || pkill -9 chrome || true', {
+        stdio: 'ignore',
+        timeout: 5000
+      });
+      console.log('   ✅ Cleaned up orphaned browser processes');
+    } catch (e) {
+      // Ignore - pkill might not exist on Windows
+    }
+
+    console.log('\n🔧 Step 2: Waiting for memory reclaim...');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Force garbage collection
+    if (global.gc) {
+      global.gc();
+      console.log('   ✅ Garbage collection triggered');
+    } else {
+      console.log('   ⚠️ GC not available (run with --expose-gc)');
+    }
+
+    console.log('\n🔧 Step 3: Rebuilding browser pool...');
+
+    // Reset pool state
+    this.browsers = [];
+    this.availableBrowsers = [];
+    this.busyBrowsers.clear();
+    this.pageCountPerBrowser.clear();
+    if (this.browserAcquisitionTimes) {
+      this.browserAcquisitionTimes = new WeakMap();
+    }
+
+    // Rebuild pool
+    let successCount = 0;
+    for (let i = 0; i < this.poolSize; i++) {
+      try {
+        console.log(`   Launching browser ${i + 1}/${this.poolSize}...`);
+        const browser = await this.launchBrowser(i + 1);
+        this.browsers.push(browser);
+        this.availableBrowsers.push(browser);
+        this.pageCountPerBrowser.set(browser, 0);
+        this.stats.totalBrowsersCreated++;
+        console.log(`   ✅ Browser ${i + 1} launched successfully`);
+        successCount++;
+      } catch (e) {
+        console.error(`   ❌ Failed to launch browser ${i + 1}:`, e.message);
+        this.browsers.push(null); // Maintain array size
+      }
+    }
+
+    console.log(`\n🔧 Step 4: Serving waiting requests (${successCount} browsers available)...`);
+
+    // Serve all waiting requests with fresh browsers
+    let served = 0;
+    while (this.waitingQueue.length > 0 && this.availableBrowsers.length > 0) {
+      const resolve = this.waitingQueue.shift();
+      const browser = this.availableBrowsers.pop();
+      this.busyBrowsers.add(browser);
+      this.stats.totalAcquisitions++;
+      if (!this.browserAcquisitionTimes) this.browserAcquisitionTimes = new WeakMap();
+      this.browserAcquisitionTimes.set(browser, Date.now());
+      resolve(browser);
+      served++;
+    }
+
+    console.log(`   ✅ Served ${served} waiting requests`);
+
+    if (this.waitingQueue.length > 0) {
+      console.warn(`   ⚠️ ${this.waitingQueue.length} requests still waiting (not enough browsers)`);
+    }
+
+    // Reset activity timestamp
+    this.lastActivityTimestamp = Date.now();
+
+    console.log('\n' + '='.repeat(80));
+    console.log('✅ DEADLOCK RECOVERY COMPLETE ✅');
+    console.log(`   Pool status: ${this.availableBrowsers.length} available, ${this.busyBrowsers.size} busy, ${this.waitingQueue.length} waiting`);
+    console.log('='.repeat(80) + '\n');
+  }
+
 }
 
 const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
