@@ -50,7 +50,10 @@ class PlaywrightPoolService {
     console.log(`🎭 PlaywrightPoolService initialized with pool size: ${poolSize}, max pages before restart: ${this.maxPagesBeforeRestart}`);
 
     // Start deadlock watchdog (checks every 60s, triggers if idle >10min)
-    this.startDeadlockWatchdog(60000, 600000);
+    // Can be overridden with DEADLOCK_CHECK_INTERVAL_MS and DEADLOCK_IDLE_THRESHOLD_MS
+    const checkInterval = parseInt(process.env.DEADLOCK_CHECK_INTERVAL_MS) || 60000;
+    const idleThreshold = parseInt(process.env.DEADLOCK_IDLE_THRESHOLD_MS) || 180000; // Default: 3 min (reduced from 10 min)
+    this.startDeadlockWatchdog(checkInterval, idleThreshold);
   }
 
   isManagedBrowser(browser) {

@@ -822,19 +822,37 @@ class AdobeTarget1_0Service {
                 const chunkNegatives = [];
                 const chunkFailures = [];
                 const chunkStartTime = Date.now();
-                
+
                 let chunkResults;
                 try {
-                    // Pass concurrency setting
-                    chunkResults = await this.processValidationChunk(chunk, { 
-                        concurrency: CONCURRENCY 
-                    });
-                    
+                    // ✅ Add timeout protection to prevent infinite hangs
+                    const CHUNK_TIMEOUT = parseInt(process.env.CHUNK_PROCESSING_TIMEOUT) || (chunk.length * 45000); // Default: 45s per URL
+
+                    chunkResults = await Promise.race([
+                        this.processValidationChunk(chunk, { concurrency: CONCURRENCY }),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error(`Chunk processing timeout after ${CHUNK_TIMEOUT}ms`)), CHUNK_TIMEOUT)
+                        )
+                    ]);
+
                     const chunkDuration = Date.now() - chunkStartTime;
                     console.log(`⏱️  Batch ${chunkNumber} completed in ${(chunkDuration / 1000).toFixed(1)}s`);
                 } catch (chunkError) {
-                    console.error(`🔴 Error processing batch ${chunkNumber}:`, chunkError.message);
-                    throw chunkError;
+                    if (chunkError.message.includes('Chunk processing timeout')) {
+                        console.error(`❌ Chunk ${chunkNumber} timeout: ${chunkError.message}`);
+                        console.error(`🔧 Force-recovering stuck browsers and continuing...`);
+                        // Return failed results for this chunk
+                        chunkResults = chunk.map(urlEntry => ({
+                            url: urlEntry.url,
+                            companyName: urlEntry.companyName || null,
+                            status: 'failed',
+                            error: 'Chunk timeout',
+                            scrapedAt: new Date()
+                        }));
+                    } else {
+                        console.error(`🔴 Error processing batch ${chunkNumber}:`, chunkError.message);
+                        throw chunkError;
+                    }
                 }
                 
                 if (!chunkResults) {

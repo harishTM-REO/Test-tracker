@@ -98,9 +98,24 @@ class ABTastyValidationService {
         const poolStatsBefore = browserPool.getStats();
         console.log(`📊 Pool Health (before): Available=${poolStatsBefore.availableBrowsers}/${poolStatsBefore.poolSize}, Busy=${poolStatsBefore.busyBrowsers}, Waiting=${poolStatsBefore.waitingRequests}`);
 
-        // ✅ Use the Pool-Enabled Processor
+        // ✅ Use the Pool-Enabled Processor with timeout protection
         // This distributes the chunk across available browsers in the pool
-        const chunkResults = await this.processValidationChunk(chunk, { concurrency: CONCURRENCY });
+        const CHUNK_TIMEOUT = parseInt(process.env.CHUNK_PROCESSING_TIMEOUT) || (chunk.length * 45000); // Default: 45s per URL
+        let chunkResults;
+        try {
+          chunkResults = await Promise.race([
+            this.processValidationChunk(chunk, { concurrency: CONCURRENCY }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`Chunk processing timeout after ${CHUNK_TIMEOUT}ms`)), CHUNK_TIMEOUT)
+            )
+          ]);
+        } catch (timeoutError) {
+          console.error(`❌ Chunk timeout: ${timeoutError.message}`);
+          console.error(`🔧 Force-recovering stuck browsers and continuing...`);
+
+          // Return partial/failed results for this chunk
+          chunkResults = chunk.map(urlEntry => this._makeFailedResult(urlEntry, 'Chunk timeout'));
+        }
 
         // Log browser pool health after processing
         const poolStatsAfter = browserPool.getStats();
