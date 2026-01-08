@@ -266,7 +266,8 @@ class PlaywrightPoolService {
         const poolStats = this.getStats();
         console.error(`\n❌ BROWSER ACQUISITION TIMEOUT after ${ACQUIRE_TIMEOUT}ms`);
         console.error(`📊 Pool State: Available=${poolStats.availableBrowsers}, Busy=${poolStats.busyBrowsers}, Waiting=${poolStats.waitingRequests}`);
-        console.error(`🔍 Browser Page Counts:`, poolStats.browserPageCounts);
+        console.error(`🔍 Tracked Page Counts:`, poolStats.browserPageCounts);
+        console.error(`🔍 Actual Page Counts:`, poolStats.actualPageCounts);
 
         // ✅ CRITICAL FIX: If we have available browsers but acquisition times out, they're all zombies!
         if (poolStats.availableBrowsers > 0 || poolStats.poolSize > this.poolSize) {
@@ -421,18 +422,90 @@ class PlaywrightPoolService {
 
     const healthyBrowsers = [];
     const zombieBrowsers = [];
+    const MAX_ALLOWED_PAGES = parseInt(process.env.PLAYWRIGHT_MAX_ALLOWED_PAGES) || 3;
 
     for (let i = 0; i < this.browsers.length; i++) {
       const browser = this.browsers[i];
       if (!browser) continue;
 
+      let isHealthy = false;
+      let actualPageCount = 0;
+
       try {
-        // Quick health check
+        // ✅ ENHANCED: Multi-check health verification
+
+        // Check 1: Browser responsiveness
         await Promise.race([
           browser.version(),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Health timeout')), 2000))
         ]);
-        healthyBrowsers.push({ browser, index: i });
+
+        // Check 2: Get actual page count
+        try {
+          const contexts = browser.contexts();
+          actualPageCount = contexts.reduce((total, ctx) => {
+            try {
+              return total + ctx.pages().length;
+            } catch (e) {
+              return total;
+            }
+          }, 0);
+
+          console.log(`   Browser ${i + 1}: ${actualPageCount} actual pages open`);
+
+          // ✅ CRITICAL: Check if browser has too many leaked pages
+          if (actualPageCount > MAX_ALLOWED_PAGES) {
+            console.log(`   ⚠️ Browser ${i + 1} has ${actualPageCount} pages (max: ${MAX_ALLOWED_PAGES}), attempting cleanup...`);
+
+            // Try to close leaked pages
+            let closedCount = 0;
+            for (const context of contexts) {
+              try {
+                const pages = context.pages();
+                for (const page of pages) {
+                  try {
+                    await page.close({ runBeforeUnload: false });
+                    closedCount++;
+                  } catch (e) {
+                    console.warn(`   ⚠️ Failed to close page: ${e.message}`);
+                  }
+                }
+              } catch (e) {
+                console.warn(`   ⚠️ Failed to access context pages: ${e.message}`);
+              }
+            }
+
+            console.log(`   🗑️ Closed ${closedCount} leaked pages on browser ${i + 1}`);
+
+            // Verify page count after cleanup
+            const contextsAfter = browser.contexts();
+            const pagesAfter = contextsAfter.reduce((total, ctx) => {
+              try {
+                return total + ctx.pages().length;
+              } catch (e) {
+                return total;
+              }
+            }, 0);
+
+            if (pagesAfter > MAX_ALLOWED_PAGES) {
+              console.log(`   💀 Browser ${i + 1} still has ${pagesAfter} pages after cleanup, marking as zombie`);
+              throw new Error(`Too many pages: ${pagesAfter}`);
+            } else {
+              console.log(`   ✅ Browser ${i + 1} cleaned successfully (${pagesAfter} pages remaining)`);
+              // Reset page counter for this browser
+              this.pageCountPerBrowser.set(browser, pagesAfter);
+            }
+          }
+
+          isHealthy = true;
+        } catch (pageError) {
+          console.log(`   💀 Browser ${i + 1} page check failed: ${pageError.message}`);
+          throw pageError;
+        }
+
+        if (isHealthy) {
+          healthyBrowsers.push({ browser, index: i });
+        }
       } catch (e) {
         console.log(`   💀 Browser ${i + 1} is a zombie (${e.message})`);
         zombieBrowsers.push({ browser, index: i });
@@ -502,6 +575,30 @@ class PlaywrightPoolService {
   }
 
   getStats() {
+    // ✅ ENHANCED: Show actual page counts alongside tracked counts
+    const browserPageCounts = {};
+    const actualPageCounts = {};
+
+    this.browsers.forEach((browser, index) => {
+      const trackedCount = this.pageCountPerBrowser.get(browser) || 0;
+      browserPageCounts[`browser_${index + 1}`] = trackedCount;
+
+      // Try to get actual page count
+      try {
+        const contexts = browser.contexts();
+        const actual = contexts.reduce((total, ctx) => {
+          try {
+            return total + ctx.pages().length;
+          } catch (e) {
+            return total;
+          }
+        }, 0);
+        actualPageCounts[`browser_${index + 1}`] = actual;
+      } catch (e) {
+        actualPageCounts[`browser_${index + 1}`] = 'error';
+      }
+    });
+
     return {
       ...this.stats,
       poolSize: this.poolSize,
@@ -510,10 +607,8 @@ class PlaywrightPoolService {
       busyBrowsers: this.busyBrowsers.size,
       waitingRequests: this.waitingQueue.length,
       maxPagesBeforeRestart: this.maxPagesBeforeRestart,
-      browserPageCounts: Array.from(this.pageCountPerBrowser.entries()).reduce((acc, [browser, count], index) => {
-        acc[`browser_${index + 1}`] = count;
-        return acc;
-      }, {})
+      browserPageCounts,
+      actualPageCounts  // ✅ NEW: Shows real open pages
     };
   }
 

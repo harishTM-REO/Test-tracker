@@ -785,14 +785,31 @@ class BrowserPoolService {
   }
   
   getStats() {
+    // ✅ ENHANCED: Show actual page counts alongside tracked counts
     const browserPageCounts = {};
+    const actualPageCounts = {};
+
     for (let i = 0; i < this.browsers.length; i++) {
       if (!this.browsers[i]) {
           browserPageCounts[`browser_${i + 1}`] = 'RESTARTING';
+          actualPageCounts[`browser_${i + 1}`] = 'RESTARTING';
           continue;
       }
+
       const pageCount = this.pageCountPerBrowser.get(this.browsers[i]) || 0;
       browserPageCounts[`browser_${i + 1}`] = pageCount;
+
+      // Try to get actual page count
+      try {
+        const browser = this.browsers[i];
+        browser.pages().then(pages => {
+          actualPageCounts[`browser_${i + 1}`] = pages.length;
+        }).catch(() => {
+          actualPageCounts[`browser_${i + 1}`] = 'error';
+        });
+      } catch (e) {
+        actualPageCounts[`browser_${i + 1}`] = 'error';
+      }
     }
 
     return {
@@ -811,7 +828,8 @@ class BrowserPoolService {
       totalPoolRefreshes: this.stats.totalPoolRefreshes,
       maxPagesBeforeRestart: this.maxPagesBeforeRestart,
       effectiveMaxPagesBeforeRestart: this.getMaxPagesBeforeRestart(),
-      browserPageCounts: browserPageCounts
+      browserPageCounts: browserPageCounts,
+      actualPageCounts: actualPageCounts  // ✅ NEW: Shows real open pages
     };
   }
 
@@ -1129,7 +1147,8 @@ class BrowserPoolService {
         console.error(`   Waiting requests: ${stats.waiting}`);
         console.error(`   Available browsers: ${stats.available}`);
         console.error(`   Busy browsers: ${stats.inUse}`);
-        console.error(`   Browser page counts:`, stats.browserPageCounts);
+        console.error(`   Tracked page counts:`, stats.browserPageCounts);
+        console.error(`   Actual page counts:`, stats.actualPageCounts);
         console.error('   Initiating emergency recovery...');
         console.error('='.repeat(80) + '\n');
 
@@ -1142,7 +1161,9 @@ class BrowserPoolService {
    * Emergency recovery: Kill all browsers and rebuild pool
    */
   async recoverFromDeadlock() {
-    console.log('🔧 Step 1: Killing all browser processes...');
+    console.log('🔧 Step 1: Checking for page leaks and cleaning up browsers...');
+
+    const MAX_ALLOWED_PAGES = parseInt(process.env.PUPPETEER_MAX_ALLOWED_PAGES) || 3;
 
     // Force-kill all browser processes
     for (let i = 0; i < this.browsers.length; i++) {
@@ -1153,6 +1174,31 @@ class BrowserPoolService {
       }
 
       try {
+        // ✅ ENHANCED: Check for page leaks before killing
+        let actualPageCount = 0;
+        try {
+          const pages = await browser.pages();
+          actualPageCount = pages.length;
+          console.log(`   Browser ${i + 1}: ${actualPageCount} pages open`);
+
+          // Try to close leaked pages first
+          if (actualPageCount > MAX_ALLOWED_PAGES) {
+            console.log(`   ⚠️ Browser ${i + 1} has ${actualPageCount} leaked pages, closing...`);
+            let closedCount = 0;
+            for (const page of pages) {
+              try {
+                await page.close({ runBeforeUnload: false });
+                closedCount++;
+              } catch (e) {
+                console.warn(`   ⚠️ Failed to close page: ${e.message}`);
+              }
+            }
+            console.log(`   🗑️ Closed ${closedCount} pages on browser ${i + 1}`);
+          }
+        } catch (pageError) {
+          console.warn(`   ⚠️ Could not check pages for browser ${i + 1}: ${pageError.message}`);
+        }
+
         // Get process ID
         let pid = null;
         try {
