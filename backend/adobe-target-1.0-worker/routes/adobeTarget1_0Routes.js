@@ -5,6 +5,8 @@ const AdobeTarget1_0Service = require(path.join(__dirname, '../services/adobeTar
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
 const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
 const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/AdobeTargetValidationResult'));
+const DynamicYieldValidationResult = require(path.join(__dirname, '../../models/DynamicYieldValidationResult'));
+const DynamicYieldValidationDocument = require(path.join(__dirname, '../../models/DynamicYieldValidationDocument'));
 const OptimizelyValidationResult = require(path.join(__dirname, '../../models/OptimizelyValidationResult'));
 const OptimizelyValidationDocument = require(path.join(__dirname, '../../models/OptimizelyValidationDocument'));
 
@@ -243,6 +245,50 @@ router.post('/optimizely-validation', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to initiate validation job',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route POST /at10/api/dynamic-yield-validation
+ * @desc  Validate Dynamic Yield presence for a dataset's URLs
+ */
+router.post('/dynamic-yield-validation', async (req, res) => {
+  try {
+    const { datasetId, datasetName, urls } = req.body;
+
+    if (!datasetId || !datasetName || !Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: datasetId, datasetName, urls (non-empty array)'
+      });
+    }
+
+    const jobId = jobQueue.createJob('dynamic-yield-validation', {
+      datasetId,
+      datasetName,
+      urls
+    });
+
+    const job = jobQueue.getJob(jobId);
+
+    res.status(202).json({
+      success: true,
+      message: 'Dynamic Yield validation job initiated',
+      jobId,
+      status: job?.status || 'pending',
+      dataset: {
+        id: datasetId,
+        name: datasetName,
+        urlsCount: urls.length
+      }
+    });
+  } catch (error) {
+    console.error('Error initiating Dynamic Yield validation job:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initiate Dynamic Yield validation job',
       error: error.message
     });
   }
@@ -515,6 +561,42 @@ router.get('/optimizely-validation/results/:datasetId', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch Optimizely validation results',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route GET /at10/api/dynamic-yield-validation/results/:datasetId
+ * @desc  Get Dynamic Yield validation result for a dataset
+ */
+router.get('/dynamic-yield-validation/results/:datasetId', async (req, res) => {
+  try {
+    const { datasetId } = req.params;
+
+    console.log(`📊 Fetching Dynamic Yield validation results for dataset: ${datasetId}`);
+
+    const result = await DynamicYieldValidationResult.findOne({ datasetId })
+      .sort({ createdAt: -1 });
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: 'Dynamic Yield validation result not found for dataset',
+        datasetId
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: result,
+      summary: result.summary
+    });
+  } catch (error) {
+    console.error('Error fetching Dynamic Yield validation results:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch Dynamic Yield validation results',
       error: error.message
     });
   }

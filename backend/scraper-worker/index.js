@@ -41,9 +41,11 @@ app.use('/worker/api/', limiter);
 // Routes
 const optimizelyRoutes = require('./routes/optimizelyWorkerRoutes');
 const abTastyRoutes = require('./routes/abTastyWorkerRoutes');
+const dynamicYieldRoutes = require('./routes/dynamicYieldWorkerRoutes');
 
 app.use('/worker/api/optimizely', optimizelyRoutes);
 app.use('/worker/api/abtasty', abTastyRoutes);
+app.use('/worker/api/dynamicyield', dynamicYieldRoutes);
 
 // Worker health check
 app.get('/worker/health', (req, res) => {
@@ -62,6 +64,7 @@ app.listen(port, async () => {
   console.log(`Available endpoints:`);
   console.log(`  GET /worker/api/optimizely/scrape?url=<URL>`);
   console.log(`  GET /worker/api/abtasty/scrape?url=<URL>`);
+  console.log(`  GET /worker/api/dynamicyield/scrape?url=<URL>`);
   console.log(`  GET /worker/health`);
 
   // Initialize database connection

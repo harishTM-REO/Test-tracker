@@ -451,6 +451,7 @@ const datasetController = {
         let optimizelyEdgeInitiated = false;
         let adobeTarget1_0Initiated = false;
         let adobeTargetValidationInitiated = false;
+        let dynamicYieldDetectionInitiated = false;
 
         if (datasetData.companies && datasetData.companies.length > 0) {
           // Check if this is an Optimizely Edge dataset
@@ -506,6 +507,16 @@ const datasetController = {
             } catch (validationError) {
               console.error(`❌ Failed to start ABTasty validation job:`, validationError.message);
             }
+          } else if (datasetData.toolType === 'Dynamic Yield Detection') {
+            console.log(`Initiating Dynamic Yield detection workflow for dataset: ${savedDataset._id}`);
+            try {
+              const DynamicYieldValidationJobService = require('../services/dynamicYieldValidationJobService');
+              const result = await DynamicYieldValidationJobService.startValidation(savedDataset._id.toString());
+              dynamicYieldDetectionInitiated = result.success;
+              console.log(`✅ Dynamic Yield detection job started: ${dynamicYieldDetectionInitiated}`);
+            } catch (dyError) {
+              console.error(`❌ Failed to start Dynamic Yield detection job:`, dyError.message);
+            }
           } else {
             // For other tool types, use normal background scraping
             console.log(`Initiating background scraping for dataset: ${savedDataset._id}`);
@@ -521,7 +532,8 @@ const datasetController = {
           scrapingInitiated: scrapingInitiated,
           optimizelyEdgeInitiated: optimizelyEdgeInitiated,
           adobeTarget1_0Initiated: adobeTarget1_0Initiated,
-          adobeTargetValidationInitiated
+          adobeTargetValidationInitiated,
+          dynamicYieldDetectionInitiated
         });
 
         console.log('Dataset created successfully');

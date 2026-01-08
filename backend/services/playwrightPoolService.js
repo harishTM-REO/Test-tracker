@@ -44,7 +44,13 @@ class PlaywrightPoolService {
       totalPoolRefreshes: 0
     };
 
+    // Initialize deadlock detection
+    this.lastActivityTimestamp = Date.now();
+
     console.log(`🎭 PlaywrightPoolService initialized with pool size: ${poolSize}, max pages before restart: ${this.maxPagesBeforeRestart}`);
+
+    // Start deadlock watchdog (checks every 60s, triggers if idle >10min)
+    this.startDeadlockWatchdog(60000, 600000);
   }
 
   isManagedBrowser(browser) {
@@ -193,7 +199,8 @@ class PlaywrightPoolService {
         // Last resort: manually add browser back to available pool
         if (this.isManagedBrowser(browser)) {
           this.busyBrowsers.delete(browser);
-          this.availableBrowsers.push(browser);
+          // ✅ FIX: Use returnBrowserToPool to prevent duplicates instead of pushing directly
+          this.returnBrowserToPool(browser);
           console.error(`🔧 Emergency recovery: Browser forcibly returned to pool`);
         }
       }
@@ -300,8 +307,13 @@ class PlaywrightPoolService {
       console.log(`🔄 Returning browser to waiting request (queue size: ${this.waitingQueue.length})`);
       resolve(browser);
     } else {
-      this.availableBrowsers.push(browser);
-      console.log(`✅ Browser returned to pool (available: ${this.availableBrowsers.length}/${this.poolSize})`);
+      // ✅ FIX: Check for duplicates before adding to prevent pool count exceeding pool size
+      if (!this.availableBrowsers.includes(browser)) {
+        this.availableBrowsers.push(browser);
+        console.log(`✅ Browser returned to pool (available: ${this.availableBrowsers.length}/${this.poolSize})`);
+      } else {
+        console.warn(`⚠️ Prevented duplicate browser return to pool (available: ${this.availableBrowsers.length}/${this.poolSize})`);
+      }
     }
   }
 
@@ -417,6 +429,175 @@ class PlaywrightPoolService {
       totalBrowsers: this.browsers.length,
       healthyBrowsers: healthyBrowsers.length
     };
+  }
+
+  /**
+   * Update activity timestamp to prevent false deadlock detection
+   */
+  updateActivity() {
+    this.lastActivityTimestamp = Date.now();
+  }
+
+  /**
+   * Watchdog: Detects and recovers from browser deadlocks
+   * Automatically started in constructor
+   */
+  startDeadlockWatchdog(checkIntervalMs = 60000, maxIdleTimeMs = 600000) {
+    console.log(`🔒 [Playwright] Starting deadlock watchdog (check every ${checkIntervalMs/1000}s, idle threshold: ${maxIdleTimeMs/1000}s)`);
+
+    setInterval(async () => {
+      const stats = this.getStats();
+      const now = Date.now();
+      const idleTime = now - this.lastActivityTimestamp;
+
+      // DEADLOCK DETECTION: Queue is full but nothing is processing
+      if (stats.waitingRequests > 0 && stats.availableBrowsers === 0 && idleTime > maxIdleTimeMs) {
+        console.error('\n' + '='.repeat(80));
+        console.error('🚨 [Playwright] DEADLOCK DETECTED 🚨');
+        console.error('='.repeat(80));
+        console.error(`   Idle for: ${Math.round(idleTime/1000)}s (threshold: ${maxIdleTimeMs/1000}s)`);
+        console.error(`   Waiting requests: ${stats.waitingRequests}`);
+        console.error(`   Available browsers: ${stats.availableBrowsers}`);
+        console.error(`   Busy browsers: ${stats.busyBrowsers}`);
+        console.error(`   Browser page counts:`, stats.browserPageCounts);
+        console.error('   Initiating emergency recovery...');
+        console.error('='.repeat(80) + '\n');
+
+        await this.recoverFromDeadlock();
+      }
+    }, checkIntervalMs);
+  }
+
+  /**
+   * Emergency recovery: Kill all browsers and rebuild pool
+   */
+  async recoverFromDeadlock() {
+    console.log('🔧 [Playwright] Step 1: Killing all browser processes...');
+
+    // Force-kill all browser processes
+    for (let i = 0; i < this.browsers.length; i++) {
+      const browser = this.browsers[i];
+      if (!browser) {
+        console.log(`   Browser ${i + 1}: Already null (skipping)`);
+        continue;
+      }
+
+      try {
+        // Get process ID (Playwright browsers don't expose .process() like Puppeteer)
+        let pid = null;
+        try {
+          // Playwright doesn't have browser.process(), but we can try to get it
+          if (browser._process) {
+            pid = browser._process.pid;
+          }
+        } catch (e) {}
+
+        // Close browser
+        try {
+          await Promise.race([
+            browser.close(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Close timeout')), 5000))
+          ]);
+          console.log(`   ✅ Browser ${i + 1} closed gracefully`);
+        } catch (e) {
+          console.warn(`   ⚠️ Browser ${i + 1} close failed: ${e.message}`);
+        }
+
+        // Force-kill process if we have PID
+        if (pid) {
+          try {
+            process.kill(pid, 'SIGKILL');
+            console.log(`   🔪 Killed browser ${i + 1} process (pid: ${pid})`);
+          } catch (killErr) {
+            if (killErr.code === 'ESRCH' || killErr.code === 'ENOENT') {
+              console.log(`   ✅ Browser ${i + 1} process already dead`);
+            } else {
+              console.warn(`   ⚠️ Failed to kill pid ${pid}: ${killErr.message}`);
+            }
+          }
+        }
+
+        this.browsers[i] = null;
+      } catch (e) {
+        console.error(`   ❌ Error killing browser ${i + 1}:`, e.message);
+      }
+    }
+
+    // Kill any orphaned chromium processes
+    try {
+      const { execSync } = require('child_process');
+      execSync('pkill -9 chromium || pkill -9 chrome || true', {
+        stdio: 'ignore',
+        timeout: 5000
+      });
+      console.log('   ✅ Cleaned up orphaned browser processes');
+    } catch (e) {
+      // Ignore - pkill might not exist on Windows
+    }
+
+    console.log('\n🔧 [Playwright] Step 2: Waiting for memory reclaim...');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Force garbage collection
+    if (global.gc) {
+      global.gc();
+      console.log('   ✅ Garbage collection triggered');
+    } else {
+      console.log('   ⚠️ GC not available (run with --expose-gc)');
+    }
+
+    console.log('\n🔧 [Playwright] Step 3: Rebuilding browser pool...');
+
+    // Reset pool state
+    this.browsers = [];
+    this.availableBrowsers = [];
+    this.busyBrowsers.clear();
+    this.waitingQueue = [];
+    this.pageCountPerBrowser.clear();
+
+    // Rebuild pool
+    let successCount = 0;
+    for (let i = 0; i < this.poolSize; i++) {
+      try {
+        console.log(`   Launching browser ${i + 1}/${this.poolSize}...`);
+        const browser = await this.launchBrowser(i + 1);
+        this.browsers.push(browser);
+        this.availableBrowsers.push(browser);
+        this.pageCountPerBrowser.set(browser, 0);
+        this.stats.totalBrowsersCreated++;
+        console.log(`   ✅ Browser ${i + 1} launched successfully`);
+        successCount++;
+      } catch (e) {
+        console.error(`   ❌ Failed to launch browser ${i + 1}:`, e.message);
+        this.browsers.push(null); // Maintain array size
+      }
+    }
+
+    console.log(`\n🔧 [Playwright] Step 4: Serving waiting requests (${successCount} browsers available)...`);
+
+    // Serve all waiting requests with fresh browsers
+    let served = 0;
+    while (this.waitingQueue.length > 0 && this.availableBrowsers.length > 0) {
+      const resolve = this.waitingQueue.shift();
+      const browser = this.availableBrowsers.shift();
+      this.busyBrowsers.add(browser);
+      resolve(browser);
+      served++;
+    }
+
+    console.log(`   ✅ Served ${served} waiting requests`);
+
+    if (this.waitingQueue.length > 0) {
+      console.warn(`   ⚠️ ${this.waitingQueue.length} requests still waiting (not enough browsers)`);
+    }
+
+    // Reset activity timestamp
+    this.lastActivityTimestamp = Date.now();
+
+    console.log('\n' + '='.repeat(80));
+    console.log('✅ [Playwright] DEADLOCK RECOVERY COMPLETE ✅');
+    console.log(`   Pool status: ${this.availableBrowsers.length} available, ${this.busyBrowsers.size} busy, ${this.waitingQueue.length} waiting`);
+    console.log('='.repeat(80) + '\n');
   }
 }
 

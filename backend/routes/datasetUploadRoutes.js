@@ -66,9 +66,24 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       const sheet = workbook.Sheets[sheetName];
       const data = XLSX.utils.sheet_to_json(sheet);
 
-      // Extract URLs (assuming first column)
+      // Extract URLs - try multiple column names
       urls = data
-        .map(row => Object.values(row)[0])
+        .map(row => {
+          // Try common URL column names first
+          const urlValue = row['URL'] || row['url'] || row['Website'] || row['website'] || row['Link'] || row['link'];
+
+          // If we found a URL column, use it
+          if (urlValue && typeof urlValue === 'string') {
+            return urlValue;
+          }
+
+          // Otherwise, fall back to finding the first column that looks like a URL
+          const values = Object.values(row);
+          return values.find(val =>
+            typeof val === 'string' &&
+            (val.startsWith('http://') || val.startsWith('https://') || val.includes('.'))
+          ) || values[0];
+        })
         .filter(url => url && typeof url === 'string')
         .map(url => url.trim());
 

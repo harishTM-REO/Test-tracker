@@ -2,11 +2,14 @@ const path = require('path');
 const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
 const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/AdobeTargetValidationResult'));
 const AdobeTargetValidationDocument = require(path.join(__dirname, '../../models/AdobeTargetValidationDocument'));
+const DynamicYieldValidationResult = require(path.join(__dirname, '../../models/DynamicYieldValidationResult'));
+const DynamicYieldValidationDocument = require(path.join(__dirname, '../../models/DynamicYieldValidationDocument'));
 const OptimizelyValidationResult = require(path.join(__dirname, '../../models/OptimizelyValidationResult'));
 const OptimizelyValidationDocument = require(path.join(__dirname, '../../models/OptimizelyValidationDocument'));
 const Dataset = require(path.join(__dirname, '../../models/Dataset'));
 const AdobeScraperService = require(path.join(__dirname, '../../services/adobeScraperService'));
 const OptimizelyValidationService = require(path.join(__dirname, './optimizelyValidationService'));
+const DynamicYieldValidationService = require(path.join(__dirname, './dynamicYieldValidationService'));
 // ✅ Use browser service (switches between pool/cluster based on USE_PUPPETEER_CLUSTER)
 const browserPool = require(path.join(__dirname, '../../services/browserService'));
 const { 
@@ -146,6 +149,9 @@ class AdobeTarget1_0Service {
             jobQueue.registerWorker('optimizely-validation', async (jobData, progressCallback) => {
                 return await OptimizelyValidationService.performValidation(jobData, progressCallback);
             });
+            jobQueue.registerWorker('dynamic-yield-validation', async (jobData, progressCallback) => {
+                return await DynamicYieldValidationService.performValidation(jobData, progressCallback);
+            });
             console.log('✅ Adobe Target 1.0 Service initialized');
         } catch (error) {
             console.error('❌ Failed to initialize AT 1.0 Service:', error);
@@ -160,7 +166,6 @@ class AdobeTarget1_0Service {
     async performScraping(jobData, progressCallback) {
         const { datasetId, datasetName, urls, options = {} } = jobData;
 
-        const browser = await this.launchBrowser(); // Launch one browser for the whole job
         try {
             console.log(`\n🎯 Starting Adobe Target 1.0 workflow for: ${datasetName}`);
             console.log(`📊 Processing ${urls.length} URLs from dataset\n`);
@@ -214,7 +219,7 @@ class AdobeTarget1_0Service {
                 try {
                     // Step 1: Prioritize URL
                     console.log(`  ➤ Step 1: Prioritizing URL...`);
-                    const prioritizationResult = await this.prioritizeUrl(originalUrl, browser);
+                    const prioritizationResult = await this.prioritizeUrl(originalUrl);
 
                     // Step 2: Categorize URLs
                     console.log(`  ➤ Step 2: Categorizing prioritized URLs...`);
@@ -330,10 +335,6 @@ class AdobeTarget1_0Service {
             }
 
             throw error;
-        } finally {
-            if (browser) {
-                await browser.close();
-            }
         }
     }
 
@@ -345,88 +346,78 @@ class AdobeTarget1_0Service {
         throw new Error('Re-scraping not yet implemented');
     }
 
-    async _liveCrawl(url, timeout, browser) {
-        let page;
-        try {
-            const normalizedUrl = normalizeUrl(url);
-            if (!normalizedUrl) {
-                throw new Error(`Invalid URL for live crawl: ${url}`);
-            }
-
-            const pageTimeout = parseInt(timeout) || 60000;
-
-            page = await browser.newPage();
-
-            if (typeof page.setViewport === 'function') {
-                await page.setViewport({ width: 1366, height: 768 });
-            }
-
-            try {
-                await page.goto(normalizedUrl, { waitUntil: 'networkidle2', timeout: pageTimeout });
-            } catch (error) {
-                console.log(`⚠️ Networkidle timeout for ${url}, falling back to domcontentloaded.`);
-                await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: pageTimeout });
-            }
-
-            await new Promise(r => setTimeout(r, 2000));
-
-            // Scroll the page
-            await page.evaluate(async () => {
-                await new Promise((resolve) => {
-                    let totalHeight = 0;
-                    const distance = 100;
-                    const timer = setInterval(() => {
-                        const scrollHeight = document.body.scrollHeight;
-                        window.scrollBy(0, distance);
-                        totalHeight += distance;
-                        if (totalHeight >= scrollHeight) {
-                            clearInterval(timer);
-                            resolve();
-                        }
-                    }, 100);
-                });
-            });
-
-            await new Promise(r => setTimeout(r, 1000));
-
-            const urls = await page.evaluate(() => {
-                const links = new Set();
-                const anchors = document.querySelectorAll('a[href]');
-                const origin = window.location.origin;
-
-                anchors.forEach(anchor => {
-                    let href = anchor.getAttribute('href');
-                    if (!href || href.trim() === '' || href.startsWith('#') || href.startsWith('javascript:')) return;
-
-                    try {
-                        const absoluteUrl = new URL(href, origin).href;
-                        links.add(absoluteUrl);
-                    } catch(e) {
-                        // ignore invalid urls
-                    }
-                });
-                return [...links];
-            });
-
-            return urls;
-
-        } catch (error) {
-            console.error(`❌ Error in _liveCrawl for ${url}:`, error.message);
-            throw error; // Re-throw to be caught by prioritizeUrl
-        } finally {
-            if (page && !page.isClosed()) {
-                await page.close();
-            }
+    async _liveCrawl(url, timeout) {
+        const normalizedUrl = normalizeUrl(url);
+        if (!normalizedUrl) {
+            throw new Error(`Invalid URL for live crawl: ${url}`);
         }
+
+        return await browserPool.withBrowser(async (browser) => {
+            const context = await browser.newContext();
+            const page = await context.newPage();
+
+            const navigationTimeout = 120000; // 2 minutes
+            page.setDefaultNavigationTimeout(navigationTimeout);
+            page.setDefaultTimeout(navigationTimeout);
+            
+            try {
+                // Use a more lenient waiting strategy
+                await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
+                
+                // Wait for a bit to let JS run
+                await new Promise(r => setTimeout(r, 5000));
+
+                await page.evaluate(async () => {
+                    await new Promise((resolve) => {
+                        let totalHeight = 0;
+                        const distance = 100;
+                        const timer = setInterval(() => {
+                            const scrollHeight = document.body.scrollHeight;
+                            window.scrollBy(0, distance);
+                            totalHeight += distance;
+                            if (totalHeight >= scrollHeight) {
+                                clearInterval(timer);
+                                resolve();
+                            }
+                        }, 100);
+                    });
+                });
+
+                await new Promise(r => setTimeout(r, 1000));
+
+                const urls = await page.evaluate(() => {
+                    const links = new Set();
+                    const anchors = document.querySelectorAll('a[href]');
+                    const origin = window.location.origin;
+
+                    anchors.forEach(anchor => {
+                        let href = anchor.getAttribute('href');
+                        if (!href || href.trim() === '' || href.startsWith('#') || href.startsWith('javascript:')) return;
+
+                        try {
+                            const absoluteUrl = new URL(href, origin).href;
+                            links.add(absoluteUrl);
+                        } catch(e) {
+                            // ignore invalid urls
+                        }
+                    });
+                    return [...links];
+                });
+                return urls;
+            } finally {
+                await page.close();
+                await context.close();
+            }
+        });
     }
 
     /**
      * Step 1: Prioritize a single URL
      */
-    async prioritizeUrl(url, browser) {
+    async prioritizeUrl(url) {
         try {
             console.log(`    ➤ Step 1a: Live-crawling ${url} to gather URLs...`);
-            const collectedUrls = await this._liveCrawl(url, 60000, browser);
+            const collectedUrls = await this._liveCrawl(url, 60000);
             console.log(`    ➤ Step 1b: Prioritizing ${collectedUrls.length} collected URLs...`);
 
             const prioritizationResult = urlPrioritizationService.prioritizeUrls(collectedUrls);
@@ -505,7 +496,7 @@ class AdobeTarget1_0Service {
      * Step 3: Scrape Adobe Target from top 25 URLs with concurrency control
      */
     async scrapeTop25Urls(categorizationResult, options = {}) {
-        const concurrency = options.concurrency || 4; // 4 concurrent URLs
+        const concurrency = options.concurrency || 2; // 2 concurrent URLs
         const results = [];
 
         // Enhanced summary with all required fields
@@ -1030,6 +1021,573 @@ class AdobeTarget1_0Service {
                 await datasetDoc.save();
             }
             throw error;
+        }
+    }
+
+    /**
+     * Dynamic Yield detection workflow
+     * Structure identical to Adobe Target validation but detects Dynamic Yield presence
+     */
+    async performDynamicYieldValidation(jobData, progressCallback) {
+        const { datasetId, datasetName, urls = [] } = jobData;
+
+        if (!urls || urls.length === 0) {
+            throw new Error('No URLs provided for Dynamic Yield validation');
+        }
+
+        let datasetDoc = null;
+        let validationResultDoc = null;
+        const startTime = new Date();
+
+        try {
+            progressCallback(5, { message: 'Starting Dynamic Yield validation run' });
+
+            // Configuration
+            const BATCH_SIZE = parseInt(process.env.DYNAMIC_YIELD_BATCH_SIZE) ||
+                               parseInt(process.env.BROWSER_RESTART_EVERY) || 20;
+            const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
+            const CONCURRENCY = parseInt(process.env.PQUEUE_CONCURRENCY) || poolSize;
+
+            const totalBatches = Math.max(1, Math.ceil(urls.length / BATCH_SIZE));
+
+            console.log('\n🚀 Starting Dynamic Yield detection with BATCHED processing');
+            console.log(`   Total URLs: ${urls.length}`);
+            console.log(`   Batch Size: ${BATCH_SIZE}`);
+            console.log(`   Concurrency: ${CONCURRENCY}`);
+            console.log(`   Total Batches: ${totalBatches}\n`);
+
+            datasetDoc = await Dataset.findById(datasetId);
+            if (datasetDoc) {
+                datasetDoc.dynamicYieldValidation = {
+                    ...(datasetDoc.dynamicYieldValidation || {}),
+                    status: 'in_progress',
+                    lastRunAt: startTime,
+                    summary: {
+                        totalUrls: urls.length,
+                        positiveCount: 0,
+                        negativeCount: 0,
+                        failedCount: 0,
+                        detectionRate: 0
+                    }
+                };
+                await datasetDoc.save();
+            }
+
+            await DynamicYieldValidationDocument.deleteMany({ datasetId });
+
+            validationResultDoc = await DynamicYieldValidationResult.create({
+                datasetId,
+                datasetName,
+                totalUrls: urls.length,
+                status: 'in_progress',
+                startedAt: startTime,
+                summary: {
+                    totalUrls: urls.length,
+                    positiveCount: 0,
+                    negativeCount: 0,
+                    failedCount: 0,
+                    detectionRate: 0,
+                    startedAt: startTime
+                }
+            });
+
+            // Counters for memory optimization
+            let positiveCount = 0;
+            let negativeCount = 0;
+            let failedCount = 0;
+
+            // Process in batches
+            for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+                const chunk = urls.slice(i, i + BATCH_SIZE);
+                const chunkNumber = Math.floor(i / BATCH_SIZE) + 1;
+
+                console.log(`\n📦 Processing Batch ${chunkNumber}/${totalBatches} (${chunk.length} URLs)`);
+
+                const chunkPositives = [];
+                const chunkNegatives = [];
+                const chunkFailures = [];
+                const chunkStartTime = Date.now();
+
+                let chunkResults;
+                try {
+                    chunkResults = await this.processDynamicYieldChunk(chunk, {
+                        concurrency: CONCURRENCY
+                    });
+
+                    const chunkDuration = Date.now() - chunkStartTime;
+                    console.log(`⏱️  Batch ${chunkNumber} completed in ${(chunkDuration / 1000).toFixed(1)}s`);
+                } catch (chunkError) {
+                    console.error(`🔴 Error processing batch ${chunkNumber}:`, chunkError.message);
+                    throw chunkError;
+                }
+
+                // Process Results
+                if (chunkResults) {
+                    chunkResults.forEach(result => {
+                        const targetUrl = result?.url;
+                        const companyName = result?.companyName || null;
+
+                        if (!targetUrl || targetUrl === 'INVALID_URL') {
+                            failedCount += 1;
+                            chunkFailures.push(this.buildDynamicYieldValidationRecord({
+                                url: 'INVALID_URL',
+                                companyName,
+                                status: 'failed',
+                                error: 'Invalid or missing URL'
+                            }));
+                            return;
+                        }
+
+                        if (!result.success) {
+                            failedCount += 1;
+                            chunkFailures.push(this.buildDynamicYieldValidationRecord({
+                                url: targetUrl,
+                                companyName,
+                                status: 'failed',
+                                error: result.error || 'Unknown error'
+                            }));
+                            return;
+                        }
+
+                        const dynamicYieldData = result.dynamicYieldData || {};
+                        const isDetected = dynamicYieldData.detected === true;
+
+                        if (isDetected) {
+                            positiveCount += 1;
+                            chunkPositives.push(this.buildDynamicYieldValidationRecord({
+                                url: targetUrl,
+                                companyName,
+                                status: 'positive',
+                                dynamicYieldData
+                            }));
+                        } else {
+                            negativeCount += 1;
+                            chunkNegatives.push(this.buildDynamicYieldValidationRecord({
+                                url: targetUrl,
+                                companyName,
+                                status: 'negative',
+                                dynamicYieldData
+                            }));
+                        }
+                    });
+                }
+
+                // Update Progress
+                const processedCount = Math.min(i + BATCH_SIZE, urls.length);
+                const progress = 5 + Math.floor((processedCount / urls.length) * 90);
+                progressCallback(Math.min(progress, 95), {
+                    message: `Validated ${processedCount}/${urls.length} URLs`,
+                    processed: processedCount,
+                    total: urls.length
+                });
+
+                // Save batch to DB
+                await this.saveDynamicYieldBatchDocument({
+                    datasetId,
+                    datasetName,
+                    batchNumber: chunkNumber,
+                    totalBatches,
+                    totalUrls: chunk.length,
+                    positives: chunkPositives,
+                    negatives: chunkNegatives,
+                    failures: chunkFailures
+                });
+
+                // Memory cleanup
+                if (chunkNumber < totalBatches) {
+                    const batchDelay = parseInt(process.env.BATCH_DELAY) || 3000;
+                    await performMemoryCleanup(batchDelay);
+                }
+            }
+
+            // Final stats
+            const endTime = new Date();
+            const summary = {
+                totalUrls: urls.length,
+                positiveCount: positiveCount,
+                negativeCount: negativeCount,
+                failedCount: failedCount,
+                detectionRate: urls.length > 0 ? Number(((positiveCount / urls.length) * 100).toFixed(2)) : 0,
+                startedAt: startTime,
+                completedAt: endTime,
+                durationMs: endTime - startTime
+            };
+
+            validationResultDoc.status = 'completed';
+            validationResultDoc.completedAt = endTime;
+            validationResultDoc.durationMs = summary.durationMs;
+            validationResultDoc.summary = summary;
+            validationResultDoc.positiveUrls = [];
+            validationResultDoc.negativeUrls = [];
+            validationResultDoc.failedUrls = [];
+            await validationResultDoc.save();
+
+            if (datasetDoc) {
+                datasetDoc.dynamicYieldValidation = {
+                    status: 'completed',
+                    lastRunAt: endTime,
+                    lastResultId: validationResultDoc._id,
+                    summary: {
+                        totalUrls: summary.totalUrls,
+                        positiveCount: summary.positiveCount,
+                        negativeCount: summary.negativeCount,
+                        failedCount: summary.failedCount,
+                        detectionRate: summary.detectionRate
+                    }
+                };
+                await datasetDoc.save();
+            }
+
+            progressCallback(100, { message: 'Dynamic Yield validation completed' });
+
+            return {
+                success: true,
+                message: 'Dynamic Yield validation completed successfully',
+                resultId: validationResultDoc._id,
+                summary
+            };
+        } catch (error) {
+            console.error('Error during Dynamic Yield validation workflow:', error);
+            if (validationResultDoc) {
+                validationResultDoc.status = 'failed';
+                validationResultDoc.error = error.message;
+                validationResultDoc.completedAt = new Date();
+                await validationResultDoc.save();
+            }
+            if (datasetDoc) {
+                datasetDoc.dynamicYieldValidation = {
+                    ...(datasetDoc.dynamicYieldValidation || {}),
+                    status: 'failed'
+                };
+                await datasetDoc.save();
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Process a chunk of URLs for Dynamic Yield detection
+     * Uses browser pool with concurrency control
+     */
+    async processDynamicYieldChunk(urls, options = {}) {
+        if (!urls || urls.length === 0) return [];
+
+        const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
+        const concurrency = options.concurrency || poolSize;
+
+        console.log(`\n🔁 Processing ${urls.length} URLs (Browser Pool Mode)`);
+        console.log(`   Concurrency: ${concurrency}`);
+
+        const PQueueLib = require('p-queue');
+        const PQueue = PQueueLib.default || PQueueLib;
+
+        const queue = new PQueue({ concurrency: concurrency });
+
+        const tasks = urls.map((entry, idx) => queue.add(async () => {
+            const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+            const targetUrl = normalizedEntry.url;
+
+            if (!targetUrl) {
+                return {
+                    index: idx,
+                    result: { success: false, url: 'INVALID_URL', error: 'Invalid URL' }
+                };
+            }
+
+            console.log(`\n🔸 [${idx + 1}/${urls.length}] Detecting Dynamic Yield: ${targetUrl}`);
+
+            try {
+                // A. Reachability Check
+                try {
+                    await isUrlReachable(targetUrl);
+                } catch (e) {
+                    console.log(`   ❌ URL unreachable: ${targetUrl}`);
+                    return {
+                        index: idx,
+                        result: { success: false, url: targetUrl, error: 'URL unreachable' }
+                    };
+                }
+
+                // B. Dynamic Yield Detection
+                const detectionResult = await this.detectDynamicYieldPresence(targetUrl);
+
+                // Check for errors
+                if (detectionResult.detectionSource?.error) {
+                    return {
+                        index: idx,
+                        result: {
+                            success: false,
+                            url: targetUrl,
+                            error: detectionResult.detectionSource.error
+                        }
+                    };
+                }
+
+                // C. Success
+                console.log('   ✅ Detection complete');
+                return {
+                    index: idx,
+                    result: {
+                        success: true,
+                        url: targetUrl,
+                        companyName: normalizedEntry.companyName,
+                        dynamicYieldData: {
+                            detected: detectionResult.detected,
+                            version: detectionResult.version,
+                            campaignIds: detectionResult.campaignIds || [],
+                            campaignNames: detectionResult.campaignNames || [],
+                            detectionMethod: detectionResult.detectionMethod,
+                            hasApprovedCookie: detectionResult.hasApprovedCookie,
+                            captchaDetected: detectionResult.captchaDetected,
+                            captchaStatus: detectionResult.captchaStatus
+                        }
+                    }
+                };
+
+            } catch (error) {
+                console.error(`   ❌ Task failed for ${targetUrl}: ${error.message}`);
+                return {
+                    index: idx,
+                    result: { success: false, url: targetUrl, error: error.message }
+                };
+            }
+        }));
+
+        const settled = await Promise.allSettled(tasks);
+
+        const results = settled.map((res, idx) => {
+            if (res.status === 'fulfilled') return res.value;
+            return {
+                index: idx,
+                result: { success: false, url: urls[idx]?.url || 'UNKNOWN', error: 'Task failed' }
+            };
+        });
+
+        results.sort((a, b) => a.index - b.index);
+
+        console.log('\n' + '═'.repeat(70));
+        console.log(`✅ Chunk complete: ${results.length} URLs processed`);
+
+        return results.map(r => r.result);
+    }
+
+    /**
+     * Detect Dynamic Yield presence on a URL
+     * PLACEHOLDER: User implements actual detection logic here
+     */
+    async detectDynamicYieldPresence(url) {
+        return await browserPool.withBrowser(async (browser) => {
+            const context = await browser.newContext();
+            const page = await context.newPage();
+
+            const navigationTimeout = 30000;
+            page.setDefaultNavigationTimeout(navigationTimeout);
+            page.setDefaultTimeout(navigationTimeout);
+
+            try {
+                // Navigate to page
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
+
+                // Handle cookie consent FIRST
+                const { handleCookieConsent } = require(path.join(__dirname, '../../utils/helper'));
+                console.log('   🍪 Handling cookie consent...');
+                const cookieConsentType = await handleCookieConsent(page);
+                console.log(`   🍪 Cookie consent result: ${cookieConsentType}`);
+
+                // Wait for Dynamic Yield to initialize after cookie consent
+                console.log('   ⏳ Waiting for Dynamic Yield to initialize...');
+                await page.waitForTimeout(3000);
+
+                // Retry logic: Check for window.DYO (max 2 attempts)
+                let detectionResult = null;
+                const maxRetries = 2;
+                const retryDelay = 1000;
+
+                for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    console.log(`   🔍 Detection attempt ${attempt}/${maxRetries}...`);
+
+                    detectionResult = await page.evaluate(() => {
+                    try {
+                        // Check for window.DYO object (main Dynamic Yield object)
+                        const hasDYO = typeof window.DYO !== 'undefined';
+                        const hasDY = typeof window.DY !== 'undefined';
+                        const hasDyQueue = typeof window._dyq !== 'undefined';
+
+                        // Check for Dynamic Yield scripts
+                        const scripts = Array.from(document.querySelectorAll('script'));
+                        const dyScripts = scripts.filter(script => {
+                            const src = script.src || '';
+                            const content = script.innerHTML || '';
+                            return src.includes('dynamicyield') ||
+                                   src.includes('dy.') ||
+                                   content.includes('DYO') ||
+                                   content.includes('window.DY');
+                        });
+
+                        // Check for Dynamic Yield cookies
+                        const cookies = document.cookie.split(';').map(c => c.trim());
+                        const dyCookies = cookies.filter(c =>
+                            c.startsWith('dy_') ||
+                            c.startsWith('_dyid') ||
+                            c.startsWith('_dyjsession') ||
+                            c.startsWith('_dycnst') ||
+                            c.startsWith('_dyus')
+                        );
+
+                        // Check for Dynamic Yield DOM elements
+                        const dyElements = document.querySelectorAll('[data-dy], [class*="dy-"], .DYNSECTION, [id*="dy-"]');
+
+                        // Determine if Dynamic Yield is detected
+                        const detected = hasDYO || hasDY || hasDyQueue || dyScripts.length > 0 || dyCookies.length > 0;
+
+                        // Try to extract version and experiment info if DYO is available
+                        let version = null;
+                        let campaignIds = [];
+                        let campaignNames = [];
+
+                        if (hasDYO && window.DYO) {
+                            // Try to get version
+                            if (window.DYO.version) {
+                                version = window.DYO.version;
+                            }
+
+                            // Extract experiments from window.DYO.otags
+                            if (window.DYO.otags && typeof window.DYO.otags === 'object') {
+                                // otags is an object where keys are experiment IDs
+                                const otagsEntries = Object.entries(window.DYO.otags);
+
+                                campaignIds = otagsEntries.map(([id, data]) => id).filter(id => id);
+                                campaignNames = otagsEntries.map(([id, data]) => data.name).filter(name => name);
+                            }
+                        }
+
+                        return {
+                            detected: detected,
+                            hasDYO: hasDYO,
+                            hasDY: hasDY,
+                            hasDyQueue: hasDyQueue,
+                            dyScriptCount: dyScripts.length,
+                            dyCookieCount: dyCookies.length,
+                            dyElementCount: dyElements.length,
+                            version: version,
+                            campaignIds: campaignIds,
+                            campaignNames: campaignNames,
+                            detectionMethod: hasDYO ? 'window.DYO' : (hasDY ? 'window.DY' : (dyScripts.length > 0 ? 'script' : (dyCookies.length > 0 ? 'cookie' : 'none')))
+                        };
+                    } catch (error) {
+                        return {
+                            detected: false,
+                            error: error.message
+                        };
+                    }
+                    });
+
+                    // Log the detection result for this attempt
+                    console.log(`   📊 Attempt ${attempt} results:`, {
+                        detected: detectionResult.detected,
+                        hasDYO: detectionResult.hasDYO,
+                        hasDY: detectionResult.hasDY,
+                        detectionMethod: detectionResult.detectionMethod
+                    });
+
+                    // If Dynamic Yield is detected, break out of retry loop
+                    if (detectionResult.detected) {
+                        console.log(`   ✅ Dynamic Yield detected on attempt ${attempt}!`);
+                        break;
+                    }
+
+                    // If not detected and we have more retries, wait before next attempt
+                    if (attempt < maxRetries) {
+                        console.log(`   ⏳ Not detected yet, waiting ${retryDelay}ms before retry...`);
+                        await page.waitForTimeout(retryDelay);
+                    } else {
+                        console.log(`   ❌ Dynamic Yield not detected after ${maxRetries} attempts`);
+                    }
+                }
+
+                console.log(`   🔍 Final Dynamic Yield Detection Results:`, JSON.stringify(detectionResult, null, 2));
+
+                return {
+                    detected: detectionResult.detected === true,
+                    version: detectionResult.version,
+                    campaignIds: detectionResult.campaignIds || [],
+                    campaignNames: detectionResult.campaignNames || [],
+                    detectionMethod: detectionResult.detectionMethod || 'none',
+                    hasApprovedCookie: cookieConsentType !== 'not_found' && cookieConsentType !== 'skipped',
+                    captchaDetected: false,
+                    captchaStatus: null,
+                    detectionSource: {
+                        error: detectionResult.error || null,
+                        hasDYO: detectionResult.hasDYO,
+                        hasDY: detectionResult.hasDY,
+                        hasDyQueue: detectionResult.hasDyQueue,
+                        dyScriptCount: detectionResult.dyScriptCount,
+                        dyCookieCount: detectionResult.dyCookieCount,
+                        dyElementCount: detectionResult.dyElementCount
+                    }
+                };
+
+            } catch (error) {
+                return {
+                    detected: false,
+                    version: null,
+                    campaignIds: [],
+                    campaignNames: [],
+                    detectionMethod: null,
+                    hasApprovedCookie: false,
+                    captchaDetected: false,
+                    captchaStatus: null,
+                    detectionSource: {
+                        error: error.message
+                    }
+                };
+            } finally {
+                await page.close();
+                await context.close();
+            }
+        });
+    }
+
+    // Helper method to build validation record
+    buildDynamicYieldValidationRecord({ url, companyName, status, dynamicYieldData = {}, error = null }) {
+        return {
+            url,
+            companyName: companyName || null,
+            status,
+            detectionDetails: Object.keys(dynamicYieldData).length > 0 ? {
+                detected: dynamicYieldData.detected === true,
+                version: dynamicYieldData.version || null,
+                campaignIds: dynamicYieldData.campaignIds || [],
+                campaignNames: dynamicYieldData.campaignNames || [],
+                detectionMethod: dynamicYieldData.detectionMethod || null,
+                hasApprovedCookie: dynamicYieldData.hasApprovedCookie || false,
+                captchaDetected: dynamicYieldData.captchaDetected === true
+            } : undefined,
+            scrapedAt: new Date(),
+            error: error || null
+        };
+    }
+
+    // Helper method to save batch document
+    async saveDynamicYieldBatchDocument({ datasetId, datasetName, batchNumber, totalBatches, totalUrls, positives, negatives, failures }) {
+        try {
+            await DynamicYieldValidationDocument.findOneAndUpdate(
+                { datasetId, batchNumber },
+                {
+                    datasetId, datasetName, batchNumber, totalBatches, totalUrls,
+                    positiveCount: positives.length,
+                    negativeCount: negatives.length,
+                    failedCount: failures.length,
+                    detectionRate: totalUrls > 0 ? Number(((positives.length / totalUrls) * 100).toFixed(2)) : 0,
+                    processedAt: new Date(),
+                    positiveUrls: positives,
+                    negativeUrls: negatives,
+                    failedUrls: failures
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+        } catch (error) {
+            console.error('Error saving Dynamic Yield batch document:', error.message);
         }
     }
 
