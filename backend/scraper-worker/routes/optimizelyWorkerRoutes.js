@@ -3,50 +3,6 @@ const express = require('express');
 const router = express.Router();
 const OptimizelyScraperService = require(path.join(__dirname, '../../services/optimizelyScraperService'));
 const { isValidUrl } = require(path.join(__dirname, '../../utils/urlValidator'));
-const axios = require("axios");
-
-/**
- * Helper function to check if URL is reachable
- * @param {string} url - URL to check
- * @returns {Promise<boolean>} True if reachable
- */
-async function isUrlReachable(url) {
-  try {
-    console.log(`[isUrlReachable] 🔍 Attempting HEAD request to: ${url}`);
-    const response = await axios.head(url, {
-      timeout: 5000,
-      maxRedirects: 3,
-      validateStatus: () => true // handle manually
-    });
-    console.log(`[isUrlReachable] ✅ HEAD response status: ${response.status}`);
-
-    if ([200, 301, 302, 403].includes(response.status)) {
-      return true;
-    }
-    return false;
-
-  } catch (headError) {
-    console.log(`[isUrlReachable] ⚠️ HEAD request failed: ${headError.message}, trying GET...`);
-    // Fallback to lightweight GET
-    try {
-      const response = await axios.get(url, {
-        timeout: 5000,
-        maxRedirects: 3,
-        headers: {
-          'Range': 'bytes=0-0' // fetch minimal content
-        },
-        validateStatus: () => true
-      });
-
-      console.log(`[isUrlReachable] ✅ GET response status: ${response.status}`);
-      return [200, 301, 302, 403].includes(response.status);
-
-    } catch (getError) {
-      console.log(`[isUrlReachable] ❌ Both HEAD and GET failed: ${getError.message}`);
-      return false;
-    }
-  }
-}
 
 /**
  * @route   GET /worker/api/optimizely/scrape
@@ -85,20 +41,7 @@ router.get('/scrape', async (req, res) => {
     console.log(`[Optimizely] 🔍 Starting scrape for: ${url}`);
     const startTime = Date.now();
 
-    // ✅ OPTIONAL: Quick reachability check (disabled by default - browser handles this better)
-    const ENABLE_REACHABILITY_CHECK = process.env.ENABLE_OPTIMIZELY_REACHABILITY_CHECK === 'true';
-
-    if (ENABLE_REACHABILITY_CHECK) {
-      console.log(`[Optimizely] ⏱️  Checking if URL is reachable...`);
-      const isReachable = await isUrlReachable(url);
-      if (!isReachable) {
-        console.warn(`[Optimizely] ⚠️  URL failed reachability check, but proceeding anyway...`);
-        // Don't block - browser might still succeed
-      } else {
-        console.log(`[Optimizely] ✅ URL is reachable`);
-      }
-    }
-
+    // ✅ Reachability check removed - browser handles navigation better
     console.log(`[Optimizely] 🚀 Starting browser scrape...`);
 
     // Scrape the website using service

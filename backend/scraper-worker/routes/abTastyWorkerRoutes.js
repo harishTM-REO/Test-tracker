@@ -2,7 +2,7 @@ const path = require('path');
 const express = require('express');
 const router = express.Router();
 const AbTastyScraperService = require(path.join(__dirname, '../../services/abTastyScraperService'));
-const { isValidUrl, isUrlReachable } = require(path.join(__dirname, '../../utils/urlValidator'));
+const { isValidUrl } = require(path.join(__dirname, '../../utils/urlValidator'));
 
 /**
  * @route   GET /worker/api/abtasty/scrape
@@ -40,20 +40,7 @@ router.get('/scrape', async (req, res) => {
     console.log(`[ABTasty] 🔍 Starting scrape for: ${url}`);
     const startTime = Date.now();
 
-    // ✅ OPTIONAL: Quick reachability check (disabled by default - browser handles this better)
-    const ENABLE_REACHABILITY_CHECK = process.env.ENABLE_ABTASTY_REACHABILITY_CHECK === 'true';
-
-    if (ENABLE_REACHABILITY_CHECK) {
-      console.log(`[ABTasty] ⏱️  Checking if URL is reachable...`);
-      const isReachable = await isUrlReachable(url);
-      if (!isReachable) {
-        console.warn(`[ABTasty] ⚠️  URL failed reachability check, but proceeding anyway...`);
-        // Don't block - browser might still succeed
-      } else {
-        console.log(`[ABTasty] ✅ URL is reachable`);
-      }
-    }
-
+    // ✅ Reachability check removed - browser handles navigation better
     console.log(`[ABTasty] 🚀 Starting browser scrape...`);
 
     // Scrape the website using service

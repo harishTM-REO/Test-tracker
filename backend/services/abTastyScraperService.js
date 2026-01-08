@@ -148,27 +148,22 @@ class AbTastyScraperService {
     try {
       console.log(`Starting AbTasty scrape for: ${url}`);
 
-      // Quick reachability check before attempting to scrape
-      console.log(`⏱️  Checking if URL is reachable...`);
-      const isReachable = await isUrlReachable(url);
-      if (!isReachable) {
-        console.warn(`⚠️  URL is not reachable: ${url}`);
-        return {
-          success: false,
-          error: 'URL is not reachable',
-          url: url,
-          abTasty: {
-            detected: false,
-            experimentCount: 0,
-            activeCount: 0,
-            experiments: [],
-            cookieType: 'unreachable'
-          },
-          duration: (Date.now() - startTime) / 1000
-        };
+      // ✅ OPTIONAL: Quick reachability check (disabled by default - browser handles this better)
+      const ENABLE_SERVICE_REACHABILITY_CHECK = process.env.ENABLE_ABTASTY_SERVICE_REACHABILITY_CHECK === 'true';
+
+      if (ENABLE_SERVICE_REACHABILITY_CHECK) {
+        console.log(`⏱️  Checking if URL is reachable...`);
+        const isReachable = await isUrlReachable(url);
+
+        if (!isReachable) {
+          console.warn(`⚠️  URL failed reachability check, but proceeding anyway...`);
+          // Don't return early - let browser try
+        } else {
+          console.log(`✅ URL is reachable`);
+        }
       }
 
-      console.log(`✅ URL is reachable, proceeding with scrape...`);
+      console.log(`🚀 Proceeding with browser scrape...`);
 
       // Step 1: Get or create website record (optional if ExperimentService not available)
       let website = null;

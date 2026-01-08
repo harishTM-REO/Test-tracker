@@ -43,16 +43,22 @@ class DynamicYieldScraperService {
     try {
       console.log(`[Dynamic Yield] Starting scrape for: ${url}`);
 
-      // Quick reachability check
-      console.log(`[Dynamic Yield] ⏱️  Checking if URL is reachable...`);
-      const isReachable = await isUrlReachable(url);
+      // ✅ OPTIONAL: Quick reachability check (disabled by default - browser handles this better)
+      const ENABLE_SERVICE_REACHABILITY_CHECK = process.env.ENABLE_DYNAMICYIELD_SERVICE_REACHABILITY_CHECK === 'true';
 
-      if (!isReachable) {
-        console.warn(`[Dynamic Yield] ⚠️  URL is not reachable: ${url}`);
-        return this.formatErrorResponse(url, 'URL is not reachable', startTime);
+      if (ENABLE_SERVICE_REACHABILITY_CHECK) {
+        console.log(`[Dynamic Yield] ⏱️  Checking if URL is reachable...`);
+        const isReachable = await isUrlReachable(url);
+
+        if (!isReachable) {
+          console.warn(`[Dynamic Yield] ⚠️  URL failed reachability check, but proceeding anyway...`);
+          // Don't return early - let browser try
+        } else {
+          console.log(`[Dynamic Yield] ✅ URL is reachable`);
+        }
       }
 
-      console.log(`[Dynamic Yield] ✅ URL is reachable, starting detection...`);
+      console.log(`[Dynamic Yield] 🚀 Proceeding with browser detection...`);
 
       // Scrape Dynamic Yield data from page
       const dyData = await this.detectDynamicYieldFromPage(url);

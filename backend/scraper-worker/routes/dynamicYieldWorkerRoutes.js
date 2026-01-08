@@ -2,7 +2,7 @@ const path = require('path');
 const express = require('express');
 const router = express.Router();
 const DynamicYieldScraperService = require(path.join(__dirname, '../../services/dynamicYieldScraperService'));
-const { isValidUrl, isUrlReachable } = require(path.join(__dirname, '../../utils/urlValidator'));
+const { isValidUrl } = require(path.join(__dirname, '../../utils/urlValidator'));
 
 /**
  * @route   GET /worker/api/dynamicyield/scrape
@@ -41,20 +41,7 @@ router.get('/scrape', async (req, res) => {
     console.log(`[Dynamic Yield] 🔍 Starting scrape for: ${url}`);
     const startTime = Date.now();
 
-    // ✅ OPTIONAL: Quick reachability check (disabled by default - browser handles this better)
-    const ENABLE_REACHABILITY_CHECK = process.env.ENABLE_DYNAMICYIELD_REACHABILITY_CHECK === 'true';
-
-    if (ENABLE_REACHABILITY_CHECK) {
-      console.log(`[Dynamic Yield] ⏱️  Checking if URL is reachable...`);
-      const isReachable = await isUrlReachable(url);
-      if (!isReachable) {
-        console.warn(`[Dynamic Yield] ⚠️  URL failed reachability check, but proceeding anyway...`);
-        // Don't block - browser might still succeed
-      } else {
-        console.log(`[Dynamic Yield] ✅ URL is reachable`);
-      }
-    }
-
+    // ✅ Reachability check removed - browser handles navigation better
     console.log(`[Dynamic Yield] 🚀 Starting browser scrape...`);
 
     // Scrape the website using service
