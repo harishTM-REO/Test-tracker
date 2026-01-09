@@ -5,6 +5,8 @@ const AdobeTarget1_0Service = require(path.join(__dirname, '../services/adobeTar
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
 const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
 const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/AdobeTargetValidationResult'));
+const ABTastyValidationResult = require(path.join(__dirname, '../../models/ABTastyValidationResult'));
+const ABTastyValidationDocument = require(path.join(__dirname, '../../models/ABTastyValidationDocument'));
 const DynamicYieldValidationResult = require(path.join(__dirname, '../../models/DynamicYieldValidationResult'));
 const DynamicYieldValidationDocument = require(path.join(__dirname, '../../models/DynamicYieldValidationDocument'));
 const OptimizelyValidationResult = require(path.join(__dirname, '../../models/OptimizelyValidationResult'));
@@ -457,11 +459,13 @@ router.get('/validation/results/:datasetId', async (req, res) => {
  * @query batches - (optional) Get multiple batches: ?batches=1,5,10
  * @query all - (optional) Get all batches: ?all=true
  * @query summary - (optional) Get summary view only: ?summary=true
+ * @query groupByProject - (optional) Group positive URLs by Optimizely projectId: ?groupByProject=true
+ * @example GET /at10/api/optimizely-validation/results/6936ffa1c891633c7898de00?all=true&groupByProject=true
  */
 router.get('/optimizely-validation/results/:datasetId', async (req, res) => {
   try {
     const { datasetId } = req.params;
-    const { batch, batches, all, summary } = req.query;
+    const { batch, batches, all, summary, groupByProject } = req.query;
 
     console.log(`📊 Fetching Optimizely validation results for dataset: ${datasetId}`);
 
@@ -535,6 +539,72 @@ router.get('/optimizely-validation/results/:datasetId', async (req, res) => {
         .sort({ batchNumber: 1 });
     }
 
+    // ✅ Group URLs by projectId when requested
+    if (groupByProject === 'true') {
+      console.log(`🗂️  Grouping URLs by projectId...`);
+
+      const groupedByProject = {};
+      let totalPositiveUrls = 0;
+
+      // Collect all positive URLs from all batches
+      batchDocuments.forEach(doc => {
+        if (doc.positiveUrls && Array.isArray(doc.positiveUrls)) {
+          doc.positiveUrls.forEach(urlEntry => {
+            totalPositiveUrls++;
+            const projectId = urlEntry.detectionDetails?.projectId || 'unknown';
+
+            if (!groupedByProject[projectId]) {
+              groupedByProject[projectId] = {
+                projectId: projectId,
+                urls: [],
+                count: 0,
+                experiments: []
+              };
+            }
+
+            groupedByProject[projectId].urls.push({
+              url: urlEntry.url,
+              companyName: urlEntry.companyName,
+              experimentCount: urlEntry.detectionDetails?.experimentCount || 0,
+              activeCount: urlEntry.detectionDetails?.activeCount || 0,
+              scrapedAt: urlEntry.scrapedAt
+            });
+
+            groupedByProject[projectId].count++;
+
+            // Collect unique experiments for this project
+            if (urlEntry.detectionDetails?.experiments) {
+              urlEntry.detectionDetails.experiments.forEach(exp => {
+                if (!groupedByProject[projectId].experiments.find(e => e.id === exp.id)) {
+                  groupedByProject[projectId].experiments.push(exp);
+                }
+              });
+            }
+          });
+        }
+      });
+
+      // Convert to array and sort by count
+      const projectsArray = Object.values(groupedByProject)
+        .sort((a, b) => b.count - a.count);
+
+      console.log(`✅ Grouped ${totalPositiveUrls} URLs into ${projectsArray.length} projects`);
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          result: result,
+          summary: {
+            ...result.summary,
+            totalProjects: projectsArray.length,
+            totalPositiveUrls: totalPositiveUrls
+          },
+          groupedByProject: projectsArray,
+          batchCount: batchDocuments.length
+        }
+      });
+    }
+
     res.status(200).json({
       success: true,
       data: {
@@ -567,15 +637,239 @@ router.get('/optimizely-validation/results/:datasetId', async (req, res) => {
 });
 
 /**
+ * @route GET /at10/api/abtasty-validation/results/:datasetId
+ * @desc  Get ABTasty validation result for a dataset
+ * @query batch - (optional) Get a specific batch number: ?batch=5
+ * @query batches - (optional) Get multiple batches: ?batches=1,5,10
+ * @query all - (optional) Get all batches: ?all=true
+ * @query summary - (optional) Get summary view only: ?summary=true
+ * @query groupByProject - (optional) Group positive URLs by ABTasty projectId: ?groupByProject=true
+ * @example GET /at10/api/abtasty-validation/results/6936ffa1c891633c7898de00?all=true&groupByProject=true
+ */
+router.get('/abtasty-validation/results/:datasetId', async (req, res) => {
+  try {
+    const { datasetId } = req.params;
+    const { batch, batches, all, summary, groupByProject } = req.query;
+
+    console.log(`📊 Fetching ABTasty validation results for dataset: ${datasetId}`);
+
+    // If summary only requested, return just the main result document
+    if (summary === 'true') {
+      const result = await ABTastyValidationResult.findOne({ datasetId })
+        .sort({ createdAt: -1 });
+
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          message: 'ABTasty validation result not found for dataset',
+          datasetId
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          _id: result._id,
+          datasetId: result.datasetId,
+          datasetName: result.datasetName,
+          status: result.status,
+          summary: result.summary,
+          startedAt: result.startedAt,
+          completedAt: result.completedAt,
+          durationMs: result.durationMs,
+          totalUrls: result.totalUrls,
+          positiveCount: result.positiveUrls?.length || 0,
+          negativeCount: result.negativeUrls?.length || 0,
+          failedCount: result.failedUrls?.length || 0
+        }
+      });
+    }
+
+    // Get the main validation result
+    const result = await ABTastyValidationResult.findOne({ datasetId })
+      .sort({ createdAt: -1 });
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: 'ABTasty validation result not found for dataset',
+        datasetId
+      });
+    }
+
+    // Determine which batches to fetch
+    let batchesToFetch = null;
+    if (batch) {
+      batchesToFetch = [parseInt(batch)];
+    } else if (batches) {
+      batchesToFetch = batches.split(',').map(b => parseInt(b.trim())).filter(b => !isNaN(b));
+    } else if (all === 'true') {
+      batchesToFetch = null; // Get all batches
+    }
+
+    // Fetch batch documents if requested
+    let batchDocuments = [];
+    if (batchesToFetch !== null) {
+      if (batchesToFetch.length > 0) {
+        // Get specific batches
+        batchDocuments = await ABTastyValidationDocument.find({
+          datasetId,
+          batchNumber: { $in: batchesToFetch }
+        }).sort({ batchNumber: 1 });
+      }
+    } else if (all === 'true' || (!batch && !batches)) {
+      // Get all batches
+      batchDocuments = await ABTastyValidationDocument.find({ datasetId })
+        .sort({ batchNumber: 1 });
+    }
+
+    // ✅ Group URLs by projectId when requested
+    if (groupByProject === 'true') {
+      console.log(`🗂️  Grouping URLs by projectId...`);
+
+      const groupedByProject = {};
+      let totalPositiveUrls = 0;
+
+      // Collect all positive URLs from all batches
+      batchDocuments.forEach(doc => {
+        if (doc.positiveUrls && Array.isArray(doc.positiveUrls)) {
+          doc.positiveUrls.forEach(urlEntry => {
+            totalPositiveUrls++;
+            const projectId = urlEntry.detectionDetails?.projectId || 'unknown';
+
+            if (!groupedByProject[projectId]) {
+              groupedByProject[projectId] = {
+                projectId: projectId,
+                urls: [],
+                count: 0,
+                experiments: []
+              };
+            }
+
+            groupedByProject[projectId].urls.push({
+              url: urlEntry.url,
+              companyName: urlEntry.companyName,
+              experimentCount: urlEntry.detectionDetails?.experimentCount || 0,
+              activeCount: urlEntry.detectionDetails?.activeCount || 0,
+              scrapedAt: urlEntry.scrapedAt
+            });
+
+            groupedByProject[projectId].count++;
+
+            // Collect unique experiments for this project
+            if (urlEntry.detectionDetails?.experiments) {
+              urlEntry.detectionDetails.experiments.forEach(exp => {
+                if (!groupedByProject[projectId].experiments.find(e => e.id === exp.id)) {
+                  groupedByProject[projectId].experiments.push(exp);
+                }
+              });
+            }
+          });
+        }
+      });
+
+      // Convert to array and sort by count
+      const projectsArray = Object.values(groupedByProject)
+        .sort((a, b) => b.count - a.count);
+
+      console.log(`✅ Grouped ${totalPositiveUrls} URLs into ${projectsArray.length} projects`);
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          result: result,
+          summary: {
+            ...result.summary,
+            totalProjects: projectsArray.length,
+            totalPositiveUrls: totalPositiveUrls
+          },
+          groupedByProject: projectsArray,
+          batchCount: batchDocuments.length
+        }
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        result: result,
+        summary: result.summary,
+        batches: batchDocuments.map(doc => ({
+          batchNumber: doc.batchNumber,
+          totalBatches: doc.totalBatches,
+          totalUrls: doc.totalUrls,
+          positiveCount: doc.positiveCount,
+          negativeCount: doc.negativeCount,
+          failedCount: doc.failedCount,
+          detectionRate: doc.detectionRate,
+          positiveUrls: doc.positiveUrls,
+          negativeUrls: doc.negativeUrls,
+          failedUrls: doc.failedUrls,
+          processedAt: doc.processedAt
+        })),
+        batchCount: batchDocuments.length
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching ABTasty validation results:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch ABTasty validation results',
+      error: error.message
+    });
+  }
+});
+
+/**
  * @route GET /at10/api/dynamic-yield-validation/results/:datasetId
  * @desc  Get Dynamic Yield validation result for a dataset
+ * @query batch - (optional) Get a specific batch number: ?batch=5
+ * @query batches - (optional) Get multiple batches: ?batches=1,5,10
+ * @query all - (optional) Get all batches: ?all=true
+ * @query summary - (optional) Get summary view only: ?summary=true
+ * @query groupByCampaign - (optional) Group positive URLs by campaignId: ?groupByCampaign=true
+ * @example GET /at10/api/dynamic-yield-validation/results/6936ffa1c891633c7898de00?all=true&groupByCampaign=true
  */
 router.get('/dynamic-yield-validation/results/:datasetId', async (req, res) => {
   try {
     const { datasetId } = req.params;
+    const { batch, batches, all, summary, groupByCampaign } = req.query;
 
     console.log(`📊 Fetching Dynamic Yield validation results for dataset: ${datasetId}`);
 
+    // If summary only requested, return just the main result document
+    if (summary === 'true') {
+      const result = await DynamicYieldValidationResult.findOne({ datasetId })
+        .sort({ createdAt: -1 });
+
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          message: 'Dynamic Yield validation result not found for dataset',
+          datasetId
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          _id: result._id,
+          datasetId: result.datasetId,
+          datasetName: result.datasetName,
+          status: result.status,
+          summary: result.summary,
+          startedAt: result.startedAt,
+          completedAt: result.completedAt,
+          durationMs: result.durationMs,
+          totalUrls: result.totalUrls,
+          positiveCount: result.positiveUrls?.length || 0,
+          negativeCount: result.negativeUrls?.length || 0,
+          failedCount: result.failedUrls?.length || 0
+        }
+      });
+    }
+
+    // Get the main validation result
     const result = await DynamicYieldValidationResult.findOne({ datasetId })
       .sort({ createdAt: -1 });
 
@@ -587,10 +881,140 @@ router.get('/dynamic-yield-validation/results/:datasetId', async (req, res) => {
       });
     }
 
+    // Determine which batches to fetch
+    let batchesToFetch = null;
+    if (batch) {
+      batchesToFetch = [parseInt(batch)];
+    } else if (batches) {
+      batchesToFetch = batches.split(',').map(b => parseInt(b.trim())).filter(b => !isNaN(b));
+    } else if (all === 'true') {
+      batchesToFetch = null; // Get all batches
+    }
+
+    // Fetch batch documents if requested
+    let batchDocuments = [];
+    if (batchesToFetch !== null) {
+      if (batchesToFetch.length > 0) {
+        // Get specific batches
+        batchDocuments = await DynamicYieldValidationDocument.find({
+          datasetId,
+          batchNumber: { $in: batchesToFetch }
+        }).sort({ batchNumber: 1 });
+      }
+    } else if (all === 'true' || (!batch && !batches)) {
+      // Get all batches
+      batchDocuments = await DynamicYieldValidationDocument.find({ datasetId })
+        .sort({ batchNumber: 1 });
+    }
+
+    // ✅ Group URLs by campaignId when requested
+    if (groupByCampaign === 'true') {
+      console.log(`🗂️  Grouping URLs by campaignId...`);
+
+      const groupedByCampaign = {};
+      let totalPositiveUrls = 0;
+
+      // Collect all positive URLs from all batches
+      batchDocuments.forEach(doc => {
+        if (doc.positiveUrls && Array.isArray(doc.positiveUrls)) {
+          doc.positiveUrls.forEach(urlEntry => {
+            totalPositiveUrls++;
+
+            // Dynamic Yield can have multiple campaignIds per URL
+            const campaignIds = urlEntry.detectionDetails?.campaignIds || [];
+            const campaignNames = urlEntry.detectionDetails?.campaignNames || [];
+
+            if (campaignIds.length === 0) {
+              // No campaigns, group as 'unknown'
+              const campaignKey = 'unknown';
+              if (!groupedByCampaign[campaignKey]) {
+                groupedByCampaign[campaignKey] = {
+                  campaignId: 'unknown',
+                  campaignName: 'Unknown',
+                  urls: [],
+                  count: 0
+                };
+              }
+
+              groupedByCampaign[campaignKey].urls.push({
+                url: urlEntry.url,
+                companyName: urlEntry.companyName,
+                detectionMethod: urlEntry.detectionDetails?.detectionMethod,
+                version: urlEntry.detectionDetails?.version,
+                scrapedAt: urlEntry.scrapedAt
+              });
+
+              groupedByCampaign[campaignKey].count++;
+            } else {
+              // Add URL to each campaign it belongs to
+              campaignIds.forEach((campaignId, index) => {
+                const campaignName = campaignNames[index] || 'Unknown';
+
+                if (!groupedByCampaign[campaignId]) {
+                  groupedByCampaign[campaignId] = {
+                    campaignId: campaignId,
+                    campaignName: campaignName,
+                    urls: [],
+                    count: 0
+                  };
+                }
+
+                groupedByCampaign[campaignId].urls.push({
+                  url: urlEntry.url,
+                  companyName: urlEntry.companyName,
+                  detectionMethod: urlEntry.detectionDetails?.detectionMethod,
+                  version: urlEntry.detectionDetails?.version,
+                  scrapedAt: urlEntry.scrapedAt
+                });
+
+                groupedByCampaign[campaignId].count++;
+              });
+            }
+          });
+        }
+      });
+
+      // Convert to array and sort by count
+      const campaignsArray = Object.values(groupedByCampaign)
+        .sort((a, b) => b.count - a.count);
+
+      console.log(`✅ Grouped ${totalPositiveUrls} URLs into ${campaignsArray.length} campaigns`);
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          result: result,
+          summary: {
+            ...result.summary,
+            totalCampaigns: campaignsArray.length,
+            totalPositiveUrls: totalPositiveUrls
+          },
+          groupedByCampaign: campaignsArray,
+          batchCount: batchDocuments.length
+        }
+      });
+    }
+
     res.status(200).json({
       success: true,
-      data: result,
-      summary: result.summary
+      data: {
+        result: result,
+        summary: result.summary,
+        batches: batchDocuments.map(doc => ({
+          batchNumber: doc.batchNumber,
+          totalBatches: doc.totalBatches,
+          totalUrls: doc.totalUrls,
+          positiveCount: doc.positiveCount,
+          negativeCount: doc.negativeCount,
+          failedCount: doc.failedCount,
+          detectionRate: doc.detectionRate,
+          positiveUrls: doc.positiveUrls,
+          negativeUrls: doc.negativeUrls,
+          failedUrls: doc.failedUrls,
+          processedAt: doc.processedAt
+        })),
+        batchCount: batchDocuments.length
+      }
     });
   } catch (error) {
     console.error('Error fetching Dynamic Yield validation results:', error);
