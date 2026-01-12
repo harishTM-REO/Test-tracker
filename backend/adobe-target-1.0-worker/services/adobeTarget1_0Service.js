@@ -1,5 +1,7 @@
 const path = require('path');
 const AdobeTarget1_0Result = require(path.join(__dirname, '../../models/AdobeTarget1_0Result'));
+const AdobeTarget1_0Document = require(path.join(__dirname, '../../models/AdobeTarget1_0Document'));
+const AdobeTarget1_0UrlResult = require(path.join(__dirname, '../../models/AdobeTarget1_0UrlResult'));
 const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/AdobeTargetValidationResult'));
 const AdobeTargetValidationDocument = require(path.join(__dirname, '../../models/AdobeTargetValidationDocument'));
 const DynamicYieldValidationResult = require(path.join(__dirname, '../../models/DynamicYieldValidationResult'));
@@ -160,8 +162,9 @@ class AdobeTarget1_0Service {
     }
 
     /**
-     * Main Adobe Target 1.0 scraping workflow
+     * Main Adobe Target 1.0 scraping workflow with BATCH PROCESSING
      * Processes URLs through: Prioritization → Categorization → Top 25 Scraping
+     * ✅ FIX: Saves results in batches to prevent MongoDB 16MB document limit error
      */
     async performScraping(jobData, progressCallback) {
         const { datasetId, datasetName, urls, options = {} } = jobData;
@@ -172,6 +175,16 @@ class AdobeTarget1_0Service {
 
             const startTime = new Date();
 
+            // ========== CONFIGURATION FROM ENV ==========
+            // Batch size for saving results (prevents 16MB document limit)
+            const BATCH_SIZE = parseInt(process.env.ADOBE_TARGET_1_0_BATCH_SIZE) || 20;
+            const totalBatches = Math.max(1, Math.ceil(urls.length / BATCH_SIZE));
+
+            console.log(`\n🔄 Batch Processing Configuration:`);
+            console.log(`   Total URLs: ${urls.length}`);
+            console.log(`   Batch Size: ${BATCH_SIZE}`);
+            console.log(`   Total Batches: ${totalBatches}\n`);
+
             // Fetch and update dataset status to in_progress
             let dataset = await Dataset.findById(datasetId);
             if (dataset) {
@@ -179,15 +192,18 @@ class AdobeTarget1_0Service {
                 console.log('✅ Dataset status updated to in_progress');
             }
 
-            // Create result document
+            // Delete any existing batch documents for this dataset (cleanup)
+            await AdobeTarget1_0Document.deleteMany({ datasetId });
+
+            // Create result document (stores only summaries, not full data)
             let result = await AdobeTarget1_0Result.create({
                 datasetId: datasetId,
                 datasetName: datasetName,
                 originalUrlsCount: urls.length,
                 startedAt: startTime,
                 status: 'in_progress',
-                batchNumber: options.batchNumber || 1,
-                totalBatches: options.totalBatches || 1,
+                batchNumber: 1,
+                totalBatches: totalBatches,
                 overallStats: {
                     totalOriginalUrls: urls.length,
                     successfulPrioritizations: 0,
@@ -200,81 +216,183 @@ class AdobeTarget1_0Service {
                     adobeTargetDetectedCount: 0,
                     totalExperimentsFound: 0
                 },
-                urlWorkflowResults: []
+                urlWorkflowResults: [] // ✅ Keep empty - data stored in batch documents
             });
 
-            progressCallback(5, { message: 'Starting workflow for each URL' });
+            progressCallback(5, { message: 'Starting workflow with batch processing' });
 
-            // Process each URL sequentially
-            for (let i = 0; i < urls.length; i++) {
-                const originalUrl = urls[i];
-                const progress = 5 + Math.floor((i / urls.length) * 85);
+            // ========== PROCESS URLS IN BATCHES ==========
+            for (let batchIndex = 0; batchIndex < urls.length; batchIndex += BATCH_SIZE) {
+                const batch = urls.slice(batchIndex, batchIndex + BATCH_SIZE);
+                const batchNumber = Math.floor(batchIndex / BATCH_SIZE) + 1;
 
-                console.log(`\n📍 Processing URL ${i + 1}/${urls.length}: ${originalUrl}`);
-                progressCallback(progress, {
-                    message: `Processing URL ${i + 1}/${urls.length}`,
-                    currentUrl: originalUrl
+                console.log(`\n${'='.repeat(70)}`);
+                console.log(`📦 Processing Batch ${batchNumber}/${totalBatches} (${batch.length} URLs)`);
+                console.log(`${'='.repeat(70)}\n`);
+
+                const batchWorkflowResults = [];
+                const batchStats = {
+                    totalTop25UrlsProcessed: 0,
+                    totalTop25UrlsSuccessful: 0,
+                    totalTop25UrlsFailed: 0,
+                    adobeTargetDetectedCount: 0,
+                    totalExperimentsFound: 0
+                };
+
+                // Process each URL in the batch
+                for (let i = 0; i < batch.length; i++) {
+                    const originalUrl = batch[i];
+                    const globalIndex = batchIndex + i;
+                    const progress = 5 + Math.floor((globalIndex / urls.length) * 85);
+
+                    console.log(`\n📍 Processing URL ${globalIndex + 1}/${urls.length} (Batch ${batchNumber}, URL ${i + 1}/${batch.length}): ${originalUrl}`);
+                    progressCallback(progress, {
+                        message: `Processing batch ${batchNumber}/${totalBatches}: URL ${globalIndex + 1}/${urls.length}`,
+                        currentUrl: originalUrl,
+                        batchNumber: batchNumber,
+                        totalBatches: totalBatches
+                    });
+
+                    try {
+                        // Step 1: Prioritize URL
+                        console.log(`  ➤ Step 1: Prioritizing URL...`);
+                        const prioritizationResult = await this.prioritizeUrl(originalUrl);
+
+                        // Step 2: Categorize URLs
+                        console.log(`  ➤ Step 2: Categorizing prioritized URLs...`);
+                        const categorizationResult = await this.categorizeUrls(prioritizationResult);
+
+                        // Step 3: Scrape Adobe Target from top 25
+                        console.log(`  ➤ Step 3: Scraping Adobe Target from top 25 URLs...`);
+                        const scrapingResults = await this.scrapeTop25Urls(categorizationResult, options);
+
+                        // Create workflow result entry
+                        const workflowResult = {
+                            originalUrl: originalUrl,
+                            prioritizationResult: prioritizationResult,
+                            categorizationResult: categorizationResult,
+                            topUrlsScrapingResults: scrapingResults.results,
+                            summary: scrapingResults.summary,
+                            status: 'completed',
+                            completedAt: new Date()
+                        };
+
+                        // Update overall stats
+                        result.overallStats.successfulPrioritizations += prioritizationResult.prioritizationSuccess ? 1 : 0;
+                        result.overallStats.failedPrioritizations += prioritizationResult.prioritizationSuccess ? 0 : 1;
+                        result.overallStats.successfulCategorizations += categorizationResult.categorizationSuccess ? 1 : 0;
+                        result.overallStats.failedCategorizations += categorizationResult.categorizationSuccess ? 0 : 1;
+                        result.overallStats.totalTop25UrlsProcessed += scrapingResults.summary.totalTop25Urls;
+                        result.overallStats.totalTop25UrlsSuccessful += scrapingResults.summary.successfulScrapedUrls;
+                        result.overallStats.totalTop25UrlsFailed += scrapingResults.summary.failedScrapedUrls;
+                        result.overallStats.adobeTargetDetectedCount += scrapingResults.summary.adobeTargetDetectedInTop25;
+                        result.overallStats.totalExperimentsFound += scrapingResults.summary.totalExperimentsInTop25;
+
+                        // Update batch stats
+                        batchStats.totalTop25UrlsProcessed += scrapingResults.summary.totalTop25Urls;
+                        batchStats.totalTop25UrlsSuccessful += scrapingResults.summary.successfulScrapedUrls;
+                        batchStats.totalTop25UrlsFailed += scrapingResults.summary.failedScrapedUrls;
+                        batchStats.adobeTargetDetectedCount += scrapingResults.summary.adobeTargetDetectedInTop25;
+                        batchStats.totalExperimentsFound += scrapingResults.summary.totalExperimentsInTop25;
+
+                        batchWorkflowResults.push(workflowResult);
+
+                        console.log(`  ✅ URL ${globalIndex + 1} completed: ${scrapingResults.summary.successfulScrapedUrls}/${scrapingResults.summary.totalTop25Urls} top URLs scraped successfully`);
+
+                        // ✅ NEW: Save individual URL result with URL as primary key
+                        await this.saveUrlResult({
+                            url: originalUrl,
+                            datasetId,
+                            datasetName,
+                            summary: scrapingResults.summary,
+                            status: 'completed'
+                        });
+
+                    } catch (error) {
+                        console.error(`  ❌ Error processing URL ${globalIndex + 1}: ${error.message}`);
+
+                        // Create failure workflow result entry
+                        const failureResult = {
+                            originalUrl: originalUrl,
+                            status: 'failed',
+                            error: error.message,
+                            completedAt: new Date()
+                        };
+
+                        result.overallStats.failedPrioritizations += 1;
+                        batchWorkflowResults.push(failureResult);
+
+                        // ✅ NEW: Save failed URL result
+                        await this.saveUrlResult({
+                            url: originalUrl,
+                            datasetId,
+                            datasetName,
+                            summary: {
+                                totalTop25Urls: 0,
+                                successfulScrapedUrls: 0,
+                                failedScrapedUrls: 0,
+                                adobeTargetDetectedInTop25: 0,
+                                totalExperimentsInTop25: 0,
+                                uniqueExperimentIds: [],
+                                uniqueExperimentCount: 0,
+                                uniqueActivityIds: [],
+                                uniqueActivityCount: 0,
+                                uniqueExperimentNames: [],
+                                allActivityIds: [],
+                                allActivityCount: 0
+                            },
+                            status: 'failed',
+                            error: error.message
+                        });
+
+                        // Continue with next URL even if this one fails
+                        continue;
+                    }
+                }
+
+                // ========== SAVE BATCH TO DATABASE ==========
+                console.log(`\n💾 Saving batch ${batchNumber}/${totalBatches} to database...`);
+                await this.saveScrapingBatchDocument({
+                    datasetId,
+                    datasetName,
+                    batchNumber,
+                    totalBatches,
+                    totalUrls: batch.length,
+                    urlWorkflowResults: batchWorkflowResults,
+                    batchStats
                 });
 
-                try {
-                    // Step 1: Prioritize URL
-                    console.log(`  ➤ Step 1: Prioritizing URL...`);
-                    const prioritizationResult = await this.prioritizeUrl(originalUrl);
+                // Save updated overall stats to main result document
+                await result.save();
 
-                    // Step 2: Categorize URLs
-                    console.log(`  ➤ Step 2: Categorizing prioritized URLs...`);
-                    const categorizationResult = await this.categorizeUrls(prioritizationResult);
-
-                    // Step 3: Scrape Adobe Target from top 25
-                    console.log(`  ➤ Step 3: Scraping Adobe Target from top 25 URLs...`);
-                    const scrapingResults = await this.scrapeTop25Urls(categorizationResult, options);
-
-                    // Create workflow result entry
-                    const workflowResult = {
-                        originalUrl: originalUrl,
-                        prioritizationResult: prioritizationResult,
-                        categorizationResult: categorizationResult,
-                        topUrlsScrapingResults: scrapingResults.results,
-                        summary: scrapingResults.summary,
-                        status: 'completed',
-                        completedAt: new Date()
+                // Update dataset with current progress
+                if (dataset) {
+                    dataset.scrapingStats = {
+                        totalUrls: urls.length,
+                        processedUrls: result.overallStats.totalTop25UrlsProcessed,
+                        successfulScans: result.overallStats.totalTop25UrlsSuccessful,
+                        failedScans: result.overallStats.totalTop25UrlsFailed,
+                        adobeTargetDetected: result.overallStats.adobeTargetDetectedCount,
+                        totalExperiments: result.overallStats.totalExperimentsFound,
+                        duration: null
                     };
+                    dataset.scrapingLastUpdate = new Date();
+                    await dataset.save();
+                }
 
-                    // Update overall stats
-                    result.overallStats.successfulPrioritizations += prioritizationResult.prioritizationSuccess ? 1 : 0;
-                    result.overallStats.failedPrioritizations += prioritizationResult.prioritizationSuccess ? 0 : 1;
-                    result.overallStats.successfulCategorizations += categorizationResult.categorizationSuccess ? 1 : 0;
-                    result.overallStats.failedCategorizations += categorizationResult.categorizationSuccess ? 0 : 1;
-                    result.overallStats.totalTop25UrlsProcessed += scrapingResults.summary.totalTop25Urls;
-                    result.overallStats.totalTop25UrlsSuccessful += scrapingResults.summary.successfulScrapedUrls;
-                    result.overallStats.totalTop25UrlsFailed += scrapingResults.summary.failedScrapedUrls;
-                    result.overallStats.adobeTargetDetectedCount += scrapingResults.summary.adobeTargetDetectedInTop25;
-                    result.overallStats.totalExperimentsFound += scrapingResults.summary.totalExperimentsInTop25;
+                console.log(`✅ Batch ${batchNumber} saved successfully`);
 
-                    result.urlWorkflowResults.push(workflowResult);
+                // ✅ MEMORY CLEANUP between batches
+                batchWorkflowResults.length = 0;
 
-                    console.log(`  ✅ URL ${i + 1} completed: ${scrapingResults.summary.successfulScrapedUrls}/${scrapingResults.summary.totalTop25Urls} top URLs scraped successfully`);
-
-                } catch (error) {
-                    console.error(`  ❌ Error processing URL ${i + 1}: ${error.message}`);
-
-                    // Create failure workflow result entry
-                    const failureResult = {
-                        originalUrl: originalUrl,
-                        status: 'failed',
-                        error: error.message,
-                        completedAt: new Date()
-                    };
-
-                    result.overallStats.failedPrioritizations += 1;
-                    result.urlWorkflowResults.push(failureResult);
-
-                    // Continue with next URL even if this one fails
-                    continue;
+                if (batchNumber < totalBatches) {
+                    const batchDelay = parseInt(process.env.BATCH_DELAY) || 3000;
+                    console.log(`\n⏱️  Waiting ${batchDelay}ms before next batch...`);
+                    await performMemoryCleanup(batchDelay);
                 }
             }
 
-            // Calculate duration
+            // ========== FINALIZE WORKFLOW ==========
             const endTime = new Date();
             const durationMs = endTime - startTime;
             const durationMinutes = Math.floor(durationMs / 60000);
@@ -286,7 +404,7 @@ class AdobeTarget1_0Service {
             // Save final result
             await result.save();
 
-            // Update dataset status to completed with stats
+            // Update dataset status to completed with final stats
             dataset = await Dataset.findById(datasetId);
             if (dataset) {
                 await dataset.completeScraping({
@@ -300,9 +418,9 @@ class AdobeTarget1_0Service {
                 console.log('✅ Dataset status updated to completed');
             }
 
-            console.log(`\n${'='.repeat(60)}`);
+            console.log(`\n${'='.repeat(70)}`);
             console.log(`📊 Adobe Target 1.0 Workflow Completed`);
-            console.log(`${'='.repeat(60)}`);
+            console.log(`${'='.repeat(70)}`);
             console.log(`✅ Duration: ${result.duration}`);
             console.log(`✅ Original URLs: ${result.originalUrlsCount}`);
             console.log(`✅ Successful Prioritizations: ${result.overallStats.successfulPrioritizations}`);
@@ -310,7 +428,8 @@ class AdobeTarget1_0Service {
             console.log(`✅ Total Top 25 URLs Processed: ${result.overallStats.totalTop25UrlsProcessed}`);
             console.log(`✅ Adobe Target Detected: ${result.overallStats.adobeTargetDetectedCount}`);
             console.log(`✅ Total Experiments Found: ${result.overallStats.totalExperimentsFound}`);
-            console.log(`${'='.repeat(60)}\n`);
+            console.log(`✅ Batches Processed: ${totalBatches}`);
+            console.log(`${'='.repeat(70)}\n`);
 
             progressCallback(100, { message: 'Workflow completed successfully' });
 
@@ -687,6 +806,113 @@ class AdobeTarget1_0Service {
         }
 
         return { results, summary };
+    }
+
+    /**
+     * Helper method to save a batch document for Adobe Target 1.0 scraping
+     * Stores detailed workflow results for a batch of URLs
+     */
+    async saveScrapingBatchDocument({ datasetId, datasetName, batchNumber, totalBatches, totalUrls, urlWorkflowResults, batchStats }) {
+        try {
+            const successfulCount = urlWorkflowResults.filter(r => r.status === 'completed').length;
+            const failedCount = urlWorkflowResults.filter(r => r.status === 'failed').length;
+
+            await AdobeTarget1_0Document.findOneAndUpdate(
+                { datasetId, batchNumber },
+                {
+                    datasetId,
+                    datasetName,
+                    batchNumber,
+                    totalBatches,
+                    totalUrls,
+                    successfulCount,
+                    failedCount,
+                    batchStats,
+                    urlWorkflowResults,
+                    processedAt: new Date()
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+
+            console.log(`   ✅ Batch ${batchNumber} document saved: ${successfulCount} successful, ${failedCount} failed`);
+        } catch (error) {
+            console.error(`   ❌ Error saving batch ${batchNumber} document:`, error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * ✅ ENHANCED: Save individual URL result with URL as primary key
+     * Automatically overrides existing results and tracks reprocessing
+     */
+    async saveUrlResult({ url, datasetId, datasetName, summary, status = 'completed', error = null }) {
+        try {
+            const quickStats = {
+                hasAdobeTarget: summary.adobeTargetDetectedInTop25 > 0,
+                hasExperiments: summary.uniqueActivityCount > 0 || summary.uniqueExperimentCount > 0,
+                experimentCount: summary.totalExperimentsInTop25 || 0
+            };
+
+            // Check if URL already exists to track reprocessing
+            const existingResult = await AdobeTarget1_0UrlResult.findOne({ url });
+
+            let updateData = {
+                url,
+                datasetId,
+                datasetName,
+                status,
+                summary,
+                error,
+                quickStats,
+                lastProcessedAt: new Date(),
+                completedAt: status === 'completed' || status === 'failed' ? new Date() : null
+            };
+
+            if (existingResult) {
+                // URL is being reprocessed - track changes
+                console.log(`      🔄 Reprocessing URL (previously processed ${existingResult.processCount} time(s))`);
+
+                // Store previous result for comparison
+                updateData.previousResult = {
+                    experimentCount: existingResult.quickStats.experimentCount,
+                    uniqueActivityCount: existingResult.summary.uniqueActivityCount,
+                    lastChecked: existingResult.lastProcessedAt
+                };
+
+                // Increment process count
+                updateData.processCount = (existingResult.processCount || 1) + 1;
+
+                // Keep original firstProcessedAt
+                updateData.firstProcessedAt = existingResult.firstProcessedAt;
+
+                // Detect changes
+                const experimentsChanged = existingResult.quickStats.experimentCount !== quickStats.experimentCount;
+                const activitiesChanged = existingResult.summary.uniqueActivityCount !== summary.uniqueActivityCount;
+
+                if (experimentsChanged || activitiesChanged) {
+                    console.log(`      📊 Changes detected: Experiments ${existingResult.quickStats.experimentCount} → ${quickStats.experimentCount}, Activities ${existingResult.summary.uniqueActivityCount} → ${summary.uniqueActivityCount}`);
+                } else {
+                    console.log(`      ✅ No changes detected from previous run`);
+                }
+            } else {
+                // First time processing this URL
+                console.log(`      ✨ First time processing this URL`);
+                updateData.firstProcessedAt = new Date();
+                updateData.processCount = 1;
+            }
+
+            const urlResult = await AdobeTarget1_0UrlResult.findOneAndUpdate(
+                { url }, // Find by URL (unique key)
+                updateData,
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+
+            console.log(`      💾 URL result saved: ${url} (${quickStats.experimentCount} experiments, processed ${urlResult.processCount}x)`);
+            return urlResult;
+        } catch (error) {
+            console.error(`      ❌ Error saving URL result for ${url}:`, error.message);
+            // Don't throw - continue processing other URLs
+        }
     }
 
     // --------------------------------------------------------------------------

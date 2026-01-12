@@ -509,15 +509,31 @@ class AdobeScraperService {
                     // Ignore navigation errors - we only need the network request
                 });
 
-                // Wait for Adobe Target network request OR 1.5s timeout (whichever comes first)
-                await Promise.race([
+                // Wait for Adobe Target network request OR extended timeout (whichever comes first)
+                // ✅ FIX: Increased timeout from 1.5s to 5s to capture delayed Adobe Target API calls
+                console.log('⏳ Waiting for Adobe Target network requests...');
+                const mboxData = await Promise.race([
                     networkListenerPromise,
-                    new Promise(resolve => setTimeout(resolve, 1500))
+                    new Promise(resolve => setTimeout(() => {
+                        console.log('⏰ Network listener timeout - no Adobe Target API calls captured');
+                        resolve(null);
+                    }, 5000))
                 ]);
+
+                if (mboxData) {
+                    console.log('✅ Adobe Target API call captured:', {
+                        activityCount: mboxData.activityIds?.length || 0,
+                        activityIds: mboxData.activityIds,
+                        activityNames: mboxData.activityNames
+                    });
+                } else {
+                    console.log('⚠️ No Adobe Target API calls detected - page may have AT library but no active experiments');
+                }
+
                 console.log('✅ Navigation complete');
 
                 // Now extract the data
-                const experimentData = await this.extractAdobeTargetData(sharedPage, networkListenerPromise);
+                const experimentData = await this.extractAdobeTargetData(sharedPage, Promise.resolve(mboxData));
 
                 // ... (rest of the existing logic for captcha, cookies, etc. remains the same) ...
 
@@ -620,6 +636,16 @@ class AdobeScraperService {
                                 const mboxData = fullResponse;
                                 const activityNames = [];
                                 const activityIds = [];
+
+                                console.log('📦 Adobe Target API response structure:', {
+                                    hasOffers: !!fullResponse.offers,
+                                    offersCount: fullResponse.offers?.length || 0,
+                                    hasExecute: !!fullResponse.execute,
+                                    hasPageLoad: !!fullResponse.execute?.pageLoad,
+                                    optionsCount: fullResponse.execute?.pageLoad?.options?.length || 0
+                                });
+
+                                // Extract from offers array
                                 if (fullResponse.offers) {
                                     fullResponse.offers.forEach(offer => {
                                         if (offer.responseTokens) {
@@ -628,6 +654,8 @@ class AdobeScraperService {
                                         }
                                     });
                                 }
+
+                                // Extract from execute.pageLoad.options
                                 if (fullResponse.execute?.pageLoad?.options) {
                                     fullResponse.execute.pageLoad.options.forEach(opt => {
                                         if (opt.responseTokens) {
@@ -636,6 +664,46 @@ class AdobeScraperService {
                                         }
                                     });
                                 }
+
+                                // ✅ FIX: Fallback extraction when responseTokens are not configured
+                                // Extract from execute.mboxes (alternative structure)
+                                if (fullResponse.execute?.mboxes) {
+                                    fullResponse.execute.mboxes.forEach(mbox => {
+                                        if (mbox.options) {
+                                            mbox.options.forEach(opt => {
+                                                if (opt.responseTokens) {
+                                                    if (opt.responseTokens['activity.name']) activityNames.push(opt.responseTokens['activity.name']);
+                                                    if (opt.responseTokens['activity.id']) activityIds.push(opt.responseTokens['activity.id']);
+                                                }
+                                                // Fallback: try to extract from option content
+                                                if (opt.content && !opt.responseTokens) {
+                                                    console.log('⚠️ Adobe Target response lacks responseTokens - activity info may be missing');
+                                                }
+                                            });
+                                        }
+                                    });
+                                }
+
+                                // Additional fallback: check for prefetch structure
+                                if (fullResponse.prefetch?.mboxes) {
+                                    fullResponse.prefetch.mboxes.forEach(mbox => {
+                                        if (mbox.options) {
+                                            mbox.options.forEach(opt => {
+                                                if (opt.responseTokens) {
+                                                    if (opt.responseTokens['activity.name']) activityNames.push(opt.responseTokens['activity.name']);
+                                                    if (opt.responseTokens['activity.id']) activityIds.push(opt.responseTokens['activity.id']);
+                                                }
+                                            });
+                                        }
+                                    });
+                                }
+
+                                console.log('🎯 Extracted activities:', {
+                                    activityIds: activityIds,
+                                    activityNames: activityNames,
+                                    count: activityIds.length
+                                });
+
                                 mboxData.activityNames = activityNames;
                                 mboxData.activityIds = activityIds;
                                 if (!resolved) { resolved = true; resolve(mboxData); }
@@ -707,14 +775,29 @@ class AdobeScraperService {
                         mboxPromise,
                         new Promise(r => setTimeout(() => r(null), 2000))
                     ]);
-                } catch (e) {}
-            }
-            if (mboxResponseData) {
-                experimentData.mboxData = mboxResponseData;
-                if (mboxResponseData.activityIds) {
-                    experimentData.experimentCount = mboxResponseData.activityIds.length;
+                } catch (e) {
+                    console.warn('⚠️ Error waiting for mbox data:', e.message);
                 }
             }
+
+            if (mboxResponseData) {
+                console.log('📊 Mbox data extracted:', {
+                    hasActivityIds: !!mboxResponseData.activityIds,
+                    activityCount: mboxResponseData.activityIds?.length || 0,
+                    hasActivityNames: !!mboxResponseData.activityNames,
+                    activityNames: mboxResponseData.activityNames
+                });
+
+                experimentData.mboxData = mboxResponseData;
+                if (mboxResponseData.activityIds && mboxResponseData.activityIds.length > 0) {
+                    experimentData.experimentCount = mboxResponseData.activityIds.length;
+                } else {
+                    console.log('⚠️ Mbox data received but no activityIds found');
+                }
+            } else {
+                console.log('⚠️ No mbox data available - Adobe Target detected but no experiments captured');
+            }
+
             return experimentData;
         } catch (error) {
             console.error('Error extracting data:', error);

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const AdobeTarget1_0Result = require('../models/AdobeTarget1_0Result');
+const AdobeTarget1_0Document = require('../models/AdobeTarget1_0Document');
 const {
   sanitizeAdobeTargetDocument
 } = require('../utils/adobeTargetResultSanitizer');
@@ -33,6 +34,7 @@ async function getAdobeTargetDocuments(req, res) {
     }
 
     // Determine query scope
+    // ✅ FIX: Fetch from batch documents (AdobeTarget1_0Document) instead of main result
     let documents;
     if (batch) {
       const batchNumber = parseInt(batch, 10);
@@ -42,7 +44,7 @@ async function getAdobeTargetDocuments(req, res) {
           message: 'Batch must be a number'
         });
       }
-      documents = await AdobeTarget1_0Result.find({
+      documents = await AdobeTarget1_0Document.find({
         datasetId,
         batchNumber
       }).sort({ createdAt: -1 });
@@ -59,16 +61,41 @@ async function getAdobeTargetDocuments(req, res) {
         });
       }
 
-      documents = await AdobeTarget1_0Result.find({
+      documents = await AdobeTarget1_0Document.find({
         datasetId,
         batchNumber: { $in: batchList }
       }).sort({ batchNumber: 1 });
     } else if (all === 'true') {
-      documents = await AdobeTarget1_0Result.find({ datasetId })
+      documents = await AdobeTarget1_0Document.find({ datasetId })
         .sort({ batchNumber: 1 });
     } else {
-      documents = await AdobeTarget1_0Result.findOne({ datasetId })
+      // Default: Get summary from main result document
+      const mainResult = await AdobeTarget1_0Result.findOne({ datasetId })
         .sort({ createdAt: -1 });
+
+      if (!mainResult) {
+        return res.status(404).json({
+          success: false,
+          message: 'No Adobe Target 1.0 results found for this dataset'
+        });
+      }
+
+      // Return summary from main result
+      return res.status(200).json({
+        success: true,
+        message: 'Adobe Target 1.0 summary retrieved successfully',
+        data: {
+          datasetId: mainResult.datasetId,
+          datasetName: mainResult.datasetName,
+          originalUrlsCount: mainResult.originalUrlsCount,
+          totalBatches: mainResult.totalBatches,
+          overallStats: mainResult.overallStats,
+          duration: mainResult.duration,
+          status: mainResult.status,
+          startedAt: mainResult.startedAt,
+          completedAt: mainResult.completedAt
+        }
+      });
     }
 
     if (!documents || (Array.isArray(documents) && documents.length === 0)) {
@@ -117,7 +144,7 @@ async function getAdobeTargetDocuments(req, res) {
     // Summaries only
     if (summary === 'true') {
       const summaryData = docsArray.map(doc => {
-        const stats = doc.overallStats || {};
+        const stats = doc.batchStats || {};
         const processed = stats.totalTop25UrlsProcessed || 0;
         const successRate = processed > 0
           ? `${((stats.totalTop25UrlsSuccessful || 0) / processed * 100).toFixed(1)}%`
@@ -130,36 +157,34 @@ async function getAdobeTargetDocuments(req, res) {
           datasetId: doc.datasetId,
           datasetName: doc.datasetName,
           batchNumber: doc.batchNumber,
-          originalUrlsCount: doc.originalUrlsCount,
+          totalBatches: doc.totalBatches,
+          totalUrls: doc.totalUrls,
+          successfulCount: doc.successfulCount,
+          failedCount: doc.failedCount,
           totalTop25UrlsProcessed: processed,
           totalTop25UrlsSuccessful: stats.totalTop25UrlsSuccessful || 0,
           totalTop25UrlsFailed: stats.totalTop25UrlsFailed || 0,
           adobeTargetDetectedCount: stats.adobeTargetDetectedCount || 0,
           totalExperimentsFound: stats.totalExperimentsFound || 0,
-          uniqueExperimentsFound: stats.uniqueExperimentsFound ||
-            (stats.uniqueExperimentIds ? stats.uniqueExperimentIds.length : 0),
           successRate,
           detectionRate,
-          duration: doc.duration,
-          status: doc.status,
+          processedAt: doc.processedAt,
           urlWorkflowCount: doc.urlWorkflowResults?.length || 0
         };
       });
 
       return res.status(200).json({
         success: true,
-        message: 'Adobe Target 1.0 summary retrieved successfully',
+        message: 'Adobe Target 1.0 batch summary retrieved successfully',
         data: Array.isArray(documents) ? summaryData : summaryData[0]
       });
     }
 
-    // Full payload
-    const sanitizedDocs = docsArray.map(sanitizeAdobeTargetDocument);
-
+    // Full payload - return batch documents as-is (already structured)
     res.status(200).json({
       success: true,
-      message: 'Adobe Target 1.0 document retrieved successfully',
-      data: Array.isArray(documents) ? sanitizedDocs : sanitizedDocs[0]
+      message: 'Adobe Target 1.0 batch documents retrieved successfully',
+      data: Array.isArray(documents) ? docsArray : docsArray[0]
     });
 
   } catch (error) {
