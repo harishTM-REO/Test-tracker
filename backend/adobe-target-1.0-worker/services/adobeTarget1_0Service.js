@@ -534,25 +534,39 @@ class AdobeTarget1_0Service {
      * Step 1: Prioritize a single URL
      */
     async prioritizeUrl(url) {
+        // ✅ TIMEOUT: Entire prioritization step must complete within 3 minutes
+        const PRIORITIZATION_TIMEOUT = parseInt(process.env.PRIORITIZATION_TIMEOUT) || 180000; // 3 minutes default
+
         try {
-            console.log(`    ➤ Step 1a: Live-crawling ${url} to gather URLs...`);
-            const collectedUrls = await this._liveCrawl(url, 60000);
-            console.log(`    ➤ Step 1b: Prioritizing ${collectedUrls.length} collected URLs...`);
+            console.log(`    ➤ Step 1: Prioritizing URL with ${PRIORITIZATION_TIMEOUT / 1000}s timeout...`);
 
-            const prioritizationResult = urlPrioritizationService.prioritizeUrls(collectedUrls);
+            const prioritizationPromise = (async () => {
+                console.log(`    ➤ Step 1a: Live-crawling ${url} to gather URLs...`);
+                const collectedUrls = await this._liveCrawl(url, 60000);
+                console.log(`    ➤ Step 1b: Prioritizing ${collectedUrls.length} collected URLs...`);
 
-            console.log(`    ✅ Prioritization success: ${prioritizationResult.prioritizedUrls.length} URLs prioritized from ${collectedUrls.length} collected`);
-            return {
-                originalUrl: url,
-                totalUrlsCollected: collectedUrls.length,
-                totalPrioritized: prioritizationResult.prioritizedUrls.length,
-                prioritizedUrls: prioritizationResult.prioritizedUrls,
-                prioritizationSuccess: true,
-                prioritizedAt: new Date(),
-                metadata: {
-                    localesDetected: prioritizationResult.localesDetected
-                }
-            };
+                const prioritizationResult = urlPrioritizationService.prioritizeUrls(collectedUrls);
+
+                console.log(`    ✅ Prioritization success: ${prioritizationResult.prioritizedUrls.length} URLs prioritized from ${collectedUrls.length} collected`);
+                return {
+                    originalUrl: url,
+                    totalUrlsCollected: collectedUrls.length,
+                    totalPrioritized: prioritizationResult.prioritizedUrls.length,
+                    prioritizedUrls: prioritizationResult.prioritizedUrls,
+                    prioritizationSuccess: true,
+                    prioritizedAt: new Date(),
+                    metadata: {
+                        localesDetected: prioritizationResult.localesDetected
+                    }
+                };
+            })();
+
+            // Race between prioritization and timeout
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Prioritization timeout after ${PRIORITIZATION_TIMEOUT / 1000}s`)), PRIORITIZATION_TIMEOUT)
+            );
+
+            return await Promise.race([prioritizationPromise, timeoutPromise]);
 
         } catch (error) {
             console.error(`    ❌ Prioritization failed for ${url}:`, error.message);
@@ -569,6 +583,9 @@ class AdobeTarget1_0Service {
      * Step 2: Categorize the prioritized URLs and get top 25
      */
     async categorizeUrls(prioritizationResult) {
+        // ✅ TIMEOUT: Categorization step must complete within 2 minutes
+        const CATEGORIZATION_TIMEOUT = parseInt(process.env.CATEGORIZATION_TIMEOUT) || 120000; // 2 minutes default
+
         try {
             if (!prioritizationResult.prioritizationSuccess) {
                 return {
@@ -578,9 +595,19 @@ class AdobeTarget1_0Service {
                 };
             }
 
-            console.log(`    ➤ Step 2: Categorizing ${prioritizationResult.prioritizedUrls.length} prioritized URLs...`);
+            console.log(`    ➤ Step 2: Categorizing ${prioritizationResult.prioritizedUrls.length} prioritized URLs with ${CATEGORIZATION_TIMEOUT / 1000}s timeout...`);
 
-            const categorizationResult = urlDynamicCategorizationService.categorizeDynamically(prioritizationResult.prioritizedUrls);
+            const categorizationPromise = (async () => {
+                const categorizationResult = urlDynamicCategorizationService.categorizeDynamically(prioritizationResult.prioritizedUrls);
+                return categorizationResult;
+            })();
+
+            // Race between categorization and timeout
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Categorization timeout after ${CATEGORIZATION_TIMEOUT / 1000}s`)), CATEGORIZATION_TIMEOUT)
+            );
+
+            const categorizationResult = await Promise.race([categorizationPromise, timeoutPromise]);
 
             if (categorizationResult.success) {
                 const top25 = categorizationResult.prioritizedTop25 || [];
