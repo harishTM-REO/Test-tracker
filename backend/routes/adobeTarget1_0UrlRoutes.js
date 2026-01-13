@@ -8,10 +8,17 @@ const {
 } = require('../controller/adobeTarget1_0UrlController');
 
 /**
- * @route GET /api/adobe-target-1.0/url-results?url=https://example.com
- * @desc  Retrieve result for a specific URL
+ * @route GET /api/adobe-target-1.0/url-results/changes?url=https://example.com
+ * @desc  Get change history for a specific URL (compare previous vs current results)
+ * NOTE: Must come BEFORE /url-results to avoid route conflicts
  */
-router.get('/url-results', getUrlResult);
+router.get('/url-results/changes', getUrlChanges);
+
+/**
+ * @route GET /api/adobe-target-1.0/url-results/dataset/:datasetId/summary
+ * @desc  Get aggregated summary for all URLs in a dataset
+ */
+router.get('/url-results/dataset/:datasetId/summary', getDatasetSummary);
 
 /**
  * @route GET /api/adobe-target-1.0/url-results/dataset/:datasetId
@@ -26,15 +33,9 @@ router.get('/url-results', getUrlResult);
 router.get('/url-results/dataset/:datasetId', getDatasetUrlResults);
 
 /**
- * @route GET /api/adobe-target-1.0/url-results/dataset/:datasetId/summary
- * @desc  Get aggregated summary for all URLs in a dataset
+ * @route GET /api/adobe-target-1.0/url-results?url=https://example.com
+ * @desc  Retrieve result for a specific URL
  */
-router.get('/url-results/dataset/:datasetId/summary', getDatasetSummary);
-
-/**
- * @route GET /api/adobe-target-1.0/url-results/changes?url=https://example.com
- * @desc  Get change history for a specific URL (compare previous vs current results)
- */
-router.get('/url-results/changes', getUrlChanges);
+router.get('/url-results', getUrlResult);
 
 module.exports = router;

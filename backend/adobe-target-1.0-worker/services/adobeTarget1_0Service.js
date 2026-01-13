@@ -872,10 +872,13 @@ class AdobeTarget1_0Service {
                 // URL is being reprocessed - track changes
                 console.log(`      🔄 Reprocessing URL (previously processed ${existingResult.processCount} time(s))`);
 
-                // Store previous result for comparison
+                // Store previous result for comparison (full lists, not just counts)
                 updateData.previousResult = {
                     experimentCount: existingResult.quickStats.experimentCount,
                     uniqueActivityCount: existingResult.summary.uniqueActivityCount,
+                    uniqueActivityIds: existingResult.summary.uniqueActivityIds || [],
+                    uniqueExperimentNames: existingResult.summary.uniqueExperimentNames || [],
+                    allActivityIds: existingResult.summary.allActivityIds || [],
                     lastChecked: existingResult.lastProcessedAt
                 };
 
@@ -891,6 +894,19 @@ class AdobeTarget1_0Service {
 
                 if (experimentsChanged || activitiesChanged) {
                     console.log(`      📊 Changes detected: Experiments ${existingResult.quickStats.experimentCount} → ${quickStats.experimentCount}, Activities ${existingResult.summary.uniqueActivityCount} → ${summary.uniqueActivityCount}`);
+
+                    // Log added/removed activity IDs
+                    const previousIds = existingResult.summary.uniqueActivityIds || [];
+                    const currentIds = summary.uniqueActivityIds || [];
+                    const added = currentIds.filter(id => !previousIds.includes(id));
+                    const removed = previousIds.filter(id => !currentIds.includes(id));
+
+                    if (added.length > 0) {
+                        console.log(`      ➕ Added activity IDs: ${added.join(', ')}`);
+                    }
+                    if (removed.length > 0) {
+                        console.log(`      ➖ Removed activity IDs: ${removed.join(', ')}`);
+                    }
                 } else {
                     console.log(`      ✅ No changes detected from previous run`);
                 }

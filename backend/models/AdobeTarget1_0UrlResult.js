@@ -90,6 +90,9 @@ const adobeTarget1_0UrlResultSchema = new mongoose.Schema({
   previousResult: {
     experimentCount: Number,
     uniqueActivityCount: Number,
+    uniqueActivityIds: [String],
+    uniqueExperimentNames: [String],
+    allActivityIds: [String],
     lastChecked: Date
   },
 
@@ -105,10 +108,8 @@ const adobeTarget1_0UrlResultSchema = new mongoose.Schema({
 });
 
 // Indexes for efficient querying
-adobeTarget1_0UrlResultSchema.index({ url: 1 }, { unique: true });
+// Note: url, quickStats fields already have { index: true } in schema definition
 adobeTarget1_0UrlResultSchema.index({ datasetId: 1, status: 1 });
-adobeTarget1_0UrlResultSchema.index({ 'quickStats.hasAdobeTarget': 1 });
-adobeTarget1_0UrlResultSchema.index({ 'quickStats.hasExperiments': 1 });
 adobeTarget1_0UrlResultSchema.index({ createdAt: -1 });
 
 // Static methods
@@ -146,28 +147,74 @@ adobeTarget1_0UrlResultSchema.methods.getChanges = function() {
   if (!this.previousResult) {
     return {
       hasChanges: false,
-      message: 'No previous result to compare'
+      message: 'No previous result to compare',
+      current: {
+        experimentCount: this.quickStats.experimentCount,
+        uniqueActivityCount: this.summary.uniqueActivityCount,
+        uniqueActivityIds: this.summary.uniqueActivityIds || [],
+        uniqueExperimentNames: this.summary.uniqueExperimentNames || [],
+        allActivityIds: this.summary.allActivityIds || [],
+        lastChecked: this.lastProcessedAt
+      }
     };
   }
 
+  // Get previous data from stored previousResult (we need to store more data)
+  const previousActivityIds = this.previousResult.uniqueActivityIds || [];
+  const previousExperimentNames = this.previousResult.uniqueExperimentNames || [];
+  const previousAllActivityIds = this.previousResult.allActivityIds || [];
+
+  // Get current data
+  const currentActivityIds = this.summary.uniqueActivityIds || [];
+  const currentExperimentNames = this.summary.uniqueExperimentNames || [];
+  const currentAllActivityIds = this.summary.allActivityIds || [];
+
+  // Calculate differences
   const experimentChange = this.quickStats.experimentCount - this.previousResult.experimentCount;
   const activityChange = this.summary.uniqueActivityCount - this.previousResult.uniqueActivityCount;
 
+  // Find added and removed activity IDs
+  const addedActivityIds = currentActivityIds.filter(id => !previousActivityIds.includes(id));
+  const removedActivityIds = previousActivityIds.filter(id => !currentActivityIds.includes(id));
+  const unchangedActivityIds = currentActivityIds.filter(id => previousActivityIds.includes(id));
+
+  // Find added and removed experiment names
+  const addedExperimentNames = currentExperimentNames.filter(name => !previousExperimentNames.includes(name));
+  const removedExperimentNames = previousExperimentNames.filter(name => !currentExperimentNames.includes(name));
+  const unchangedExperimentNames = currentExperimentNames.filter(name => previousExperimentNames.includes(name));
+
   return {
-    hasChanges: experimentChange !== 0 || activityChange !== 0,
+    hasChanges: experimentChange !== 0 || activityChange !== 0 || addedActivityIds.length > 0 || removedActivityIds.length > 0,
     previous: {
       experimentCount: this.previousResult.experimentCount,
       uniqueActivityCount: this.previousResult.uniqueActivityCount,
+      uniqueActivityIds: previousActivityIds,
+      uniqueExperimentNames: previousExperimentNames,
+      allActivityIds: previousAllActivityIds,
       lastChecked: this.previousResult.lastChecked
     },
     current: {
       experimentCount: this.quickStats.experimentCount,
       uniqueActivityCount: this.summary.uniqueActivityCount,
+      uniqueActivityIds: currentActivityIds,
+      uniqueExperimentNames: currentExperimentNames,
+      allActivityIds: currentAllActivityIds,
       lastChecked: this.lastProcessedAt
     },
     changes: {
       experiments: experimentChange,
-      activities: activityChange
+      activities: activityChange,
+      addedActivityIds: addedActivityIds,
+      removedActivityIds: removedActivityIds,
+      unchangedActivityIds: unchangedActivityIds,
+      addedExperimentNames: addedExperimentNames,
+      removedExperimentNames: removedExperimentNames,
+      unchangedExperimentNames: unchangedExperimentNames
+    },
+    summary: {
+      totalAdded: addedActivityIds.length,
+      totalRemoved: removedActivityIds.length,
+      totalUnchanged: unchangedActivityIds.length
     }
   };
 };
