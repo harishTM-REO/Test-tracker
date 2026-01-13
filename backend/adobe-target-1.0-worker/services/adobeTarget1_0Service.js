@@ -177,7 +177,7 @@ class AdobeTarget1_0Service {
 
             // ========== CONFIGURATION FROM ENV ==========
             // Batch size for saving results (prevents 16MB document limit)
-            const BATCH_SIZE = parseInt(process.env.ADOBE_TARGET_1_0_BATCH_SIZE) || 20;
+            const BATCH_SIZE = parseInt(process.env.ADOBE_TARGET_1_0_BATCH_SIZE) || 5;
             const totalBatches = Math.max(1, Math.ceil(urls.length / BATCH_SIZE));
 
             console.log(`\n🔄 Batch Processing Configuration:`);
