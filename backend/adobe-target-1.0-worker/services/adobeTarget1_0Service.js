@@ -478,11 +478,11 @@ class AdobeTarget1_0Service {
             const navigationTimeout = 120000; // 2 minutes
             page.setDefaultNavigationTimeout(navigationTimeout);
             page.setDefaultTimeout(navigationTimeout);
-            
+
             try {
                 // Use a more lenient waiting strategy
                 await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
-                
+
                 // Wait for a bit to let JS run
                 await new Promise(r => setTimeout(r, 5000));
 
@@ -531,6 +531,91 @@ class AdobeTarget1_0Service {
     }
 
     /**
+     * ✅ NEW: Live crawl that returns browser/page references for timeout cleanup
+     */
+    async _liveCrawlWithCleanup(url, timeout) {
+        const normalizedUrl = normalizeUrl(url);
+        if (!normalizedUrl) {
+            throw new Error(`Invalid URL for live crawl: ${url}`);
+        }
+
+        // Acquire browser manually instead of using withBrowser
+        const browser = await browserPool.acquire();
+        const context = await browser.newContext();
+        const page = await context.newPage();
+
+        const navigationTimeout = 120000; // 2 minutes
+        page.setDefaultNavigationTimeout(navigationTimeout);
+        page.setDefaultTimeout(navigationTimeout);
+
+        try {
+            // Use a more lenient waiting strategy
+            await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
+
+            // Wait for a bit to let JS run
+            await new Promise(r => setTimeout(r, 5000));
+
+            await page.evaluate(async () => {
+                await new Promise((resolve) => {
+                    let totalHeight = 0;
+                    const distance = 100;
+                    const timer = setInterval(() => {
+                        const scrollHeight = document.body.scrollHeight;
+                        window.scrollBy(0, distance);
+                        totalHeight += distance;
+                        if (totalHeight >= scrollHeight) {
+                            clearInterval(timer);
+                            resolve();
+                        }
+                    }, 100);
+                });
+            });
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            const urls = await page.evaluate(() => {
+                const links = new Set();
+                const anchors = document.querySelectorAll('a[href]');
+                const origin = window.location.origin;
+
+                anchors.forEach(anchor => {
+                    let href = anchor.getAttribute('href');
+                    if (!href || href.trim() === '' || href.startsWith('#') || href.startsWith('javascript:')) return;
+
+                    try {
+                        const absoluteUrl = new URL(href, origin).href;
+                        links.add(absoluteUrl);
+                    } catch(e) {
+                        // ignore invalid urls
+                    }
+                });
+                return [...links];
+            });
+
+            // Successfully completed - clean up and release browser
+            await page.close();
+            await context.close();
+            browserPool.release(browser);
+
+            return {
+                urls,
+                browser: null,  // Already released
+                context: null,  // Already closed
+                page: null      // Already closed
+            };
+        } catch (error) {
+            // Error occurred - return references for cleanup by caller
+            return {
+                urls: [],
+                browser: browser,
+                context: context,
+                page: page,
+                error: error.message
+            };
+        }
+    }
+
+    /**
      * Step 1: Prioritize a single URL
      */
     async prioritizeUrl(url) {
@@ -539,17 +624,30 @@ class AdobeTarget1_0Service {
 
         let timeoutOccurred = false;
         let timeoutHandle = null;
+        let currentBrowser = null;
+        let currentContext = null;
+        let currentPage = null;
 
         try {
             console.log(`    ➤ Step 1: Prioritizing URL with ${PRIORITIZATION_TIMEOUT / 1000}s timeout...`);
 
             const prioritizationPromise = (async () => {
                 console.log(`    ➤ Step 1a: Live-crawling ${url} to gather URLs...`);
-                const collectedUrls = await this._liveCrawl(url, 60000);
+
+                // Modified _liveCrawl to return browser/context/page references
+                const liveCrawlResult = await this._liveCrawlWithCleanup(url, 60000);
+
+                // Store references for cleanup on timeout
+                currentBrowser = liveCrawlResult.browser;
+                currentContext = liveCrawlResult.context;
+                currentPage = liveCrawlResult.page;
+
+                const collectedUrls = liveCrawlResult.urls;
 
                 // Check if timeout already occurred
                 if (timeoutOccurred) {
-                    console.log(`    ⚠️ Timeout already occurred, discarding late result`);
+                    console.log(`    ⚠️ Timeout already occurred, cleaning up browser resources...`);
+                    // Cleanup will happen in the catch block
                     return null;
                 }
 
@@ -572,8 +670,29 @@ class AdobeTarget1_0Service {
 
             // Race between prioritization and timeout
             const timeoutPromise = new Promise((_, reject) => {
-                timeoutHandle = setTimeout(() => {
+                timeoutHandle = setTimeout(async () => {
                     timeoutOccurred = true;
+
+                    // ✅ CRITICAL: Forcefully close browser resources IMMEDIATELY on timeout
+                    console.log(`    🛑 Timeout fired - forcefully closing browser resources...`);
+                    try {
+                        if (currentPage) {
+                            await currentPage.close().catch(() => {});
+                            console.log(`       ✅ Page closed`);
+                        }
+                        if (currentContext) {
+                            await currentContext.close().catch(() => {});
+                            console.log(`       ✅ Context closed`);
+                        }
+                        if (currentBrowser) {
+                            // Release browser back to pool (don't close it)
+                            browserPool.release(currentBrowser);
+                            console.log(`       ✅ Browser released back to pool`);
+                        }
+                    } catch (cleanupError) {
+                        console.log(`       ⚠️ Error during immediate cleanup: ${cleanupError.message}`);
+                    }
+
                     reject(new Error(`Prioritization timeout after ${PRIORITIZATION_TIMEOUT / 1000}s`));
                 }, PRIORITIZATION_TIMEOUT);
             });
@@ -590,6 +709,24 @@ class AdobeTarget1_0Service {
         } catch (error) {
             console.error(`    ❌ Prioritization failed for ${url}:`, error.message);
 
+            // ✅ CLEANUP: Additional cleanup of any remaining resources
+            try {
+                if (currentPage && !currentPage.isClosed()) {
+                    await currentPage.close().catch(() => {});
+                    console.log(`    🧹 Cleaned up page`);
+                }
+                if (currentContext) {
+                    await currentContext.close().catch(() => {});
+                    console.log(`    🧹 Cleaned up context`);
+                }
+                if (currentBrowser) {
+                    browserPool.release(currentBrowser);
+                    console.log(`    🧹 Browser released to pool`);
+                }
+            } catch (cleanupError) {
+                console.log(`    ⚠️ Error during final cleanup: ${cleanupError.message}`);
+            }
+
             // ✅ CLEANUP: If timeout occurred, restart browser pool to free memory
             if (error.message.includes('timeout')) {
                 const RESTART_ON_TIMEOUT = process.env.RESTART_BROWSER_ON_TIMEOUT !== 'false'; // Default: true
@@ -597,6 +734,9 @@ class AdobeTarget1_0Service {
                 if (RESTART_ON_TIMEOUT) {
                     console.log(`    🔄 Timeout detected - restarting browser pool to free memory...`);
                     try {
+                        // Small delay to let resources close
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+
                         // Force garbage collection if available
                         if (global.gc) {
                             global.gc();
@@ -607,6 +747,13 @@ class AdobeTarget1_0Service {
                         await browserPool.restart();
                         console.log(`    ✅ Browser pool restarted - all browsers closed and reinitialized`);
                         console.log(`    💾 Memory should start decreasing now...`);
+
+                        // Another GC after restart
+                        if (global.gc) {
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            global.gc();
+                            console.log(`    🗑️ Second garbage collection after restart`);
+                        }
                     } catch (restartError) {
                         console.error(`    ⚠️ Error restarting browser pool:`, restartError.message);
                     }
