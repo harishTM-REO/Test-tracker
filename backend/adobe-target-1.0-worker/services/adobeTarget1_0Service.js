@@ -540,7 +540,7 @@ class AdobeTarget1_0Service {
         }
 
         // Acquire browser manually instead of using withBrowser
-        const browser = await browserPool.acquire();
+        const browser = await browserPool.acquireBrowser();
         const context = await browser.newContext();
         const page = await context.newPage();
 
@@ -595,7 +595,7 @@ class AdobeTarget1_0Service {
             // Successfully completed - clean up and release browser
             await page.close();
             await context.close();
-            browserPool.release(browser);
+            browserPool.releaseBrowser(browser);
 
             return {
                 urls,
@@ -686,7 +686,7 @@ class AdobeTarget1_0Service {
                         }
                         if (currentBrowser) {
                             // Release browser back to pool (don't close it)
-                            browserPool.release(currentBrowser);
+                            browserPool.releaseBrowser(currentBrowser);
                             console.log(`       ✅ Browser released back to pool`);
                         }
                     } catch (cleanupError) {
@@ -720,7 +720,7 @@ class AdobeTarget1_0Service {
                     console.log(`    🧹 Cleaned up context`);
                 }
                 if (currentBrowser) {
-                    browserPool.release(currentBrowser);
+                    browserPool.releaseBrowser(currentBrowser);
                     console.log(`    🧹 Browser released to pool`);
                 }
             } catch (cleanupError) {
