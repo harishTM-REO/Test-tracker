@@ -537,14 +537,23 @@ class AdobeTarget1_0Service {
         // ✅ TIMEOUT: Entire prioritization step must complete within 3 minutes
         const PRIORITIZATION_TIMEOUT = parseInt(process.env.PRIORITIZATION_TIMEOUT) || 180000; // 3 minutes default
 
+        let timeoutOccurred = false;
+        let timeoutHandle = null;
+
         try {
             console.log(`    ➤ Step 1: Prioritizing URL with ${PRIORITIZATION_TIMEOUT / 1000}s timeout...`);
 
             const prioritizationPromise = (async () => {
                 console.log(`    ➤ Step 1a: Live-crawling ${url} to gather URLs...`);
                 const collectedUrls = await this._liveCrawl(url, 60000);
-                console.log(`    ➤ Step 1b: Prioritizing ${collectedUrls.length} collected URLs...`);
 
+                // Check if timeout already occurred
+                if (timeoutOccurred) {
+                    console.log(`    ⚠️ Timeout already occurred, discarding late result`);
+                    return null;
+                }
+
+                console.log(`    ➤ Step 1b: Prioritizing ${collectedUrls.length} collected URLs...`);
                 const prioritizationResult = urlPrioritizationService.prioritizeUrls(collectedUrls);
 
                 console.log(`    ✅ Prioritization success: ${prioritizationResult.prioritizedUrls.length} URLs prioritized from ${collectedUrls.length} collected`);
@@ -562,14 +571,50 @@ class AdobeTarget1_0Service {
             })();
 
             // Race between prioritization and timeout
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error(`Prioritization timeout after ${PRIORITIZATION_TIMEOUT / 1000}s`)), PRIORITIZATION_TIMEOUT)
-            );
+            const timeoutPromise = new Promise((_, reject) => {
+                timeoutHandle = setTimeout(() => {
+                    timeoutOccurred = true;
+                    reject(new Error(`Prioritization timeout after ${PRIORITIZATION_TIMEOUT / 1000}s`));
+                }, PRIORITIZATION_TIMEOUT);
+            });
 
-            return await Promise.race([prioritizationPromise, timeoutPromise]);
+            const result = await Promise.race([prioritizationPromise, timeoutPromise]);
+
+            // Clear timeout if prioritization succeeded
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+            }
+
+            return result;
 
         } catch (error) {
             console.error(`    ❌ Prioritization failed for ${url}:`, error.message);
+
+            // ✅ CLEANUP: If timeout occurred, restart browser pool to free memory
+            if (error.message.includes('timeout')) {
+                const RESTART_ON_TIMEOUT = process.env.RESTART_BROWSER_ON_TIMEOUT !== 'false'; // Default: true
+
+                if (RESTART_ON_TIMEOUT) {
+                    console.log(`    🔄 Timeout detected - restarting browser pool to free memory...`);
+                    try {
+                        // Force garbage collection if available
+                        if (global.gc) {
+                            global.gc();
+                            console.log(`    🗑️ Forced garbage collection`);
+                        }
+
+                        // Restart browser pool to clean up stuck browsers
+                        await browserPool.restart();
+                        console.log(`    ✅ Browser pool restarted - all browsers closed and reinitialized`);
+                        console.log(`    💾 Memory should start decreasing now...`);
+                    } catch (restartError) {
+                        console.error(`    ⚠️ Error restarting browser pool:`, restartError.message);
+                    }
+                } else {
+                    console.log(`    ⏭️ Browser restart on timeout is disabled (RESTART_BROWSER_ON_TIMEOUT=false)`);
+                }
+            }
+
             return {
                 originalUrl: url,
                 prioritizationSuccess: false,
