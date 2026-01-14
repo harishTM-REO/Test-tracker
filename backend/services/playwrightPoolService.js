@@ -49,10 +49,10 @@ class PlaywrightPoolService {
 
     console.log(`🎭 PlaywrightPoolService initialized with pool size: ${poolSize}, max pages before restart: ${this.maxPagesBeforeRestart}`);
 
-    // Start deadlock watchdog (checks every 60s, triggers if idle >10min)
+    // Start deadlock watchdog (checks every 60s, triggers if idle >5min)
     // Can be overridden with DEADLOCK_CHECK_INTERVAL_MS and DEADLOCK_IDLE_THRESHOLD_MS
     const checkInterval = parseInt(process.env.DEADLOCK_CHECK_INTERVAL_MS) || 60000;
-    const idleThreshold = parseInt(process.env.DEADLOCK_IDLE_THRESHOLD_MS) || 180000; // Default: 3 min (reduced from 10 min)
+    const idleThreshold = parseInt(process.env.DEADLOCK_IDLE_THRESHOLD_MS) || 300000; // Default: 5 min
     this.startDeadlockWatchdog(checkInterval, idleThreshold);
   }
 
@@ -214,6 +214,8 @@ class PlaywrightPoolService {
     await this.initialize();
 
     this.stats.totalAcquisitions++;
+    // Update activity to prevent false deadlock detection
+    this.updateActivity();
 
     if (this.availableBrowsers.length > 0) {
       const browser = this.availableBrowsers.shift();
@@ -301,6 +303,8 @@ class PlaywrightPoolService {
     }
 
     this.stats.totalReleases++;
+    // Update activity to prevent false deadlock detection
+    this.updateActivity();
     this.busyBrowsers.delete(browser);
 
     // Check if browser needs restart (page count is incremented separately via incrementPageCount)

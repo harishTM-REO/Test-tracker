@@ -1,5 +1,27 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
+
+// Handle unhandled promise rejections from playwright-extra stealth plugins
+// These occur when browsers are closed while stealth plugins try to inject scripts
+process.on('unhandledRejection', (reason, promise) => {
+  // Check if this is a playwright-extra stealth plugin error
+  const errorMessage = reason?.message || String(reason);
+
+  if (errorMessage.includes('Target page, context or browser has been closed') ||
+      errorMessage.includes('page.addInitScript') ||
+      errorMessage.includes('cdpSession.send')) {
+    // Log but don't crash - these are expected when browsers are restarted/closed
+    console.warn('⚠️ Playwright stealth plugin error (non-fatal):', errorMessage);
+    return;
+  }
+
+  // For other unhandled rejections, log and potentially exit
+  console.error('❌ Unhandled Promise Rejection:', reason);
+  console.error('Promise:', promise);
+  // Uncomment the next line if you want to exit on other unhandled rejections
+  // process.exit(1);
+});
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
