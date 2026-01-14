@@ -574,6 +574,13 @@ class PlaywrightPoolService {
     console.log('✅ All Playwright browsers closed');
   }
 
+  async restart() {
+    console.log('🔄 Restarting Playwright browser pool...');
+    await this.closeAll();
+    await this.initialize();
+    console.log('✅ Playwright browser pool restarted');
+  }
+
   getStats() {
     // ✅ ENHANCED: Show actual page counts alongside tracked counts
     const browserPageCounts = {};

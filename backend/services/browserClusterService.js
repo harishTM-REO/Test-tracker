@@ -346,6 +346,16 @@ class BrowserClusterService {
   }
 
   /**
+   * Restart the browser cluster
+   */
+  async restart() {
+    console.log('🔄 Restarting browser cluster...');
+    await this.closeAll();
+    await this.initialize();
+    console.log('✅ Browser cluster restarted');
+  }
+
+  /**
    * Health check
    */
   async healthCheck() {
