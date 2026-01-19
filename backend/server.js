@@ -155,7 +155,6 @@ app.listen(port, async () => {
     // Don't crash the server, but log the warning
   }
 
-  // Start cron jobs after server starts
   // ❌ DISABLED - All cron jobs have been disabled
   // try {
   //   CronJobService.startCronJobs();
