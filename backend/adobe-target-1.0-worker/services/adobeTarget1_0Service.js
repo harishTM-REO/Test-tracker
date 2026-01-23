@@ -300,12 +300,14 @@ class AdobeTarget1_0Service {
                         console.log(`  ✅ URL ${globalIndex + 1} completed: ${scrapingResults.summary.successfulScrapedUrls}/${scrapingResults.summary.totalTop25Urls} top URLs scraped successfully`);
 
                         // ✅ NEW: Save individual URL result with URL as primary key
+                        // Include the scraped top 25 URLs results for comparison
                         await this.saveUrlResult({
                             url: originalUrl,
                             datasetId,
                             datasetName,
                             summary: scrapingResults.summary,
-                            status: 'completed'
+                            status: 'completed',
+                            top25UrlsResults: scrapingResults.results
                         });
 
                     } catch (error) {
@@ -458,11 +460,303 @@ class AdobeTarget1_0Service {
     }
 
     /**
-     * Re-scraping workflow - scrapes experiments from existing top 25 URLs
+     * Re-scrape Adobe Target experiments from previously scraped top 25 URLs
+     * Skips prioritization and categorization - directly scrapes known URLs
+     * Saves results to adobetarget1_0_url_results collection for comparison
      */
     async performReScraping(jobData, progressCallback) {
-        // TODO: Implement re-scraping logic
-        throw new Error('Re-scraping not yet implemented');
+        const { datasetId, datasetName, urlsToRescrape, userId, options = {} } = jobData;
+
+        try {
+            console.log(`\n🔄 Starting Adobe Target 1.0 RE-SCRAPING workflow for: ${datasetName}`);
+            console.log(`📊 Re-processing ${urlsToRescrape.length} companies\n`);
+
+            const startTime = new Date();
+
+            // Calculate total URLs to rescrape
+            const totalUrls = urlsToRescrape.reduce((sum, company) => sum + (company.top25Urls?.length || 0), 0);
+            console.log(`📊 Total URLs to re-scrape: ${totalUrls}`);
+
+            // ========== CONFIGURATION FROM ENV ==========
+            const BATCH_SIZE = parseInt(process.env.ADOBE_TARGET_1_0_BATCH_SIZE) || 5;
+            const totalBatches = Math.max(1, Math.ceil(urlsToRescrape.length / BATCH_SIZE));
+
+            console.log(`\n🔄 Batch Processing Configuration:`);
+            console.log(`   Total Companies: ${urlsToRescrape.length}`);
+            console.log(`   Batch Size: ${BATCH_SIZE}`);
+            console.log(`   Total Batches: ${totalBatches}\n`);
+
+            // Fetch and update dataset status to in_progress
+            let dataset = await Dataset.findById(datasetId);
+            if (dataset) {
+                dataset.scrapingStatus = 'in_progress';
+                dataset.scrapingError = null;
+                dataset.scrapingLastUpdate = new Date();
+                await dataset.save();
+                console.log('✅ Dataset status updated to in_progress');
+            }
+
+            // Get or create the main result document
+            let result = await AdobeTarget1_0Result.findOne({ datasetId });
+            if (!result) {
+                throw new Error('No existing Adobe Target 1.0 result found for this dataset');
+            }
+
+            // Start a new rescrape run
+            const runNumber = (result.currentRunNumber || 1) + 1;
+            result.currentRunNumber = runNumber;
+            result.lastRescrapedAt = new Date();
+
+            // Initialize run tracking if not exists
+            if (!result.runs) {
+                result.runs = [];
+            }
+
+            result.runs.push({
+                runNumber: runNumber,
+                runType: 'rescrape',
+                startedAt: startTime,
+                status: 'in_progress',
+                triggeredBy: userId ? 'user' : 'system',
+                triggeredByUserId: userId,
+                urlWorkflowResults: [],
+                stats: {
+                    totalTop25UrlsProcessed: 0,
+                    totalTop25UrlsSuccessful: 0,
+                    totalTop25UrlsFailed: 0,
+                    adobeTargetDetectedCount: 0,
+                    totalExperimentsFound: 0,
+                    uniqueExperimentsFound: 0,
+                    uniqueExperimentIds: []
+                }
+            });
+
+            await result.save();
+
+            progressCallback(5, { message: 'Starting re-scraping workflow' });
+
+            // Overall stats for this rescrape run
+            const rescrapeStats = {
+                totalTop25UrlsProcessed: 0,
+                totalTop25UrlsSuccessful: 0,
+                totalTop25UrlsFailed: 0,
+                adobeTargetDetectedCount: 0,
+                totalExperimentsFound: 0,
+                uniqueExperimentIds: new Set(),
+                uniqueActivityIds: new Set()
+            };
+
+            // ========== PROCESS COMPANIES IN BATCHES ==========
+            let processedCompanies = 0;
+
+            for (let batchIndex = 0; batchIndex < urlsToRescrape.length; batchIndex += BATCH_SIZE) {
+                const batch = urlsToRescrape.slice(batchIndex, batchIndex + BATCH_SIZE);
+                const batchNumber = Math.floor(batchIndex / BATCH_SIZE) + 1;
+
+                console.log(`\n${'='.repeat(70)}`);
+                console.log(`📦 Processing Batch ${batchNumber}/${totalBatches} (${batch.length} companies)`);
+                console.log(`${'='.repeat(70)}\n`);
+
+                // Process each company in the batch
+                for (let i = 0; i < batch.length; i++) {
+                    const companyData = batch[i];
+                    const originalUrl = companyData.originalUrl;
+                    const top25Urls = companyData.top25Urls || [];
+                    const globalIndex = batchIndex + i;
+                    const progress = 5 + Math.floor((globalIndex / urlsToRescrape.length) * 85);
+
+                    console.log(`\n📍 Re-scraping Company ${globalIndex + 1}/${urlsToRescrape.length}: ${originalUrl}`);
+                    console.log(`   URLs to scrape: ${top25Urls.length}`);
+
+                    progressCallback(progress, {
+                        message: `Re-scraping batch ${batchNumber}/${totalBatches}: Company ${globalIndex + 1}/${urlsToRescrape.length}`,
+                        currentUrl: originalUrl,
+                        batchNumber: batchNumber,
+                        totalBatches: totalBatches
+                    });
+
+                    try {
+                        if (top25Urls.length === 0) {
+                            console.log(`   ⚠️ No URLs to re-scrape for this company, skipping...`);
+                            continue;
+                        }
+
+                        // Create a fake categorization result to use existing scrapeTop25Urls method
+                        const fakeCategorization = {
+                            categorizationSuccess: true,
+                            prioritizedTop25: top25Urls.map(urlData => ({
+                                url: urlData.url,
+                                category: urlData.category || 'unknown',
+                                priority: urlData.priority || 0,
+                                isSeedUrl: urlData.isSeedUrl || false
+                            }))
+                        };
+
+                        // Scrape Adobe Target from the top 25 URLs
+                        console.log(`   ➤ Scraping Adobe Target from ${top25Urls.length} URLs...`);
+                        const scrapingResults = await this.scrapeTop25Urls(fakeCategorization, options);
+
+                        // Update rescrape stats
+                        rescrapeStats.totalTop25UrlsProcessed += scrapingResults.summary.totalTop25Urls;
+                        rescrapeStats.totalTop25UrlsSuccessful += scrapingResults.summary.successfulScrapedUrls;
+                        rescrapeStats.totalTop25UrlsFailed += scrapingResults.summary.failedScrapedUrls;
+                        rescrapeStats.adobeTargetDetectedCount += scrapingResults.summary.adobeTargetDetectedInTop25;
+                        rescrapeStats.totalExperimentsFound += scrapingResults.summary.totalExperimentsInTop25;
+
+                        // Track unique IDs
+                        if (scrapingResults.summary.uniqueExperimentIds) {
+                            scrapingResults.summary.uniqueExperimentIds.forEach(id => rescrapeStats.uniqueExperimentIds.add(id));
+                        }
+                        if (scrapingResults.summary.uniqueActivityIds) {
+                            scrapingResults.summary.uniqueActivityIds.forEach(id => rescrapeStats.uniqueActivityIds.add(id));
+                        }
+
+                        console.log(`   ✅ Company completed: ${scrapingResults.summary.successfulScrapedUrls}/${scrapingResults.summary.totalTop25Urls} URLs scraped`);
+
+                        // ✅ Save to adobetarget1_0_url_results collection (handles comparison automatically)
+                        // Include the scraped top 25 URLs results for comparison
+                        await this.saveUrlResult({
+                            url: originalUrl,
+                            datasetId,
+                            datasetName,
+                            summary: scrapingResults.summary,
+                            status: 'completed',
+                            top25UrlsResults: scrapingResults.results
+                        });
+
+                        processedCompanies++;
+
+                    } catch (error) {
+                        console.error(`   ❌ Error re-scraping company ${originalUrl}: ${error.message}`);
+
+                        // Save failed result
+                        await this.saveUrlResult({
+                            url: originalUrl,
+                            datasetId,
+                            datasetName,
+                            summary: {
+                                totalTop25Urls: top25Urls.length,
+                                successfulScrapedUrls: 0,
+                                failedScrapedUrls: top25Urls.length,
+                                adobeTargetDetectedInTop25: 0,
+                                totalExperimentsInTop25: 0,
+                                uniqueExperimentIds: [],
+                                uniqueExperimentCount: 0,
+                                uniqueActivityIds: [],
+                                uniqueActivityCount: 0,
+                                uniqueExperimentNames: [],
+                                allActivityIds: [],
+                                allActivityCount: 0
+                            },
+                            status: 'failed',
+                            error: error.message
+                        });
+
+                        rescrapeStats.totalTop25UrlsFailed += top25Urls.length;
+                        continue;
+                    }
+                }
+
+                // ✅ MEMORY CLEANUP between batches
+                if (batchNumber < totalBatches) {
+                    const batchDelay = parseInt(process.env.BATCH_DELAY) || 3000;
+                    console.log(`\n⏱️  Waiting ${batchDelay}ms before next batch...`);
+                    await performMemoryCleanup(batchDelay);
+                }
+            }
+
+            // ========== FINALIZE RESCRAPE ==========
+            const endTime = new Date();
+            const durationMs = endTime - startTime;
+            const durationMinutes = Math.floor(durationMs / 60000);
+            const durationSeconds = Math.floor((durationMs % 60000) / 1000);
+            const duration = `${durationMinutes}m ${durationSeconds}s`;
+
+            // Update the run with final stats
+            const currentRun = result.runs.find(r => r.runNumber === runNumber);
+            if (currentRun) {
+                currentRun.completedAt = endTime;
+                currentRun.duration = duration;
+                currentRun.status = 'completed';
+                currentRun.stats = {
+                    totalTop25UrlsProcessed: rescrapeStats.totalTop25UrlsProcessed,
+                    totalTop25UrlsSuccessful: rescrapeStats.totalTop25UrlsSuccessful,
+                    totalTop25UrlsFailed: rescrapeStats.totalTop25UrlsFailed,
+                    adobeTargetDetectedCount: rescrapeStats.adobeTargetDetectedCount,
+                    totalExperimentsFound: rescrapeStats.totalExperimentsFound,
+                    uniqueExperimentsFound: rescrapeStats.uniqueExperimentIds.size,
+                    uniqueExperimentIds: Array.from(rescrapeStats.uniqueExperimentIds)
+                };
+            }
+
+            await result.save();
+
+            // Update dataset status to completed
+            dataset = await Dataset.findById(datasetId);
+            if (dataset) {
+                dataset.scrapingStatus = 'completed';
+                dataset.scrapingLastUpdate = new Date();
+                dataset.scrapingStats = {
+                    totalUrls: urlsToRescrape.length,
+                    processedUrls: rescrapeStats.totalTop25UrlsProcessed,
+                    successfulScans: rescrapeStats.totalTop25UrlsSuccessful,
+                    failedScans: rescrapeStats.totalTop25UrlsFailed,
+                    adobeTargetDetected: rescrapeStats.adobeTargetDetectedCount,
+                    totalExperiments: rescrapeStats.totalExperimentsFound
+                };
+                await dataset.save();
+                console.log('✅ Dataset status updated to completed');
+            }
+
+            console.log(`\n${'='.repeat(70)}`);
+            console.log(`📊 Adobe Target 1.0 RE-SCRAPING Completed (Run #${runNumber})`);
+            console.log(`${'='.repeat(70)}`);
+            console.log(`✅ Duration: ${duration}`);
+            console.log(`✅ Companies Processed: ${processedCompanies}/${urlsToRescrape.length}`);
+            console.log(`✅ Total URLs Re-scraped: ${rescrapeStats.totalTop25UrlsProcessed}`);
+            console.log(`✅ Successful: ${rescrapeStats.totalTop25UrlsSuccessful}`);
+            console.log(`✅ Failed: ${rescrapeStats.totalTop25UrlsFailed}`);
+            console.log(`✅ Adobe Target Detected: ${rescrapeStats.adobeTargetDetectedCount}`);
+            console.log(`✅ Total Experiments Found: ${rescrapeStats.totalExperimentsFound}`);
+            console.log(`✅ Unique Experiment IDs: ${rescrapeStats.uniqueExperimentIds.size}`);
+            console.log(`${'='.repeat(70)}\n`);
+
+            progressCallback(100, { message: 'Re-scraping completed successfully' });
+
+            return {
+                success: true,
+                message: 'Adobe Target 1.0 re-scraping completed',
+                runNumber: runNumber,
+                resultId: result._id,
+                stats: {
+                    companiesProcessed: processedCompanies,
+                    totalUrlsRescraped: rescrapeStats.totalTop25UrlsProcessed,
+                    successfulScans: rescrapeStats.totalTop25UrlsSuccessful,
+                    failedScans: rescrapeStats.totalTop25UrlsFailed,
+                    adobeTargetDetected: rescrapeStats.adobeTargetDetectedCount,
+                    totalExperiments: rescrapeStats.totalExperimentsFound,
+                    uniqueExperimentIds: rescrapeStats.uniqueExperimentIds.size
+                }
+            };
+
+        } catch (error) {
+            console.error(`❌ Error in AT 1.0 re-scraping workflow:`, error);
+
+            // Mark dataset as failed
+            try {
+                const dataset = await Dataset.findById(datasetId);
+                if (dataset) {
+                    dataset.scrapingStatus = 'failed';
+                    dataset.scrapingError = error.message;
+                    dataset.scrapingLastUpdate = new Date();
+                    await dataset.save();
+                }
+            } catch (updateError) {
+                console.error('Error updating dataset status:', updateError.message);
+            }
+
+            throw error;
+        }
     }
 
     async _liveCrawl(url, timeout) {
@@ -1063,8 +1357,9 @@ class AdobeTarget1_0Service {
     /**
      * ✅ ENHANCED: Save individual URL result with URL as primary key
      * Automatically overrides existing results and tracks reprocessing
+     * Now also stores the scraped top 25 URLs results for comparison
      */
-    async saveUrlResult({ url, datasetId, datasetName, summary, status = 'completed', error = null }) {
+    async saveUrlResult({ url, datasetId, datasetName, summary, status = 'completed', error = null, top25UrlsResults = null }) {
         try {
             const quickStats = {
                 hasAdobeTarget: summary.adobeTargetDetectedInTop25 > 0,
@@ -1087,6 +1382,25 @@ class AdobeTarget1_0Service {
                 completedAt: status === 'completed' || status === 'failed' ? new Date() : null
             };
 
+            // Add top 25 URLs results if provided
+            if (top25UrlsResults && top25UrlsResults.length > 0) {
+                updateData.top25UrlsResults = top25UrlsResults.map(result => ({
+                    url: result.url,
+                    category: result.category,
+                    priority: result.priority,
+                    isSeedUrl: result.isSeedUrl || false,
+                    success: result.success,
+                    adobeTargetDetected: result.adobeTargetDetected || false,
+                    experimentCount: result.experimentCount || 0,
+                    experiments: result.experiments || [],
+                    activityIds: result.activityIds || [],
+                    activityNames: result.activityNames || [],
+                    version: result.version,
+                    error: result.error,
+                    scrapedAt: result.scrapedAt || new Date()
+                }));
+            }
+
             if (existingResult) {
                 // URL is being reprocessed - track changes
                 console.log(`      🔄 Reprocessing URL (previously processed ${existingResult.processCount} time(s))`);
@@ -1100,6 +1414,11 @@ class AdobeTarget1_0Service {
                     allActivityIds: existingResult.summary.allActivityIds || [],
                     lastChecked: existingResult.lastProcessedAt
                 };
+
+                // Store previous top 25 URLs results for comparison
+                if (existingResult.top25UrlsResults && existingResult.top25UrlsResults.length > 0) {
+                    updateData.previousTop25UrlsResults = existingResult.top25UrlsResults;
+                }
 
                 // Increment process count
                 updateData.processCount = (existingResult.processCount || 1) + 1;
@@ -1142,7 +1461,7 @@ class AdobeTarget1_0Service {
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             );
 
-            console.log(`      💾 URL result saved: ${url} (${quickStats.experimentCount} experiments, processed ${urlResult.processCount}x)`);
+            console.log(`      💾 URL result saved: ${url} (${quickStats.experimentCount} experiments, ${top25UrlsResults?.length || 0} URLs, processed ${urlResult.processCount}x)`);
             return urlResult;
         } catch (error) {
             console.error(`      ❌ Error saving URL result for ${url}:`, error.message);

@@ -101,7 +101,53 @@ const adobeTarget1_0UrlResultSchema = new mongoose.Schema({
     hasAdobeTarget: { type: Boolean, default: false, index: true },
     hasExperiments: { type: Boolean, default: false, index: true },
     experimentCount: { type: Number, default: 0, index: true }
-  }
+  },
+
+  // Scraped top 25 URLs with their results
+  top25UrlsResults: [{
+    url: { type: String, required: true },
+    category: String,
+    priority: Number,
+    isSeedUrl: { type: Boolean, default: false },
+    success: { type: Boolean, default: false },
+    adobeTargetDetected: { type: Boolean, default: false },
+    experimentCount: { type: Number, default: 0 },
+    experiments: [{
+      experimentId: String,
+      activityId: String,
+      activityName: String,
+      experienceName: String,
+      offerName: String
+    }],
+    activityIds: [String],
+    activityNames: [String],
+    version: String,
+    error: String,
+    scrapedAt: Date
+  }],
+
+  // Previous top 25 URLs results (for comparison)
+  previousTop25UrlsResults: [{
+    url: { type: String, required: true },
+    category: String,
+    priority: Number,
+    isSeedUrl: { type: Boolean, default: false },
+    success: { type: Boolean, default: false },
+    adobeTargetDetected: { type: Boolean, default: false },
+    experimentCount: { type: Number, default: 0 },
+    experiments: [{
+      experimentId: String,
+      activityId: String,
+      activityName: String,
+      experienceName: String,
+      offerName: String
+    }],
+    activityIds: [String],
+    activityNames: [String],
+    version: String,
+    error: String,
+    scrapedAt: Date
+  }]
 }, {
   timestamps: true,
   collection: 'adobetarget1_0_url_results'
