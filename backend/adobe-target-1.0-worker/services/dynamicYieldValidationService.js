@@ -1,5 +1,4 @@
 const path = require('path');
-const AdobeTarget1_0Service = require(path.join(__dirname, './adobeTarget1_0Service'));
 
 /**
  * Lightweight wrapper to run Dynamic Yield validation separately from
@@ -7,6 +6,8 @@ const AdobeTarget1_0Service = require(path.join(__dirname, './adobeTarget1_0Serv
  */
 class DynamicYieldValidationService {
   async performValidation(jobData, progressCallback) {
+    // Lazy-load to avoid circular dependency with adobeTarget1_0Service
+    const AdobeTarget1_0Service = require(path.join(__dirname, './adobeTarget1_0Service'));
     const service = new AdobeTarget1_0Service();
     return service.performDynamicYieldValidation(jobData, progressCallback);
   }
