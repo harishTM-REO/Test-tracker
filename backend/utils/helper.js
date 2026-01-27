@@ -593,7 +593,7 @@ const handleCookieConsent = async (page) => {
 
               return { found: false };
             }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('evaluate_timeout')), 3000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error('evaluate_timeout')), 6000))
           ]);
         } catch (evalErr) {
           console.warn(`⚠️ Cookie consent evaluate timeout, skipping...`);
