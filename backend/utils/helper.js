@@ -556,40 +556,50 @@ const handleCookieConsent = async (page) => {
       while (Date.now() - start < MAX_TIME) {
         if (page.isClosed()) return 'page_closed';
         if (page.url() !== startUrl) return 'navigated';
-  
-        const result = await page.evaluate(() => {
-          const providers = [
-            { type: 'onetrust', sel: '#onetrust-accept-btn-handler' },
-            { type: 'cookiebot', sel: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll' },
-            { type: 'quantcast', sel: '.qc-cmp2-summary-buttons button[mode="primary"]' },
-            { type: 'iubenda', sel: '.iubenda-cs-accept-btn' }
-          ];
-  
-          for (const p of providers) {
-            const el = document.querySelector(p.sel);
-            if (el && el.offsetParent) {
-              el.click();
-              return { found: true, type: p.type };
-            }
-          }
-  
-          // Heuristic fallback
-          const buttons = [...document.querySelectorAll('button, a[role="button"]')];
-          for (const btn of buttons) {
-            const text = btn.textContent?.toLowerCase() || '';
-            if (
-              btn.offsetParent &&
-              ['accept', 'allow', 'agree', 'ok', 'got it'].some(t => text.includes(t)) &&
-              !['reject', 'decline'].some(t => text.includes(t))
-            ) {
-              btn.click();
-              return { found: true, type: 'heuristic' };
-            }
-          }
-  
-          return { found: false };
-        });
-  
+
+        // Wrap evaluate in timeout to prevent hanging on unresponsive pages
+        let result;
+        try {
+          result = await Promise.race([
+            page.evaluate(() => {
+              const providers = [
+                { type: 'onetrust', sel: '#onetrust-accept-btn-handler' },
+                { type: 'cookiebot', sel: '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll' },
+                { type: 'quantcast', sel: '.qc-cmp2-summary-buttons button[mode="primary"]' },
+                { type: 'iubenda', sel: '.iubenda-cs-accept-btn' }
+              ];
+
+              for (const p of providers) {
+                const el = document.querySelector(p.sel);
+                if (el && el.offsetParent) {
+                  el.click();
+                  return { found: true, type: p.type };
+                }
+              }
+
+              // Heuristic fallback
+              const buttons = [...document.querySelectorAll('button, a[role="button"]')];
+              for (const btn of buttons) {
+                const text = btn.textContent?.toLowerCase() || '';
+                if (
+                  btn.offsetParent &&
+                  ['accept', 'allow', 'agree', 'ok', 'got it'].some(t => text.includes(t)) &&
+                  !['reject', 'decline'].some(t => text.includes(t))
+                ) {
+                  btn.click();
+                  return { found: true, type: 'heuristic' };
+                }
+              }
+
+              return { found: false };
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('evaluate_timeout')), 3000))
+          ]);
+        } catch (evalErr) {
+          console.warn(`⚠️ Cookie consent evaluate timeout, skipping...`);
+          return 'evaluate_timeout';
+        }
+
         if (result?.found) {
           console.log(`✅ Cookie consent accepted (${result.type})`);
           return result.type;
@@ -598,7 +608,7 @@ const handleCookieConsent = async (page) => {
         // ✅ FIX: Use Promise-based delay instead of page.waitForTimeout (not a valid Puppeteer method)
         await new Promise(resolve => setTimeout(resolve, 250));
       }
-  
+
       return 'not_found';
     } catch (e) {
       // ❗ Never throw from cookie consent
