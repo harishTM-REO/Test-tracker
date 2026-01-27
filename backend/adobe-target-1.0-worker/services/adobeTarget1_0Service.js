@@ -2106,8 +2106,27 @@ class AdobeTarget1_0Service {
                     };
                 }
 
-                // B. Dynamic Yield Detection
-                const detectionResult = await this.detectDynamicYieldPresence(targetUrl);
+                // B. Dynamic Yield Detection (with overall timeout)
+                const DETECTION_TIMEOUT = 60000; // 60 seconds max per URL
+                let detectionResult;
+                try {
+                    detectionResult = await Promise.race([
+                        this.detectDynamicYieldPresence(targetUrl),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('Detection timeout')), DETECTION_TIMEOUT)
+                        )
+                    ]);
+                } catch (timeoutErr) {
+                    console.log(`   ⏱️ Detection timed out for: ${targetUrl}`);
+                    return {
+                        index: idx,
+                        result: {
+                            success: false,
+                            url: targetUrl,
+                            error: `Detection timeout after ${DETECTION_TIMEOUT/1000}s`
+                        }
+                    };
+                }
 
                 // Check for errors
                 if (detectionResult.detectionSource?.error) {
@@ -2204,7 +2223,10 @@ class AdobeTarget1_0Service {
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     console.log(`   🔍 Detection attempt ${attempt}/${maxRetries}...`);
 
-                    detectionResult = await page.evaluate(() => {
+                    // Wrap evaluate in timeout to prevent hanging
+                    try {
+                        detectionResult = await Promise.race([
+                            page.evaluate(() => {
                     try {
                         // Check for window.DYO object (main Dynamic Yield object)
                         const hasDYO = typeof window.DYO !== 'undefined';
@@ -2278,7 +2300,13 @@ class AdobeTarget1_0Service {
                             error: error.message
                         };
                     }
-                    });
+                    }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('evaluate_timeout')), 10000))
+                        ]);
+                    } catch (evalErr) {
+                        console.warn(`   ⚠️ Detection evaluate timed out, marking as failed`);
+                        detectionResult = { detected: false, error: 'evaluate_timeout' };
+                    }
 
                     // Log the detection result for this attempt
                     console.log(`   📊 Attempt ${attempt} results:`, {
