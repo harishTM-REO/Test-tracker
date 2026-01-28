@@ -80,8 +80,21 @@ class DynamicYieldScraperService {
    */
   async detectDynamicYieldFromPage(url) {
     return await this.browserPool.withBrowser(async (browser) => {
-      const context = await browser.newContext();
-      const page = await context.newPage();
+      // Support both Playwright (newContext) and Puppeteer (createBrowserContext/createIncognitoBrowserContext)
+      let context, page;
+      if (typeof browser.newContext === 'function') {
+        // Playwright
+        context = await browser.newContext();
+        page = await context.newPage();
+      } else if (typeof browser.createBrowserContext === 'function') {
+        // Puppeteer
+        context = await browser.createBrowserContext();
+        page = await context.newPage();
+      } else {
+        // Fallback: direct page creation (older Puppeteer)
+        page = await browser.newPage();
+        context = null;
+      }
 
       const navigationTimeout = 30000;
       page.setDefaultNavigationTimeout(navigationTimeout);
@@ -253,7 +266,9 @@ class DynamicYieldScraperService {
         };
       } finally {
         await page.close();
-        await context.close();
+        if (context && typeof context.close === 'function') {
+          await context.close();
+        }
       }
     });
   }
