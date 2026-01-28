@@ -113,7 +113,8 @@ class DynamicYieldScraperService {
 
         // Wait for Dynamic Yield to initialize
         console.log('[Dynamic Yield] ⏳ Waiting for Dynamic Yield to initialize...');
-        await page.waitForTimeout(3000);
+        // Use Promise-based delay (works with both Puppeteer and Playwright)
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
         // Retry logic: Check for window.DYO (max 2 attempts)
         let detectionResult = null;
@@ -231,7 +232,7 @@ class DynamicYieldScraperService {
           // If not detected and we have more retries, wait before next attempt
           if (attempt < maxRetries) {
             console.log(`[Dynamic Yield] ⏳ Not detected yet, waiting ${retryDelay}ms before retry...`);
-            await page.waitForTimeout(retryDelay);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
           } else {
             console.log(`[Dynamic Yield] ❌ Dynamic Yield not detected after ${maxRetries} attempts`);
           }
