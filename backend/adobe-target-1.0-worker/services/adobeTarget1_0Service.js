@@ -2301,10 +2301,10 @@ class AdobeTarget1_0Service {
                         };
                     }
                     }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('evaluate_timeout')), 10000))
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('evaluate_timeout')), 20000))
                         ]);
                     } catch (evalErr) {
-                        console.warn(`   ⚠️ Detection evaluate timed out, marking as failed`);
+                        console.warn(`   ⚠️ Detection evaluate timed out (20s), marking as failed`);
                         detectionResult = { detected: false, error: 'evaluate_timeout' };
                     }
 

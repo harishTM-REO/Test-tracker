@@ -828,12 +828,14 @@ router.get('/abtasty-validation/results/:datasetId', async (req, res) => {
  * @query all - (optional) Get all batches: ?all=true
  * @query summary - (optional) Get summary view only: ?summary=true
  * @query groupByCampaign - (optional) Group positive URLs by campaignId: ?groupByCampaign=true
+ * @query filter - (optional) Filter URLs by status: ?filter=positive, ?filter=negative, ?filter=failed
  * @example GET /at10/api/dynamic-yield-validation/results/6936ffa1c891633c7898de00?all=true&groupByCampaign=true
+ * @example GET /at10/api/dynamic-yield-validation/results/6936ffa1c891633c7898de00?all=true&filter=positive
  */
 router.get('/dynamic-yield-validation/results/:datasetId', async (req, res) => {
   try {
     const { datasetId } = req.params;
-    const { batch, batches, all, summary, groupByCampaign } = req.query;
+    const { batch, batches, all, summary, groupByCampaign, filter } = req.query;
 
     console.log(`📊 Fetching Dynamic Yield validation results for dataset: ${datasetId}`);
 
@@ -991,6 +993,51 @@ router.get('/dynamic-yield-validation/results/:datasetId', async (req, res) => {
           },
           groupedByCampaign: campaignsArray,
           batchCount: batchDocuments.length
+        }
+      });
+    }
+
+    // ✅ Filter URLs by status when requested (positive, negative, failed)
+    if (filter && ['positive', 'negative', 'failed'].includes(filter.toLowerCase())) {
+      console.log(`🔍 Filtering URLs by status: ${filter}`);
+
+      const filterType = filter.toLowerCase();
+      const urlFieldMap = {
+        positive: 'positiveUrls',
+        negative: 'negativeUrls',
+        failed: 'failedUrls'
+      };
+      const urlField = urlFieldMap[filterType];
+
+      // Collect all URLs of the specified type from all batches
+      const filteredUrls = [];
+      batchDocuments.forEach(doc => {
+        if (doc[urlField] && Array.isArray(doc[urlField])) {
+          doc[urlField].forEach(urlEntry => {
+            filteredUrls.push({
+              ...urlEntry.toObject ? urlEntry.toObject() : urlEntry,
+              batchNumber: doc.batchNumber
+            });
+          });
+        }
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          datasetId: result.datasetId,
+          datasetName: result.datasetName,
+          status: result.status,
+          filter: filterType,
+          totalCount: filteredUrls.length,
+          urls: filteredUrls,
+          summary: {
+            totalUrls: result.totalUrls,
+            positiveCount: result.summary?.positiveCount || 0,
+            negativeCount: result.summary?.negativeCount || 0,
+            failedCount: result.summary?.failedCount || 0,
+            detectionRate: result.summary?.detectionRate || 0
+          }
         }
       });
     }
