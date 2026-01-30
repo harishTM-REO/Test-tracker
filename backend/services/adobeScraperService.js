@@ -148,10 +148,11 @@ class AdobeScraperService {
             // Ignore navigation errors - we only need the network request
           });
 
-          // Wait for Adobe Target network request OR 1.5s timeout (whichever comes first)
+          // Wait for Adobe Target network request OR 5s timeout (whichever comes first)
+          // ✅ FIX: Increased from 1.5s to 5s to reduce false negatives on slow-loading sites
           await Promise.race([
             networkListenerPromise,
-            new Promise(resolve => setTimeout(resolve, 1500))
+            new Promise(resolve => setTimeout(resolve, 5000))
           ]);
       
           /* ======================================================
@@ -289,9 +290,10 @@ class AdobeScraperService {
           if (networkListenerPromise) {
             try {
               console.log('⏳ Waiting for Adobe Target network response...');
+              // ✅ FIX: Increased from 3s to 5s to reduce false negatives
               mboxResponseData = await Promise.race([
                 networkListenerPromise,
-                new Promise(r => setTimeout(() => r(null), 3000))
+                new Promise(r => setTimeout(() => r(null), 5000))
               ]);
               if (mboxResponseData) {
                 console.log('✅ Adobe Target network data captured!');
@@ -444,15 +446,88 @@ class AdobeScraperService {
         const adobeTargetData = await page.evaluate(() => {
             const hasAdobe = !!window.adobe;
             const hasTarget = !!(window.adobe && window.adobe.target);
+
+            // Fallback: Check for Adobe Target specific scripts by domain/path
+            const scripts = document.querySelectorAll('script[src]');
+            const hasAdobeTargetScript = Array.from(scripts).some(script => {
+                const src = script.src.toLowerCase();
+                return (
+                    src.includes('assets.adobedtm.com') ||      // Adobe DTM CDN
+                    src.includes('tt.omtrdc.net') ||            // Adobe Target API domain
+                    src.includes('mboxedge') ||                 // Adobe Target edge
+                    src.includes('cdn.tt.omtrdc.net') ||        // Adobe Target CDN
+                    (src.includes('adobe') && src.includes('target')) ||  // Generic adobe+target combo
+                    /\/at\.js($|\?|#)/.test(src) ||             // at.js at end of path
+                    /\/at-\d+\.js/.test(src)                    // Versioned at.js (e.g., at-2.js)
+                );
+            });
+
+            // Check for mbox cookie (Adobe Target tracking cookie)
+            const hasMboxCookie = document.cookie.includes('mbox');
+
             try {
-                if (!hasAdobe || !hasTarget) {
-                    return { detected: false, version: null, hasMboxCookie: false, hasAdobeScript: false };
+                // Primary detection: window.adobe.target object
+                if (hasAdobe && hasTarget) {
+                    const versionValue = window.adobe.target?.VERSION || window.adobe.target?.['VERSION'];
+                    const version = parseInt(versionValue) || null;
+                    return {
+                        detected: true,
+                        version: version,
+                        hasMboxCookie: hasMboxCookie,
+                        hasAdobeScript: true,
+                        detectionMethod: 'windowObject'
+                    };
                 }
-                const versionValue = window.adobe.target?.VERSION || window.adobe.target?.['VERSION'];
-                const version = parseInt(versionValue) || null;
-                return { detected: true, version: version, hasMboxCookie: false, hasAdobeScript: false };
+
+                // Fallback detection: Adobe-specific script tags found
+                if (hasAdobeTargetScript) {
+                    return {
+                        detected: true,
+                        version: null,
+                        hasMboxCookie: hasMboxCookie,
+                        hasAdobeScript: true,
+                        detectionMethod: 'scriptTag'
+                    };
+                }
+
+                // Fallback detection: mbox cookie present (indicates AT was loaded previously)
+                if (hasMboxCookie) {
+                    return {
+                        detected: true,
+                        version: null,
+                        hasMboxCookie: true,
+                        hasAdobeScript: false,
+                        detectionMethod: 'mboxCookie'
+                    };
+                }
+
+                return {
+                    detected: false,
+                    version: null,
+                    hasMboxCookie: false,
+                    hasAdobeScript: false,
+                    detectionMethod: 'none'
+                };
             } catch (e) {
-                return { detected: false, version: null, hasMboxCookie: false, hasAdobeScript: false, error: e.message };
+                // Even on error, check if we found scripts
+                if (hasAdobeTargetScript || hasMboxCookie) {
+                    return {
+                        detected: true,
+                        version: null,
+                        hasMboxCookie: hasMboxCookie,
+                        hasAdobeScript: hasAdobeTargetScript,
+                        detectionMethod: 'fallbackOnError',
+                        error: e.message
+                    };
+                }
+                return {
+                    detected: false,
+                    version: null,
+                    hasMboxCookie: false,
+                    hasAdobeScript: false,
+                    detectionMethod: 'error',
+                    error: e.message
+                };
             }
         });
 
@@ -460,9 +535,12 @@ class AdobeScraperService {
         return {
             detected,
             version: adobeTargetData?.version || null,
-            hasMboxCookie: false,
-            hasAdobeScript: false,
-            detectionSource: { adobeObject: detected },
+            hasMboxCookie: adobeTargetData?.hasMboxCookie || false,
+            hasAdobeScript: adobeTargetData?.hasAdobeScript || false,
+            detectionSource: {
+                adobeObject: detected,
+                method: adobeTargetData?.detectionMethod || 'unknown'
+            },
             raw: adobeTargetData
         };
     }
@@ -741,23 +819,66 @@ class AdobeScraperService {
             const experimentData = await Promise.race([
                 page.evaluate(() => {
                     return new Promise((resolve) => {
+                        // ✅ Enhanced: Check for Adobe Target specific scripts by domain/path
+                        const checkAdobeScripts = () => {
+                            const scripts = document.querySelectorAll('script[src]');
+                            return Array.from(scripts).some(script => {
+                                const src = script.src.toLowerCase();
+                                return (
+                                    src.includes('assets.adobedtm.com') ||      // Adobe DTM CDN
+                                    src.includes('tt.omtrdc.net') ||            // Adobe Target API domain
+                                    src.includes('mboxedge') ||                 // Adobe Target edge
+                                    src.includes('cdn.tt.omtrdc.net') ||        // Adobe Target CDN
+                                    (src.includes('adobe') && src.includes('target')) ||  // Generic adobe+target combo
+                                    /\/at\.js($|\?|#)/.test(src) ||             // at.js at end of path
+                                    /\/at-\d+\.js/.test(src)                    // Versioned at.js (e.g., at-2.js)
+                                );
+                            });
+                        };
+
+                        // ✅ Enhanced: Check for mbox cookie
+                        const hasMboxCookie = document.cookie.includes('mbox');
+
                         const check = () => {
                             try {
+                                // Primary: Check window.adobe.target
                                 if (window.adobe && window.adobe.target) {
                                     const version = parseInt(window.adobe.target.VERSION) || null;
-                                    return { experiments: [], hasAdobeTarget: true, adobeTargetVersion: version, adobeTargetObject: {} };
+                                    return { experiments: [], hasAdobeTarget: true, adobeTargetVersion: version, adobeTargetObject: {}, detectionMethod: 'windowObject' };
+                                }
+
+                                // Fallback: Check for Adobe-specific scripts
+                                if (checkAdobeScripts()) {
+                                    return { experiments: [], hasAdobeTarget: true, adobeTargetVersion: null, adobeTargetObject: {}, detectionMethod: 'scriptTag' };
+                                }
+
+                                // Fallback: Check for mbox cookie
+                                if (hasMboxCookie) {
+                                    return { experiments: [], hasAdobeTarget: true, adobeTargetVersion: null, adobeTargetObject: {}, detectionMethod: 'mboxCookie' };
                                 }
                             } catch(e) {}
                             return null;
                         };
+
                         const result = check();
                         if (result) { resolve(result); return; }
+
                         let attempts = 0;
                         const interval = setInterval(() => {
                             attempts++;
                             const res = check();
                             if (res) { clearInterval(interval); resolve(res); }
-                            else if (attempts > 10) { clearInterval(interval); resolve({ hasAdobeTarget: false, experiments: [], experimentCount: 0 }); }
+                            else if (attempts > 15) {
+                                clearInterval(interval);
+                                // ✅ Final fallback check before giving up
+                                const hasScripts = checkAdobeScripts();
+                                const hasCookie = document.cookie.includes('mbox');
+                                if (hasScripts || hasCookie) {
+                                    resolve({ hasAdobeTarget: true, experiments: [], experimentCount: 0, detectionMethod: hasScripts ? 'scriptTag' : 'mboxCookie' });
+                                } else {
+                                    resolve({ hasAdobeTarget: false, experiments: [], experimentCount: 0, detectionMethod: 'none' });
+                                }
+                            }
                         }, 200);
                     });
                 }),
@@ -771,9 +892,10 @@ class AdobeScraperService {
             });
             if (mboxPromise) {
                 try {
+                    // ✅ FIX: Increased from 2s to 5s to reduce false negatives
                     mboxResponseData = await Promise.race([
                         mboxPromise,
-                        new Promise(r => setTimeout(() => r(null), 2000))
+                        new Promise(r => setTimeout(() => r(null), 5000))
                     ]);
                 } catch (e) {
                     console.warn('⚠️ Error waiting for mbox data:', e.message);
@@ -816,6 +938,7 @@ class AdobeScraperService {
                 captchaDetected: experimentData.captchaDetected,
                 captchaStatus: experimentData.captchaStatus,
                 detected: experimentData.hasAdobeTarget,
+                detectionMethod: experimentData.detectionMethod || 'unknown',  // ✅ Added: Shows how AT was detected
                 version: experimentData.adobeTargetVersion,
                 experiments: experimentData.experiments,
                 experimentCount: experimentData.experimentCount || 0,
