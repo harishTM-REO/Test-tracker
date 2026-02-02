@@ -1223,6 +1223,7 @@ async function liveCrawlAndPrioritize(req, res) {
             message: 'Live crawl and prioritization completed',
             url: url,
             totalUrlsCollected: urls.length,
+            collectedUrls: urls,
             totalPrioritized: prioritizationResult.prioritizedUrls.length,
             prioritizedUrls: prioritizationResult.prioritizedUrls,
             metadata: {

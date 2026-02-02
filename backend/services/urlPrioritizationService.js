@@ -752,17 +752,20 @@ class UrlPrioritizationService {
       if (children.length > 0) {
         const isVerified = verifiedUrls.has(parentUrl);
 
-        // LIMIT TO TOP 2 CHILDREN by descendant count
-        const limitedChildren = this.getTopChildren(children, allUrlsSet, 2);
+        // Get top 2 children by descendant count for priority display
+        const topChildren = this.getTopChildren(children, allUrlsSet, 2);
+
+        // Include ALL children sorted alphabetically
+        const allChildren = children.sort();
 
         hierarchicalUrls.push({
           url: parentUrl,
-          children: limitedChildren,
+          children: topChildren,
+          allChildren: allChildren,  // All collected URLs under this parent
           wasCollected: isVerified  // Track if URL was in original crawl
         });
 
-        const childCountLabel = children.length > 2 ? `${limitedChildren.length}/2 top` : `${limitedChildren.length}`;
-        console.log(`✓ Parent: ${parentUrl} → ${childCountLabel} children (from ${children.length} total)`);
+        console.log(`✓ Parent: ${parentUrl} → ${topChildren.length} top children, ${allChildren.length} total`);
       }
     }
 
