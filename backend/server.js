@@ -30,6 +30,7 @@ const abTastyRoutes = require("./routes/abTastyRoutes");
 const adobeTargetRoutes = require("./routes/adobeRoutes");
 const adobeTarget1_0Routes = require("./routes/adobeTarget1_0Routes");
 const adobeTarget1_0UrlRoutes = require("./routes/adobeTarget1_0UrlRoutes");
+const adobeTarget1_0RevalidationRoutes = require("./routes/adobeTarget1_0RevalidationRoutes");
 const adobeTargetValidationRoutes = require("./routes/adobeTargetValidationRoutes");
 const pageCrawlerRoutes = require("./routes/pageCrawlerRoutes");
 const experimentsRoutes = require("./routes/experimentsRoutes");
@@ -112,6 +113,7 @@ app.use("/api/abtasty", abTastyRoutes);
 app.use("/api/adobetarget", adobeTargetRoutes);
 app.use("/api/adobe-target-1.0", adobeTarget1_0Routes);
 app.use("/api/adobe-target-1.0", adobeTarget1_0UrlRoutes); // URL-based results
+app.use("/api/adobe-target-1.0", adobeTarget1_0RevalidationRoutes); // Revalidation routes
 app.use("/api/adobe-target-validation", adobeTargetValidationRoutes);
 
 // Page Crawler Routes
@@ -182,6 +184,19 @@ app.listen(port, async () => {
   } catch (error) {
     console.error(
       "❌ Failed to initialize background scraping service:",
+      error
+    );
+    // Don't crash the server, but log the error
+  }
+
+  // Initialize Adobe Target 1.0 Revalidation Service
+  try {
+    const AdobeTarget1_0RevalidationService = require("./services/adobeTarget1_0RevalidationService");
+    await AdobeTarget1_0RevalidationService.initialize();
+    console.log("✅ Adobe Target 1.0 Revalidation Service initialized");
+  } catch (error) {
+    console.error(
+      "❌ Failed to initialize Adobe Target 1.0 Revalidation Service:",
       error
     );
     // Don't crash the server, but log the error

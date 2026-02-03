@@ -1215,7 +1215,8 @@ async function liveCrawlAndPrioritize(req, res) {
         // Prioritization (Logic remains identical)
         console.log(`🔍 Prioritizing...`);
         const prioritizeStartTime = Date.now();
-        const prioritizationResult = urlPrioritizationService.prioritizeUrls(urls);
+        // Pass the seed URL to ensure correct domain filtering
+        const prioritizationResult = urlPrioritizationService.prioritizeUrls(urls, { seedUrl: url });
         const prioritizeDuration = Date.now() - prioritizeStartTime;
 
         res.status(200).json({

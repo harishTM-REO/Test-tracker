@@ -946,7 +946,8 @@ class AdobeTarget1_0Service {
                 }
 
                 console.log(`    ➤ Step 1b: Prioritizing ${collectedUrls.length} collected URLs...`);
-                const prioritizationResult = urlPrioritizationService.prioritizeUrls(collectedUrls);
+                // Pass the original seed URL to ensure correct domain filtering
+                const prioritizationResult = urlPrioritizationService.prioritizeUrls(collectedUrls, { seedUrl: url });
 
                 console.log(`    ✅ Prioritization success: ${prioritizationResult.prioritizedUrls.length} URLs prioritized from ${collectedUrls.length} collected`);
                 return {

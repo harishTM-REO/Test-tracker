@@ -3,7 +3,7 @@
     <h4 class="heading">File Data Dashboard</h4>
     <v-col class="type-select">
       <h5 class="sub-heading">Please select a testing tool</h5>
-      <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely', 'Optimizely Edge', 'Optimizely Validation', 'ABTasty Validation', 'Adobe Target', 'Adobe Target 1.0', 'Adobe Target Validation', 'Dynamic Yield Detection']"  variant="solo"></v-select>
+      <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely', 'Optimizely Edge', 'Optimizely Validation', 'ABTasty Validation', 'Adobe Target', 'Adobe Target 1.0', 'Adobe Target 1.0 Revalidation', 'Adobe Target Validation', 'Dynamic Yield Detection']"  variant="solo"></v-select>
     </v-col>
     <v-card class="upload-card" elevation="2" v-if="selectedToolType">
       <v-card-title class="card-title">
@@ -871,6 +871,12 @@ export default {
       this.error = null;
 
       try {
+        // Handle Adobe Target 1.0 Revalidation separately
+        if (this.selectedToolType === 'Adobe Target 1.0 Revalidation') {
+          await this.handleRevalidation();
+          return;
+        }
+
         // Prepare the payload according to your backend schema
         const payload = {
           name: this.saveOptions.name,
@@ -946,6 +952,113 @@ export default {
         this.saving = false;
         console.error('Error saving dataset:', err);
       }
+    },
+
+    // Handle Adobe Target 1.0 Revalidation
+    async handleRevalidation() {
+      try {
+        console.log('Starting Adobe Target 1.0 Revalidation...');
+
+        // Extract URLs from the uploaded data
+        const urls = this.extractUrlsForRevalidation();
+
+        if (urls.length === 0) {
+          throw new Error('No valid URLs found in the uploaded file. Please ensure your file has a column with URLs.');
+        }
+
+        console.log(`Found ${urls.length} URLs for revalidation`);
+
+        // Call the revalidation endpoint
+        const response = await fetch(`${this.apiBaseUrl}/api/adobe-target-1.0/revalidate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            datasetName: this.saveOptions.name || 'Revalidation Job',
+            urls: urls,
+            options: {
+              enhancedDetection: true
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        console.log('Revalidation job started:', result);
+
+        // Show success notification
+        this.$emit('show-notification', {
+          type: 'success',
+          message: `Revalidation started for ${result.data.urlsToRevalidate} URLs. Job ID: ${result.data.jobId}`
+        });
+
+        // Reset form
+        this.saveOptions = {
+          name: '',
+          version: '',
+          description: ''
+        };
+
+        this.saving = false;
+
+        // Redirect to datasets page
+        setTimeout(() => {
+          this.$router.push('/datasets');
+        }, 2000);
+
+      } catch (err) {
+        this.error = `Failed to start revalidation: ${err.message}`;
+        this.saving = false;
+        console.error('Error starting revalidation:', err);
+      }
+    },
+
+    // Extract URLs from uploaded data for revalidation
+    extractUrlsForRevalidation() {
+      if (!this.data || !this.data.sheets) return [];
+
+      const urls = [];
+
+      this.data.sheets.forEach(sheet => {
+        if (sheet.columns && sheet.rows) {
+          // Find URL column
+          const urlColumnIndex = sheet.columns.findIndex(col =>
+            col.toLowerCase().includes('url') ||
+            col.toLowerCase().includes('website') ||
+            col.toLowerCase().includes('link') ||
+            col.toLowerCase().includes('domain')
+          );
+
+          if (urlColumnIndex !== -1) {
+            sheet.rows.forEach(row => {
+              const urlValue = row[urlColumnIndex];
+              if (urlValue && typeof urlValue === 'string' && urlValue.trim()) {
+                // Clean and validate URL
+                let cleanUrl = urlValue.trim();
+                if (!cleanUrl.startsWith('http')) {
+                  cleanUrl = `https://${cleanUrl}`;
+                }
+                // Basic URL validation
+                try {
+                  new URL(cleanUrl);
+                  urls.push(cleanUrl);
+                } catch (e) {
+                  // Skip invalid URLs
+                }
+              }
+            });
+          }
+        }
+      });
+
+      // Remove duplicates
+      return [...new Set(urls)];
     },
 
     async loadDatasets() {

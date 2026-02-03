@@ -802,6 +802,8 @@ class UrlPrioritizationService {
    * Within each locale, returns sections with merged query string variants
    * @param {Array<string>} urls - List of URLs to prioritize
    * @param {Object} options - Configuration options
+   * @param {string} options.seedUrl - Optional seed URL to use for base domain extraction (recommended)
+   * @param {string} options.baseDomain - Optional base domain to use directly
    * @returns {Object} Prioritized URLs with structure: { prioritizedUrls: [...], localesDetected: [...] }
    */
   prioritizeUrls(urls, options = {}) {
@@ -815,21 +817,44 @@ class UrlPrioritizationService {
       const protocolNormalizedUrls = normalizedUrls.map(url => this.normalizeProtocol(url));
       console.log(`✅ Normalized ${protocolNormalizedUrls.length} URLs (protocol + domain)`);
 
-      // Extract base domain
+      // Extract base domain - PRIORITY ORDER:
+      // 1. Use options.baseDomain if provided
+      // 2. Use options.seedUrl if provided (extract domain from it)
+      // 3. Fall back to first URL in list (legacy behavior)
       let baseDomain = 'https://www.example.com';
-      for (const url of protocolNormalizedUrls) {
-        if (url.startsWith('http')) {
-          try {
-            const urlObj = new URL(url);
-            baseDomain = urlObj.origin;
-            break;
-          } catch (e) {
-            // Continue
+
+      if (options.baseDomain) {
+        // Option 1: Direct baseDomain provided
+        baseDomain = options.baseDomain;
+        console.log(`📍 Base domain (from options.baseDomain): ${baseDomain}`);
+      } else if (options.seedUrl) {
+        // Option 2: Extract from seedUrl
+        try {
+          const seedUrlObj = new URL(this.normalizeProtocol(options.seedUrl));
+          baseDomain = seedUrlObj.origin;
+          console.log(`📍 Base domain (from options.seedUrl): ${baseDomain}`);
+        } catch (e) {
+          console.warn(`⚠️ Could not parse seedUrl: ${options.seedUrl}, falling back to first URL`);
+        }
+      }
+
+      // Option 3: Fall back to first URL in list (legacy behavior)
+      if (baseDomain === 'https://www.example.com') {
+        for (const url of protocolNormalizedUrls) {
+          if (url.startsWith('http')) {
+            try {
+              const urlObj = new URL(url);
+              baseDomain = urlObj.origin;
+              console.log(`📍 Base domain (from first URL - LEGACY): ${baseDomain}`);
+              break;
+            } catch (e) {
+              // Continue
+            }
           }
         }
       }
 
-      console.log(`📍 Base domain: ${baseDomain}`);
+      console.log(`📍 Final base domain: ${baseDomain}`);
 
       // Step 2: Filter out external domain URLs (only keep same domain)
       const samedomainUrls = protocolNormalizedUrls.filter(url => {

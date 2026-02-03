@@ -85,6 +85,13 @@
           <div class="summary-label">Domains Without Adobe Target</div>
         </div>
       </div>
+      <div v-if="experimentsSummary.domainsWithFailedCrawls > 0" class="summary-card error">
+        <div class="summary-icon">🔄</div>
+        <div class="summary-content">
+          <div class="summary-value">{{ experimentsSummary.domainsWithFailedCrawls }}</div>
+          <div class="summary-label">Failed Crawls (Need Re-crawl)</div>
+        </div>
+      </div>
     </div>
 
     <!-- Loading State -->
@@ -250,6 +257,21 @@
               <p class="no-experiments-message">{{ domainData.message }}</p>
               <p class="no-experiments-stats">{{ domainData.pagesTested }} pages checked</p>
 
+              <!-- Revalidate Button -->
+              <div class="revalidate-action">
+                <button
+                  @click="revalidateDomain(domain, domainData)"
+                  :disabled="revalidatingDomains[domain]"
+                  class="revalidate-btn revalidate-btn-info"
+                >
+                  <span v-if="revalidatingDomains[domain]">⏳ Revalidating...</span>
+                  <span v-else>🔄 Revalidate Domain</span>
+                </button>
+                <span v-if="revalidationResults[domain]" class="revalidation-result" :class="revalidationResults[domain].success ? 'success' : 'error'">
+                  {{ revalidationResults[domain].message }}
+                </span>
+              </div>
+
               <!-- Show checked pages (collapsible) -->
               <details class="checked-pages-details">
                 <summary>View checked pages</summary>
@@ -263,6 +285,15 @@
                     <a :href="pageInfo.url" target="_blank" class="checked-page-url">
                       {{ truncateUrl(pageInfo.url) }}
                     </a>
+                    <button
+                      @click="revalidateSingleUrl(pageInfo.url)"
+                      :disabled="revalidatingUrls[pageInfo.url]"
+                      class="revalidate-url-btn"
+                      title="Revalidate this URL"
+                    >
+                      <span v-if="revalidatingUrls[pageInfo.url]">⏳</span>
+                      <span v-else>🔄</span>
+                    </button>
                   </div>
                   <div v-if="domainData.pagesChecked.length > 5" class="more-checked-pages">
                     +{{ domainData.pagesChecked.length - 5 }} more pages
@@ -290,10 +321,41 @@
             <div class="no-adobe-header">
               <span class="no-adobe-domain">🌐 {{ domain }}</span>
               <span class="no-adobe-badge">No Adobe Target</span>
+              <span v-if="domainData.totalTop25Urls === 0" class="failed-crawl-badge">Failed Crawl</span>
             </div>
             <div class="no-adobe-details">
               <p class="no-adobe-message">{{ domainData.message }}</p>
-              <p class="no-adobe-stats">{{ domainData.pagesTested }} pages checked</p>
+              <p class="no-adobe-stats">{{ domainData.pagesTested }} pages checked | Top 25 URLs: {{ domainData.totalTop25Urls || 0 }}</p>
+
+              <!-- Re-crawl Button (for failed crawls) -->
+              <div v-if="domainData.totalTop25Urls === 0" class="recrawl-action">
+                <button
+                  @click="recrawlDomain(domain, domainData)"
+                  :disabled="recrawlingDomains[domain]"
+                  class="recrawl-btn"
+                >
+                  <span v-if="recrawlingDomains[domain]">⏳ Re-crawling...</span>
+                  <span v-else>🔄 Force Re-crawl Domain</span>
+                </button>
+                <span v-if="recrawlResults[domain]" class="recrawl-result" :class="recrawlResults[domain].success ? 'success' : 'error'">
+                  {{ recrawlResults[domain].message }}
+                </span>
+              </div>
+
+              <!-- Revalidate Button (for already crawled but no AT detected) -->
+              <div v-else class="revalidate-action">
+                <button
+                  @click="revalidateDomain(domain, domainData)"
+                  :disabled="revalidatingDomains[domain]"
+                  class="revalidate-btn"
+                >
+                  <span v-if="revalidatingDomains[domain]">⏳ Revalidating...</span>
+                  <span v-else>🔄 Revalidate Domain</span>
+                </button>
+                <span v-if="revalidationResults[domain]" class="revalidation-result" :class="revalidationResults[domain].success ? 'success' : 'error'">
+                  {{ revalidationResults[domain].message }}
+                </span>
+              </div>
 
               <!-- Show checked pages (collapsible) -->
               <details class="checked-pages-details">
@@ -308,12 +370,96 @@
                     <a :href="pageInfo.url" target="_blank" class="checked-page-url">
                       {{ truncateUrl(pageInfo.url) }}
                     </a>
+                    <!-- Re-crawl button for individual URLs with failed crawl -->
+                    <button
+                      v-if="pageInfo.totalTop25Urls === 0"
+                      @click="recrawlSingleUrl(pageInfo.url)"
+                      :disabled="recrawlingUrls[pageInfo.url]"
+                      class="recrawl-url-btn"
+                      title="Force re-crawl this URL"
+                    >
+                      <span v-if="recrawlingUrls[pageInfo.url]">⏳</span>
+                      <span v-else>🔄</span>
+                    </button>
+                    <!-- Revalidate button for already crawled URLs -->
+                    <button
+                      v-else
+                      @click="revalidateSingleUrl(pageInfo.url)"
+                      :disabled="revalidatingUrls[pageInfo.url]"
+                      class="revalidate-url-btn"
+                      title="Revalidate this URL"
+                    >
+                      <span v-if="revalidatingUrls[pageInfo.url]">⏳</span>
+                      <span v-else>🔄</span>
+                    </button>
                   </div>
                   <div v-if="domainData.pagesChecked.length > 5" class="more-checked-pages">
                     +{{ domainData.pagesChecked.length - 5 }} more pages
                   </div>
                 </div>
               </details>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Domains With Failed Crawls Section (if separate from above) -->
+      <div v-if="domainsWithFailedCrawls && Object.keys(domainsWithFailedCrawls).length > 0" class="failed-crawl-section">
+        <h3 class="failed-crawl-title">🔄 Domains With Failed Crawls</h3>
+        <p class="failed-crawl-description">
+          These domains could not be crawled successfully. The crawling step failed before any internal URLs could be discovered.
+          Use "Force Re-crawl" to retry the entire flow (crawl → categorize → scrape top 25).
+        </p>
+
+        <div class="failed-crawl-list">
+          <div
+            v-for="(domainData, domain) in domainsWithFailedCrawls"
+            :key="domain"
+            class="failed-crawl-item"
+          >
+            <div class="failed-crawl-header">
+              <span class="failed-crawl-domain">🌐 {{ domain }}</span>
+              <span class="failed-crawl-badge">Crawl Failed</span>
+            </div>
+            <div class="failed-crawl-details">
+              <p class="failed-crawl-message">{{ domainData.message || 'Crawling failed - no internal URLs were discovered' }}</p>
+              <p class="failed-crawl-stats">
+                Process Count: {{ domainData.processCount || 1 }} |
+                Re-crawl Attempts: {{ domainData.recrawlCount || 0 }}
+                <span v-if="domainData.lastRecrawlError"> | Last Error: {{ domainData.lastRecrawlError }}</span>
+              </p>
+
+              <!-- Force Re-crawl Button -->
+              <div class="recrawl-action">
+                <button
+                  @click="recrawlDomain(domain, domainData)"
+                  :disabled="recrawlingDomains[domain]"
+                  class="recrawl-btn"
+                >
+                  <span v-if="recrawlingDomains[domain]">⏳ Re-crawling...</span>
+                  <span v-else>🔄 Force Re-crawl</span>
+                </button>
+                <span v-if="recrawlResults[domain]" class="recrawl-result" :class="recrawlResults[domain].success ? 'success' : 'error'">
+                  {{ recrawlResults[domain].message }}
+                </span>
+              </div>
+
+              <!-- Show seed URL -->
+              <div v-if="domainData.seedUrl" class="seed-url-info">
+                <span class="seed-url-label">Seed URL:</span>
+                <a :href="domainData.seedUrl" target="_blank" class="seed-url-link">
+                  {{ truncateUrl(domainData.seedUrl) }}
+                </a>
+                <button
+                  @click="recrawlSingleUrl(domainData.seedUrl)"
+                  :disabled="recrawlingUrls[domainData.seedUrl]"
+                  class="recrawl-url-btn"
+                  title="Force re-crawl this URL"
+                >
+                  <span v-if="recrawlingUrls[domainData.seedUrl]">⏳</span>
+                  <span v-else>🔄</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -340,6 +486,7 @@ export default {
       experimentsByDomain: {},
       domainsWithAdobeTargetButNoExperiments: {},
       domainsWithoutAdobeTarget: {},
+      domainsWithFailedCrawls: {},
       experimentsSummary: null,
       expandedDomains: [],
 
@@ -353,7 +500,17 @@ export default {
       statusPollingInterval: null,
 
       // API base URL
-      apiBaseUrl: import.meta.env.VITE_APP_TITLE_BACKEND_URL || 'http://localhost:3000'
+      apiBaseUrl: import.meta.env.VITE_APP_TITLE_BACKEND_URL || 'http://localhost:3000',
+
+      // Revalidation state
+      revalidatingDomains: {},
+      revalidatingUrls: {},
+      revalidationResults: {},
+
+      // Re-crawl state (for failed crawls with totalTop25Urls = 0)
+      recrawlingDomains: {},
+      recrawlingUrls: {},
+      recrawlResults: {}
     }
   },
   async mounted() {
@@ -393,7 +550,18 @@ export default {
           this.experimentsByDomain = response.data.experimentsByDomain
           this.domainsWithAdobeTargetButNoExperiments = response.data.domainsWithAdobeTargetButNoExperiments || {}
           this.domainsWithoutAdobeTarget = response.data.domainsWithoutAdobeTarget || {}
+          this.domainsWithFailedCrawls = response.data.domainsWithFailedCrawls || {}
           this.experimentsSummary = response.data.summary
+
+          // If API doesn't provide domainsWithFailedCrawls separately, extract from domainsWithoutAdobeTarget
+          if (Object.keys(this.domainsWithFailedCrawls).length === 0) {
+            this.domainsWithFailedCrawls = {}
+            for (const [domain, data] of Object.entries(this.domainsWithoutAdobeTarget)) {
+              if ((data.totalTop25Urls || 0) === 0) {
+                this.domainsWithFailedCrawls[domain] = data
+              }
+            }
+          }
         } else {
           this.error = response.data.message
         }
@@ -523,6 +691,169 @@ export default {
       if (!url) return ''
       if (url.length <= 50) return url
       return url.substring(0, 47) + '...'
+    },
+
+    // Revalidation methods
+    async revalidateDomain(domain, domainData) {
+      this.revalidatingDomains[domain] = true
+      this.revalidationResults[domain] = null
+
+      try {
+        // Extract URLs from the domain data
+        const urls = domainData.pagesChecked?.map(page => page.url) || []
+
+        if (urls.length === 0) {
+          this.revalidationResults[domain] = {
+            success: false,
+            message: 'No URLs found to revalidate'
+          }
+          return
+        }
+
+        const response = await axios.post(`${this.apiBaseUrl}/api/adobe-target-1.0/revalidate`, {
+          datasetId: this.datasetId,
+          datasetName: `Revalidation for ${domain}`,
+          urls: urls,
+          options: {
+            enhancedDetection: true
+          }
+        })
+
+        if (response.data.success) {
+          this.revalidationResults[domain] = {
+            success: true,
+            message: `Revalidation started for ${response.data.data.urlsToRevalidate} URLs (Job: ${response.data.data.jobId})`
+          }
+
+          this.$emit('message', {
+            type: 'success',
+            text: `Revalidation started for ${domain}`
+          })
+        } else {
+          throw new Error(response.data.message || 'Revalidation failed')
+        }
+      } catch (error) {
+        console.error('Error revalidating domain:', error)
+        this.revalidationResults[domain] = {
+          success: false,
+          message: error.response?.data?.message || error.message
+        }
+
+        this.$emit('message', {
+          type: 'error',
+          text: `Failed to revalidate ${domain}: ${error.message}`
+        })
+      } finally {
+        this.revalidatingDomains[domain] = false
+      }
+    },
+
+    async revalidateSingleUrl(url) {
+      this.revalidatingUrls[url] = true
+
+      try {
+        const response = await axios.post(`${this.apiBaseUrl}/api/adobe-target-1.0/revalidate/single`, {
+          url: url
+        })
+
+        if (response.data.success) {
+          this.$emit('message', {
+            type: 'success',
+            text: `Revalidation started for ${this.truncateUrl(url)}`
+          })
+        } else {
+          throw new Error(response.data.message || 'Revalidation failed')
+        }
+      } catch (error) {
+        console.error('Error revalidating URL:', error)
+        this.$emit('message', {
+          type: 'error',
+          text: `Failed to revalidate URL: ${error.message}`
+        })
+      } finally {
+        this.revalidatingUrls[url] = false
+      }
+    },
+
+    // Force Re-crawl methods (for failed crawls with totalTop25Urls = 0)
+    async recrawlDomain(domain, domainData) {
+      this.recrawlingDomains[domain] = true
+      this.recrawlResults[domain] = null
+
+      try {
+        // Get the seed URL(s) for this domain
+        const urls = domainData.pagesChecked?.map(page => page.url) ||
+                     (domainData.seedUrl ? [domainData.seedUrl] : [])
+
+        if (urls.length === 0) {
+          this.recrawlResults[domain] = {
+            success: false,
+            message: 'No URLs found to re-crawl'
+          }
+          return
+        }
+
+        const response = await axios.post(`${this.apiBaseUrl}/api/adobe-target-1.0/recrawl`, {
+          datasetId: this.datasetId,
+          datasetName: `Force Re-crawl for ${domain}`,
+          urls: urls,
+          options: {}
+        })
+
+        if (response.data.success) {
+          this.recrawlResults[domain] = {
+            success: true,
+            message: `Re-crawl started for ${response.data.data.urlsToRecrawl} URLs (Job: ${response.data.data.jobId})`
+          }
+
+          this.$emit('message', {
+            type: 'success',
+            text: `Force re-crawl started for ${domain}`
+          })
+        } else {
+          throw new Error(response.data.message || 'Re-crawl failed')
+        }
+      } catch (error) {
+        console.error('Error re-crawling domain:', error)
+        this.recrawlResults[domain] = {
+          success: false,
+          message: error.response?.data?.message || error.message
+        }
+
+        this.$emit('message', {
+          type: 'error',
+          text: `Failed to re-crawl ${domain}: ${error.message}`
+        })
+      } finally {
+        this.recrawlingDomains[domain] = false
+      }
+    },
+
+    async recrawlSingleUrl(url) {
+      this.recrawlingUrls[url] = true
+
+      try {
+        const response = await axios.post(`${this.apiBaseUrl}/api/adobe-target-1.0/recrawl/single`, {
+          url: url
+        })
+
+        if (response.data.success) {
+          this.$emit('message', {
+            type: 'success',
+            text: `Force re-crawl started for ${this.truncateUrl(url)}`
+          })
+        } else {
+          throw new Error(response.data.message || 'Re-crawl failed')
+        }
+      } catch (error) {
+        console.error('Error re-crawling URL:', error)
+        this.$emit('message', {
+          type: 'error',
+          text: `Failed to re-crawl URL: ${error.message}`
+        })
+      } finally {
+        this.recrawlingUrls[url] = false
+      }
     }
   }
 }
@@ -1276,6 +1607,301 @@ export default {
   text-align: center;
 }
 
+/* Revalidation Styles */
+.revalidate-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 6px;
+}
+
+.revalidate-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.revalidate-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.revalidate-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.revalidate-btn-info {
+  background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+}
+
+.revalidate-btn-info:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4);
+}
+
+.revalidate-url-btn {
+  padding: 4px 8px;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+  margin-left: auto;
+}
+
+.revalidate-url-btn:hover:not(:disabled) {
+  background: #667eea;
+  color: white;
+  border-color: #667eea;
+}
+
+.revalidate-url-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.revalidation-result {
+  font-size: 0.85rem;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.revalidation-result.success {
+  background: #d4edda;
+  color: #155724;
+}
+
+.revalidation-result.error {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+/* Error Summary Card (Failed Crawls) */
+.summary-card.error {
+  border-color: #dc3545;
+  background: #f8d7da;
+}
+
+.summary-card.error:hover {
+  border-color: #c82333;
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.15);
+}
+
+/* Failed Crawl Badge */
+.failed-crawl-badge {
+  background: #dc3545;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-left: 8px;
+}
+
+/* Failed Crawl Section */
+.failed-crawl-section {
+  margin-top: 30px;
+  padding: 25px;
+  background: #f8d7da;
+  border: 2px solid #dc3545;
+  border-radius: 10px;
+}
+
+.failed-crawl-title {
+  margin: 0 0 10px 0;
+  color: #721c24;
+  font-size: 1.3rem;
+}
+
+.failed-crawl-description {
+  color: #721c24;
+  margin-bottom: 20px;
+  font-size: 0.95rem;
+}
+
+.failed-crawl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.failed-crawl-item {
+  background: white;
+  border: 2px solid #dc3545;
+  border-radius: 8px;
+  padding: 15px;
+  transition: all 0.2s;
+}
+
+.failed-crawl-item:hover {
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.2);
+  transform: translateY(-2px);
+}
+
+.failed-crawl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f5c6cb;
+}
+
+.failed-crawl-domain {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: #495057;
+}
+
+.failed-crawl-badge {
+  background: #dc3545;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.failed-crawl-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.failed-crawl-message {
+  margin: 0;
+  color: #721c24;
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.failed-crawl-stats {
+  margin: 0;
+  color: #6c757d;
+  font-size: 0.85rem;
+}
+
+/* Re-crawl Action Styles */
+.recrawl-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 6px;
+}
+
+.recrawl-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.recrawl-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
+}
+
+.recrawl-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.recrawl-url-btn {
+  padding: 4px 8px;
+  border: 1px solid #dc3545;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+  margin-left: auto;
+  color: #dc3545;
+}
+
+.recrawl-url-btn:hover:not(:disabled) {
+  background: #dc3545;
+  color: white;
+}
+
+.recrawl-url-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.recrawl-result {
+  font-size: 0.85rem;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.recrawl-result.success {
+  background: #d4edda;
+  color: #155724;
+}
+
+.recrawl-result.error {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+/* Seed URL Info */
+.seed-url-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.seed-url-label {
+  font-weight: 600;
+  color: #495057;
+  font-size: 0.85rem;
+}
+
+.seed-url-link {
+  color: #0d6efd;
+  text-decoration: none;
+  font-size: 0.85rem;
+  flex: 1;
+}
+
+.seed-url-link:hover {
+  text-decoration: underline;
+}
+
 @media (max-width: 768px) {
   .experiments-header {
     flex-direction: column;
@@ -1303,6 +1929,17 @@ export default {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
+  }
+
+  .failed-crawl-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .recrawl-action {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>
