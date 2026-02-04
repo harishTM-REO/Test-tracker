@@ -1362,8 +1362,12 @@ class AdobeTarget1_0Service {
      */
     async saveUrlResult({ url, datasetId, datasetName, summary, status = 'completed', error = null, top25UrlsResults = null }) {
         try {
+            // URLs uploaded under "Adobe Target 1.0" are known to be Adobe Target positive
+            // So we always set hasAdobeTarget = true, regardless of detection results
+            // This ensures that failed crawls don't mark known positive URLs as negative
             const quickStats = {
-                hasAdobeTarget: summary.adobeTargetDetectedInTop25 > 0,
+                hasAdobeTarget: true,  // Always true for Adobe Target 1.0 uploads (user-confirmed positive)
+                adobeTargetDetectedInScrape: summary.adobeTargetDetectedInTop25 > 0,  // Actual detection result
                 hasExperiments: summary.uniqueActivityCount > 0 || summary.uniqueExperimentCount > 0,
                 experimentCount: summary.totalExperimentsInTop25 || 0
             };

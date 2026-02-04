@@ -544,8 +544,11 @@ class AdobeTarget1_0RevalidationService {
      */
     async saveRevalidationResult({ url, datasetId, datasetName, summary, status, top25UrlsResults, existingResult }) {
         try {
+            // URLs in Adobe Target 1.0 collection are known positives (user-confirmed)
+            // Always set hasAdobeTarget = true
             const quickStats = {
-                hasAdobeTarget: summary.adobeTargetDetectedInTop25 > 0,
+                hasAdobeTarget: true,  // Always true for Adobe Target 1.0 URLs
+                adobeTargetDetectedInScrape: summary.adobeTargetDetectedInTop25 > 0,  // Actual detection result
                 hasExperiments: summary.uniqueActivityCount > 0 || summary.uniqueExperimentCount > 0,
                 experimentCount: summary.totalExperimentsInTop25 || 0
             };
@@ -909,8 +912,10 @@ class AdobeTarget1_0RevalidationService {
                     allActivityIds: [],
                     allActivityCount: 0
                 };
+                // URLs in Adobe Target 1.0 collection are known positives - always keep hasAdobeTarget = true
                 updateData.quickStats = existingResult?.quickStats || {
-                    hasAdobeTarget: false,
+                    hasAdobeTarget: true,  // Always true for Adobe Target 1.0 URLs
+                    adobeTargetDetectedInScrape: false,
                     hasExperiments: false,
                     experimentCount: 0
                 };
@@ -918,8 +923,10 @@ class AdobeTarget1_0RevalidationService {
                 updateData.lastRecrawlAttempt = new Date();
             } else {
                 // Save successful re-crawl result
+                // URLs in Adobe Target 1.0 collection are known positives - always keep hasAdobeTarget = true
                 const quickStats = {
-                    hasAdobeTarget: summary.adobeTargetDetectedInTop25 > 0,
+                    hasAdobeTarget: true,  // Always true for Adobe Target 1.0 URLs
+                    adobeTargetDetectedInScrape: summary.adobeTargetDetectedInTop25 > 0,  // Actual detection result
                     hasExperiments: summary.uniqueActivityCount > 0 || summary.uniqueExperimentCount > 0,
                     experimentCount: summary.totalExperimentsInTop25 || 0
                 };
