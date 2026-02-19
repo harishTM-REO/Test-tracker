@@ -9,6 +9,8 @@ const ABTastyValidationResult = require(path.join(__dirname, '../../models/ABTas
 const ABTastyValidationDocument = require(path.join(__dirname, '../../models/ABTastyValidationDocument'));
 const DynamicYieldValidationResult = require(path.join(__dirname, '../../models/DynamicYieldValidationResult'));
 const DynamicYieldValidationDocument = require(path.join(__dirname, '../../models/DynamicYieldValidationDocument'));
+const VWOValidationResult = require(path.join(__dirname, '../../models/VWOValidationResult'));
+const VWOValidationDocument = require(path.join(__dirname, '../../models/VWOValidationDocument'));
 const OptimizelyValidationResult = require(path.join(__dirname, '../../models/OptimizelyValidationResult'));
 const OptimizelyValidationDocument = require(path.join(__dirname, '../../models/OptimizelyValidationDocument'));
 
@@ -1136,6 +1138,279 @@ router.post('/status/dataset/:datasetId', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch dataset status',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route POST /at10/api/vwo-validation
+ * @desc  Validate VWO presence for a dataset's URLs
+ */
+router.post('/vwo-validation', async (req, res) => {
+  try {
+    const { datasetId, datasetName, urls } = req.body;
+
+    if (!datasetId || !datasetName || !Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: datasetId, datasetName, urls (non-empty array)'
+      });
+    }
+
+    const jobId = jobQueue.createJob('vwo-validation', {
+      datasetId,
+      datasetName,
+      urls
+    });
+
+    const job = jobQueue.getJob(jobId);
+
+    res.status(202).json({
+      success: true,
+      message: 'VWO validation job initiated',
+      jobId,
+      status: job?.status || 'pending',
+      dataset: {
+        id: datasetId,
+        name: datasetName,
+        urlsCount: urls.length
+      }
+    });
+  } catch (error) {
+    console.error('Error initiating VWO validation job:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initiate VWO validation job',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route GET /at10/api/vwo-validation/results/:datasetId
+ * @desc  Get VWO validation result for a dataset
+ * @query batch - (optional) Get a specific batch number: ?batch=5
+ * @query batches - (optional) Get multiple batches: ?batches=1,5,10
+ * @query all - (optional) Get all batches: ?all=true
+ * @query summary - (optional) Get summary view only: ?summary=true
+ * @query groupByExperiment - (optional) Group positive URLs by experimentId: ?groupByExperiment=true
+ * @query filter - (optional) Filter URLs by status: ?filter=positive, ?filter=negative, ?filter=failed
+ * @example GET /at10/api/vwo-validation/results/6936ffa1c891633c7898de00?all=true&groupByExperiment=true
+ * @example GET /at10/api/vwo-validation/results/6936ffa1c891633c7898de00?all=true&filter=positive
+ */
+router.get('/vwo-validation/results/:datasetId', async (req, res) => {
+  try {
+    const { datasetId } = req.params;
+    const { batch, batches, all, summary, groupByExperiment, filter } = req.query;
+
+    console.log(`📊 Fetching VWO validation results for dataset: ${datasetId}`);
+
+    // If summary only requested, return just the main result document
+    if (summary === 'true') {
+      const result = await VWOValidationResult.findOne({ datasetId })
+        .sort({ createdAt: -1 });
+
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          message: 'VWO validation result not found for dataset',
+          datasetId
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          _id: result._id,
+          datasetId: result.datasetId,
+          datasetName: result.datasetName,
+          status: result.status,
+          summary: result.summary,
+          startedAt: result.startedAt,
+          completedAt: result.completedAt,
+          durationMs: result.durationMs,
+          totalUrls: result.totalUrls,
+          positiveCount: result.positiveUrls?.length || 0,
+          negativeCount: result.negativeUrls?.length || 0,
+          failedCount: result.failedUrls?.length || 0
+        }
+      });
+    }
+
+    // Get the main validation result
+    const result = await VWOValidationResult.findOne({ datasetId })
+      .sort({ createdAt: -1 });
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: 'VWO validation result not found for dataset',
+        datasetId
+      });
+    }
+
+    // Determine which batches to fetch
+    let batchesToFetch = null;
+    if (batch) {
+      batchesToFetch = [parseInt(batch)];
+    } else if (batches) {
+      batchesToFetch = batches.split(',').map(b => parseInt(b.trim())).filter(b => !isNaN(b));
+    } else if (all === 'true') {
+      batchesToFetch = null; // Get all batches
+    }
+
+    // Fetch batch documents if requested
+    let batchDocuments = [];
+    if (batchesToFetch !== null) {
+      if (batchesToFetch.length > 0) {
+        // Get specific batches
+        batchDocuments = await VWOValidationDocument.find({
+          datasetId,
+          batchNumber: { $in: batchesToFetch }
+        }).sort({ batchNumber: 1 });
+      }
+    } else if (all === 'true' || (!batch && !batches)) {
+      // Get all batches
+      batchDocuments = await VWOValidationDocument.find({ datasetId })
+        .sort({ batchNumber: 1 });
+    }
+
+    // ✅ Group URLs by experimentId when requested
+    if (groupByExperiment === 'true') {
+      console.log(`🗂️  Grouping URLs by experimentId...`);
+
+      const groupedByExperiment = {};
+      let totalPositiveUrls = 0;
+
+      // Collect all positive URLs from all batches
+      batchDocuments.forEach(doc => {
+        if (doc.positiveUrls && Array.isArray(doc.positiveUrls)) {
+          doc.positiveUrls.forEach(urlEntry => {
+            totalPositiveUrls++;
+
+            // VWO can have multiple experimentIds per URL
+            const experimentIds = urlEntry.detectionDetails?.experimentIds || [];
+
+            if (experimentIds.length === 0) {
+              // No experiments, group as 'unknown'
+              const experimentKey = 'unknown';
+              if (!groupedByExperiment[experimentKey]) {
+                groupedByExperiment[experimentKey] = {
+                  experimentId: 'unknown',
+                  urls: [],
+                  count: 0
+                };
+              }
+
+              groupedByExperiment[experimentKey].urls.push({
+                url: urlEntry.url,
+                companyName: urlEntry.companyName,
+                detectionMethod: urlEntry.detectionDetails?.detectionMethod,
+                scrapedAt: urlEntry.scrapedAt
+              });
+
+              groupedByExperiment[experimentKey].count++;
+            } else {
+              // Add URL to each experiment it belongs to
+              experimentIds.forEach((experimentId) => {
+                if (!groupedByExperiment[experimentId]) {
+                  groupedByExperiment[experimentId] = {
+                    experimentId: experimentId,
+                    urls: [],
+                    count: 0
+                  };
+                }
+
+                groupedByExperiment[experimentId].urls.push({
+                  url: urlEntry.url,
+                  companyName: urlEntry.companyName,
+                  detectionMethod: urlEntry.detectionDetails?.detectionMethod,
+                  scrapedAt: urlEntry.scrapedAt
+                });
+
+                groupedByExperiment[experimentId].count++;
+              });
+            }
+          });
+        }
+      });
+
+      // Convert to array and sort by count
+      const experimentsArray = Object.values(groupedByExperiment)
+        .sort((a, b) => b.count - a.count);
+
+      console.log(`✅ Grouped ${totalPositiveUrls} URLs into ${experimentsArray.length} experiments`);
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          result: result,
+          summary: {
+            ...result.summary,
+            totalExperiments: experimentsArray.length,
+            totalPositiveUrls: totalPositiveUrls
+          },
+          groupedByExperiment: experimentsArray,
+          batchCount: batchDocuments.length
+        }
+      });
+    }
+
+    // ✅ Filter URLs by status when requested (positive, negative, failed)
+    if (filter && ['positive', 'negative', 'failed'].includes(filter.toLowerCase())) {
+      console.log(`🔍 Filtering URLs by status: ${filter}`);
+
+      const filterType = filter.toLowerCase();
+      const urlFieldMap = {
+        positive: 'positiveUrls',
+        negative: 'negativeUrls',
+        failed: 'failedUrls'
+      };
+      const urlField = urlFieldMap[filterType];
+
+      // Collect all URLs of the specified type from all batches
+      const filteredUrls = [];
+      batchDocuments.forEach(doc => {
+        if (doc[urlField] && Array.isArray(doc[urlField])) {
+          doc[urlField].forEach(urlEntry => {
+            filteredUrls.push({
+              ...urlEntry.toObject ? urlEntry.toObject() : urlEntry,
+              batchNumber: doc.batchNumber
+            });
+          });
+        }
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          datasetId: result.datasetId,
+          datasetName: result.datasetName,
+          status: result.status,
+          filter: filterType,
+          totalCount: filteredUrls.length,
+          urls: filteredUrls,
+          summary: result.summary
+        }
+      });
+    }
+
+    // Default response: summary + all batches
+    res.status(200).json({
+      success: true,
+      data: {
+        result: result,
+        batches: batchDocuments,
+        summary: result.summary
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching VWO validation results:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch VWO validation results',
       error: error.message
     });
   }

@@ -408,6 +408,31 @@ const datasetSchema = new mongoose.Schema({
     }
   },
 
+  // VWO validation tracking
+  vwoValidation: {
+    status: {
+      type: String,
+      enum: ['not_started', 'pending', 'in_progress', 'completed', 'failed'],
+      default: 'not_started'
+    },
+    lastRunAt: {
+      type: Date,
+      default: null
+    },
+    lastResultId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'VWOValidationResult',
+      default: null
+    },
+    summary: {
+      totalUrls: { type: Number, default: 0 },
+      positiveCount: { type: Number, default: 0 },
+      negativeCount: { type: Number, default: 0 },
+      failedCount: { type: Number, default: 0 },
+      detectionRate: { type: Number, default: 0 }
+    }
+  },
+
   // Optimizely validation tracking
   optimizelyValidation: {
     status: {

@@ -3,7 +3,7 @@
     <h4 class="heading">File Data Dashboard</h4>
     <v-col class="type-select">
       <h5 class="sub-heading">Please select a testing tool</h5>
-      <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely', 'Optimizely Edge', 'Optimizely Validation', 'ABTasty Validation', 'Adobe Target', 'Adobe Target 1.0', 'Adobe Target 1.0 Revalidation', 'Adobe Target Validation', 'Dynamic Yield Detection']"  variant="solo"></v-select>
+      <v-select v-model="selectedToolType" label="Select a testing tool" :items="['AbTasty', 'Optimizely', 'Optimizely Edge', 'Optimizely Validation', 'ABTasty Validation', 'Adobe Target', 'Adobe Target 1.0', 'Adobe Target 1.0 Revalidation', 'Adobe Target Validation', 'Dynamic Yield Detection', 'VWO Detection']"  variant="solo"></v-select>
     </v-col>
     <v-card class="upload-card" elevation="2" v-if="selectedToolType">
       <v-card-title class="card-title">

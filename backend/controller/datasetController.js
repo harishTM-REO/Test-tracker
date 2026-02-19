@@ -176,7 +176,7 @@ const datasetController = {
         .sort(sort)
         .limit(limit * 1)
         .skip((page - 1) * limit)
-        .select('_id name description originalFileName version fileType createdAt totalRows scrapingStatus scrapingStats toolType adobeTargetValidation optimizelyValidation abTastyValidation dynamicYieldValidation')
+        .select('_id name description originalFileName version fileType createdAt totalRows scrapingStatus scrapingStats toolType adobeTargetValidation optimizelyValidation abTastyValidation dynamicYieldValidation vwoValidation')
         .lean();
       const findDuration = Date.now() - findStartTime;
 
@@ -452,6 +452,7 @@ const datasetController = {
         let adobeTarget1_0Initiated = false;
         let adobeTargetValidationInitiated = false;
         let dynamicYieldDetectionInitiated = false;
+        let vwoDetectionInitiated = false;
 
         if (datasetData.companies && datasetData.companies.length > 0) {
           // Check if this is an Optimizely Edge dataset
@@ -517,6 +518,16 @@ const datasetController = {
             } catch (dyError) {
               console.error(`❌ Failed to start Dynamic Yield detection job:`, dyError.message);
             }
+          } else if (datasetData.toolType === 'VWO Detection') {
+            console.log(`Initiating VWO detection workflow for dataset: ${savedDataset._id}`);
+            try {
+              const VWOValidationJobService = require('../services/vwoValidationJobService');
+              const result = await VWOValidationJobService.startValidation(savedDataset._id.toString());
+              vwoDetectionInitiated = result.success;
+              console.log(`✅ VWO detection job started: ${vwoDetectionInitiated}`);
+            } catch (vwoError) {
+              console.error(`❌ Failed to start VWO detection job:`, vwoError.message);
+            }
           } else {
             // For other tool types, use normal background scraping
             console.log(`Initiating background scraping for dataset: ${savedDataset._id}`);
@@ -533,7 +544,8 @@ const datasetController = {
           optimizelyEdgeInitiated: optimizelyEdgeInitiated,
           adobeTarget1_0Initiated: adobeTarget1_0Initiated,
           adobeTargetValidationInitiated,
-          dynamicYieldDetectionInitiated
+          dynamicYieldDetectionInitiated,
+          vwoDetectionInitiated
         });
 
         console.log('Dataset created successfully');

@@ -6,12 +6,15 @@ const AdobeTargetValidationResult = require(path.join(__dirname, '../../models/A
 const AdobeTargetValidationDocument = require(path.join(__dirname, '../../models/AdobeTargetValidationDocument'));
 const DynamicYieldValidationResult = require(path.join(__dirname, '../../models/DynamicYieldValidationResult'));
 const DynamicYieldValidationDocument = require(path.join(__dirname, '../../models/DynamicYieldValidationDocument'));
+const VWOValidationResult = require(path.join(__dirname, '../../models/VWOValidationResult'));
+const VWOValidationDocument = require(path.join(__dirname, '../../models/VWOValidationDocument'));
 const OptimizelyValidationResult = require(path.join(__dirname, '../../models/OptimizelyValidationResult'));
 const OptimizelyValidationDocument = require(path.join(__dirname, '../../models/OptimizelyValidationDocument'));
 const Dataset = require(path.join(__dirname, '../../models/Dataset'));
 const AdobeScraperService = require(path.join(__dirname, '../../services/adobeScraperService'));
 const OptimizelyValidationService = require(path.join(__dirname, './optimizelyValidationService'));
 const DynamicYieldValidationService = require(path.join(__dirname, './dynamicYieldValidationService'));
+const VWOValidationService = require(path.join(__dirname, './vwoValidationService'));
 // ✅ Use browser service (switches between pool/cluster based on USE_PUPPETEER_CLUSTER)
 const browserPool = require(path.join(__dirname, '../../services/browserService'));
 const { 
@@ -153,6 +156,9 @@ class AdobeTarget1_0Service {
             });
             jobQueue.registerWorker('dynamic-yield-validation', async (jobData, progressCallback) => {
                 return await DynamicYieldValidationService.performValidation(jobData, progressCallback);
+            });
+            jobQueue.registerWorker('vwo-validation', async (jobData, progressCallback) => {
+                return await VWOValidationService.performValidation(jobData, progressCallback);
             });
             console.log('✅ Adobe Target 1.0 Service initialized');
         } catch (error) {
@@ -2419,6 +2425,496 @@ class AdobeTarget1_0Service {
             );
         } catch (error) {
             console.error('Error saving Dynamic Yield batch document:', error.message);
+        }
+    }
+
+    /**
+     * VWO detection workflow
+     * Structure identical to Dynamic Yield but detects VWO presence
+     */
+    async performVWOValidation(jobData, progressCallback) {
+        const { datasetId, datasetName, urls = [] } = jobData;
+
+        if (!urls || urls.length === 0) {
+            throw new Error('No URLs provided for VWO validation');
+        }
+
+        let datasetDoc = null;
+        let validationResultDoc = null;
+        const startTime = new Date();
+
+        try {
+            console.log(`\n🚀 VWO Validation Started`);
+            console.log(`   Dataset: ${datasetName} (${datasetId})`);
+            console.log(`   Total URLs: ${urls.length}`);
+
+            // Ensure DB connection
+            await ensureDBConnection();
+
+            // CRITICAL: Disable MongoDB client timeout to prevent "The client is closed" error during long batch jobs
+            // This is necessary because the default client timeout (30s) is too aggressive for long-running jobs
+            const mongooseClient = require('mongoose');
+            if (mongooseClient && mongooseClient.connection && mongooseClient.connection.client) {
+                mongooseClient.connection.client.s.options.serverSelectionTimeoutMS = 300000; // 5 minutes
+            }
+
+            datasetDoc = await Dataset.findById(datasetId);
+            if (datasetDoc) {
+                datasetDoc.vwoValidation = {
+                    ...(datasetDoc.vwoValidation || {}),
+                    status: 'in_progress',
+                    lastRunAt: startTime,
+                    summary: {
+                        totalUrls: urls.length,
+                        positiveCount: 0,
+                        negativeCount: 0,
+                        failedCount: 0,
+                        detectionRate: 0
+                    }
+                };
+                await datasetDoc.save();
+            }
+
+            await VWOValidationDocument.deleteMany({ datasetId });
+
+            validationResultDoc = await VWOValidationResult.create({
+                datasetId,
+                datasetName,
+                totalUrls: urls.length,
+                status: 'in_progress',
+                startedAt: startTime,
+                summary: {
+                    totalUrls: urls.length,
+                    positiveCount: 0,
+                    negativeCount: 0,
+                    failedCount: 0,
+                    detectionRate: 0,
+                    startedAt: startTime
+                }
+            });
+
+            const BATCH_SIZE = parseInt(process.env.BATCH_SIZE) || 50;
+            const CONCURRENCY = parseInt(process.env.CONCURRENCY) || 2;
+
+            const chunks = [];
+            for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+                chunks.push(urls.slice(i, i + BATCH_SIZE));
+            }
+
+            console.log(`📦 Split into ${chunks.length} batches (size: ${BATCH_SIZE}, concurrency: ${CONCURRENCY})`);
+
+            let positiveCount = 0;
+            let negativeCount = 0;
+            let failedCount = 0;
+
+            const totalBatches = chunks.length;
+            for (let chunkNumber = 1; chunkNumber <= totalBatches; chunkNumber++) {
+                const chunk = chunks[chunkNumber - 1];
+                const chunkStartTime = Date.now();
+
+                console.log(`\n🔥 Processing Batch ${chunkNumber}/${totalBatches} (${chunk.length} URLs)`);
+
+                let chunkResults;
+                try {
+                    chunkResults = await this.processVWOChunk(chunk, {
+                        concurrency: CONCURRENCY
+                    });
+
+                    const chunkDuration = Date.now() - chunkStartTime;
+                    console.log(`⏱️  Batch ${chunkNumber} completed in ${(chunkDuration / 1000).toFixed(1)}s`);
+                } catch (chunkError) {
+                    console.error(`🔴 Error processing batch ${chunkNumber}:`, chunkError.message);
+                    throw chunkError;
+                }
+
+                const chunkPositives = [];
+                const chunkNegatives = [];
+                const chunkFailures = [];
+
+                if (chunkResults && Array.isArray(chunkResults)) {
+                    chunkResults.forEach(({ url: targetUrl, companyName, result }) => {
+
+                        if (!targetUrl || targetUrl === 'INVALID_URL') {
+                            failedCount += 1;
+                            chunkFailures.push(this.buildVWOValidationRecord({
+                                url: 'INVALID_URL',
+                                companyName,
+                                status: 'failed',
+                                error: 'Invalid or missing URL'
+                            }));
+                            return;
+                        }
+
+                        if (!result.success) {
+                            failedCount += 1;
+                            chunkFailures.push(this.buildVWOValidationRecord({
+                                url: targetUrl,
+                                companyName,
+                                status: 'failed',
+                                error: result.error || 'Unknown error'
+                            }));
+                            return;
+                        }
+
+                        const vwoData = result.vwoData || {};
+                        const isDetected = vwoData.detected === true;
+
+                        if (isDetected) {
+                            positiveCount += 1;
+                            chunkPositives.push(this.buildVWOValidationRecord({
+                                url: targetUrl,
+                                companyName,
+                                status: 'positive',
+                                vwoData
+                            }));
+                        } else {
+                            negativeCount += 1;
+                            chunkNegatives.push(this.buildVWOValidationRecord({
+                                url: targetUrl,
+                                companyName,
+                                status: 'negative',
+                                vwoData
+                            }));
+                        }
+                    });
+                }
+
+                // Update Progress
+                if (progressCallback && typeof progressCallback === 'function') {
+                    progressCallback({
+                        message: `Processed batch ${chunkNumber}/${totalBatches}`,
+                        batchNumber: chunkNumber,
+                        totalBatches
+                    });
+                }
+
+                // Save batch to DB
+                await this.saveVWOBatchDocument({
+                    datasetId,
+                    datasetName,
+                    batchNumber: chunkNumber,
+                    totalBatches,
+                    totalUrls: chunk.length,
+                    positives: chunkPositives,
+                    negatives: chunkNegatives,
+                    failures: chunkFailures
+                });
+
+                // Periodic memory cleanup
+                if (chunkNumber % 5 === 0) {
+                    await performMemoryCleanup();
+                }
+            }
+
+            const endTime = new Date();
+            const durationMs = endTime - startTime;
+
+            const summary = {
+                totalUrls: urls.length,
+                positiveCount,
+                negativeCount,
+                failedCount,
+                detectionRate: urls.length > 0 ? Number(((positiveCount / urls.length) * 100).toFixed(2)) : 0,
+                startedAt: startTime,
+                completedAt: endTime,
+                durationMs
+            };
+
+            validationResultDoc.status = 'completed';
+            validationResultDoc.completedAt = endTime;
+            validationResultDoc.durationMs = durationMs;
+            validationResultDoc.summary = summary;
+            await validationResultDoc.save();
+
+            if (datasetDoc) {
+                datasetDoc.vwoValidation = {
+                    status: 'completed',
+                    lastRunAt: endTime,
+                    lastResultId: validationResultDoc._id,
+                    summary: {
+                        totalUrls: summary.totalUrls,
+                        positiveCount: summary.positiveCount,
+                        negativeCount: summary.negativeCount,
+                        failedCount: summary.failedCount,
+                        detectionRate: summary.detectionRate
+                    }
+                };
+                await datasetDoc.save();
+            }
+
+            console.log(`\n✅ VWO Validation Completed`);
+            console.log(`   Duration: ${(durationMs / 1000).toFixed(1)}s`);
+            console.log(`   Positive: ${positiveCount}, Negative: ${negativeCount}, Failed: ${failedCount}`);
+            console.log(`   Detection Rate: ${summary.detectionRate}%`);
+
+            return { success: true, summary };
+
+        } catch (error) {
+            console.error(`❌ VWO Validation Failed:`, error);
+            if (validationResultDoc) {
+                validationResultDoc.status = 'failed';
+                validationResultDoc.error = error.message;
+                await validationResultDoc.save();
+            }
+            if (datasetDoc) {
+                datasetDoc.vwoValidation = {
+                    ...(datasetDoc.vwoValidation || {}),
+                    status: 'failed'
+                };
+                await datasetDoc.save();
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Process a chunk of URLs for VWO detection
+     * Uses browser pool with concurrency control
+     */
+    async processVWOChunk(urls, options = {}) {
+        if (!urls || urls.length === 0) return [];
+
+        const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
+        const concurrency = options.concurrency || poolSize;
+
+        console.log(`\n🔁 Processing ${urls.length} URLs (Browser Pool Mode)`);
+        console.log(`   Concurrency: ${concurrency}`);
+
+        const PQueueLib = require('p-queue');
+        const PQueue = PQueueLib.default || PQueueLib;
+        const queue = new PQueue({ concurrency });
+
+        const DETECTION_TIMEOUT = 40000;
+        const results = [];
+
+        const tasks = urls.map((urlEntry, idx) => {
+            return queue.add(async () => {
+                const { url: rawUrl, companyName } = urlEntry;
+
+                let targetUrl = rawUrl;
+                if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.trim()) {
+                    return { index: idx, url: 'INVALID_URL', companyName, result: { success: false, error: 'Invalid or missing URL' } };
+                }
+
+                targetUrl = targetUrl.trim();
+                if (!/^https?:\/\//i.test(targetUrl)) {
+                    targetUrl = `https://${targetUrl}`;
+                }
+
+                try {
+                    console.log(`   [${idx + 1}/${urls.length}] Checking VWO on: ${targetUrl}`);
+
+                    let detectionResult;
+                    try {
+                        detectionResult = await Promise.race([
+                            this.detectVWOPresence(targetUrl),
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('Detection timeout')), DETECTION_TIMEOUT)
+                            )
+                        ]);
+                    } catch (timeoutErr) {
+                        console.log(`   ⏱️ Detection timed out for: ${targetUrl}`);
+                        return {
+                            index: idx,
+                            result: {
+                                success: false,
+                                error: 'Detection timeout',
+                                vwoData: { detected: false }
+                            },
+                            url: targetUrl,
+                            companyName
+                        };
+                    }
+
+                    return {
+                        index: idx,
+                        result: {
+                            success: true,
+                            vwoData: detectionResult
+                        },
+                        url: targetUrl,
+                        companyName
+                    };
+                } catch (error) {
+                    console.error(`   ❌ Error detecting VWO for ${targetUrl}:`, error.message);
+                    return {
+                        index: idx,
+                        result: {
+                            success: false,
+                            error: error.message,
+                            vwoData: { detected: false }
+                        },
+                        url: targetUrl,
+                        companyName
+                    };
+                }
+            });
+        });
+
+        results.push(...await Promise.all(tasks));
+
+        await queue.onIdle();
+
+        const sortedResults = results.sort((a, b) => a.index - b.index);
+
+        return sortedResults.map(({ url, companyName, result }) => ({ url, companyName, result }));
+    }
+
+    /**
+     * Detect VWO presence on a URL
+     * Checks for window.VWO.pageGroup.experimentConfig
+     */
+    async detectVWOPresence(url) {
+        return await browserPool.withBrowser(async (browser) => {
+            const context = await browser.newContext();
+            const page = await context.newPage();
+
+            const navigationTimeout = 30000;
+            page.setDefaultNavigationTimeout(navigationTimeout);
+            page.setDefaultTimeout(navigationTimeout);
+
+            try {
+                // Navigate to page
+                console.log(`[VWO] 🌐 Navigating to: ${url}`);
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
+
+                // Handle cookie consent
+                const { handleCookieConsent } = require(path.join(__dirname, '../../utils/helper'));
+                console.log('[VWO] 🍪 Handling cookie consent...');
+                const cookieConsentType = await handleCookieConsent(page);
+                console.log(`[VWO] 🍪 Cookie consent result: ${cookieConsentType}`);
+
+                // Wait for VWO to initialize
+                console.log('[VWO] ⏳ Waiting for VWO to initialize...');
+                await new Promise(resolve => setTimeout(resolve, 3000));
+
+                // Retry logic: Check for window.VWO (max 2 attempts)
+                let detectionResult = null;
+                const maxRetries = 2;
+                const retryDelay = 1000;
+
+                for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    console.log(`[VWO] 🔍 Detection attempt ${attempt}/${maxRetries}...`);
+
+                    detectionResult = await page.evaluate(() => {
+                        try {
+                            // Check for window.VWO object
+                            const hasVWO = typeof window.VWO !== 'undefined';
+
+                            // Check if VWO experiment config exists
+                            const hasExperimentConfig = hasVWO &&
+                                window.VWO.pageGroup &&
+                                window.VWO.pageGroup.experimentConfig;
+
+                            let experimentIds = [];
+
+                            if (hasExperimentConfig) {
+                                // Extract experiment IDs (keys of experimentConfig object)
+                                experimentIds = Object.keys(window.VWO.pageGroup.experimentConfig);
+                            }
+
+                            const detected = hasVWO && experimentIds.length > 0;
+
+                            return {
+                                detected: detected,
+                                hasVWO: hasVWO,
+                                experimentIds: experimentIds,
+                                experimentCount: experimentIds.length,
+                                detectionMethod: detected ? 'window.VWO.pageGroup.experimentConfig' : 'none'
+                            };
+                        } catch (error) {
+                            return {
+                                detected: false,
+                                error: error.message
+                            };
+                        }
+                    });
+
+                    // Log the detection result for this attempt
+                    console.log(`[VWO] 📊 Attempt ${attempt} results:`, {
+                        detected: detectionResult.detected,
+                        hasVWO: detectionResult.hasVWO,
+                        experimentCount: detectionResult.experimentCount
+                    });
+
+                    // If VWO is detected, break out of retry loop
+                    if (detectionResult.detected) {
+                        console.log(`[VWO] ✅ VWO detected on attempt ${attempt}!`);
+                        break;
+                    }
+
+                    // If not detected and we have more retries, wait before next attempt
+                    if (attempt < maxRetries) {
+                        console.log(`[VWO] ⏳ Not detected yet, waiting ${retryDelay}ms before retry...`);
+                        await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    } else {
+                        console.log(`[VWO] ❌ VWO not detected after ${maxRetries} attempts`);
+                    }
+                }
+
+                return {
+                    detected: detectionResult.detected === true,
+                    experimentIds: detectionResult.experimentIds || [],
+                    experimentCount: detectionResult.experimentCount || 0,
+                    detectionMethod: detectionResult.detectionMethod || 'none',
+                    cookieType: cookieConsentType
+                };
+
+            } catch (error) {
+                console.error('[VWO] Error during detection:', error);
+                return {
+                    detected: false,
+                    error: error.message,
+                    experimentCount: 0,
+                    experimentIds: []
+                };
+            } finally {
+                await page.close();
+                if (context && typeof context.close === 'function') {
+                    await context.close();
+                }
+            }
+        });
+    }
+
+    // Helper method to build VWO validation record
+    buildVWOValidationRecord({ url, companyName, status, vwoData = {}, error = null }) {
+        return {
+            url,
+            companyName: companyName || null,
+            status,
+            detectionDetails: Object.keys(vwoData).length > 0 ? {
+                detected: vwoData.detected === true,
+                experimentIds: vwoData.experimentIds || [],
+                detectionMethod: vwoData.detectionMethod || null,
+                hasVWOCookie: vwoData.cookieType ? true : false,
+                error: vwoData.error || null
+            } : {},
+            scrapedAt: new Date(),
+            error: error || vwoData.error || null
+        };
+    }
+
+    // Helper method to save VWO batch document
+    async saveVWOBatchDocument({ datasetId, datasetName, batchNumber, totalBatches, totalUrls, positives, negatives, failures }) {
+        try {
+            await VWOValidationDocument.findOneAndUpdate(
+                { datasetId, batchNumber },
+                {
+                    datasetId, datasetName, batchNumber, totalBatches, totalUrls,
+                    positiveCount: positives.length,
+                    negativeCount: negatives.length,
+                    failedCount: failures.length,
+                    detectionRate: totalUrls > 0 ? Number(((positives.length / totalUrls) * 100).toFixed(2)) : 0,
+                    processedAt: new Date(),
+                    positiveUrls: positives,
+                    negativeUrls: negatives,
+                    failedUrls: failures
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+        } catch (error) {
+            console.error('Error saving VWO batch document:', error.message);
         }
     }
 
