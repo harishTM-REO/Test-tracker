@@ -208,7 +208,7 @@ export default {
     },
 
     isValidationDataset(dataset) {
-      return ['Adobe Target Validation', 'Optimizely Validation', 'ABTasty Validation', 'Dynamic Yield Detection'].includes(dataset?.toolType)
+      return ['Adobe Target Validation', 'Optimizely Validation', 'ABTasty Validation', 'Dynamic Yield Detection', 'VWO Detection'].includes(dataset?.toolType)
     },
 
     getValidationField(dataset) {
@@ -216,7 +216,8 @@ export default {
         'Adobe Target Validation': 'adobeTargetValidation',
         'Optimizely Validation': 'optimizelyValidation',
         'ABTasty Validation': 'abTastyValidation',
-        'Dynamic Yield Detection': 'dynamicYieldValidation'
+        'Dynamic Yield Detection': 'dynamicYieldValidation',
+        'VWO Detection': 'vwoValidation'
       }
       const key = map[dataset?.toolType]
       return key ? dataset[key] : null

@@ -837,7 +837,7 @@ router.get('/abtasty-validation/results/:datasetId', async (req, res) => {
 router.get('/dynamic-yield-validation/results/:datasetId', async (req, res) => {
   try {
     const { datasetId } = req.params;
-    const { batch, batches, all, summary, groupByCampaign, filter } = req.query;
+    const { batch, batches, all, summary, groupByCampaign, filter, urls } = req.query;
 
     console.log(`📊 Fetching Dynamic Yield validation results for dataset: ${datasetId}`);
 
@@ -1024,6 +1024,29 @@ router.get('/dynamic-yield-validation/results/:datasetId', async (req, res) => {
         }
       });
 
+      // If urls=true, return only URL strings for simpler output
+      if (urls === 'true') {
+        const urlStrings = filteredUrls.map(entry => entry.url);
+        return res.status(200).json({
+          success: true,
+          data: {
+            datasetId: result.datasetId,
+            datasetName: result.datasetName,
+            status: result.status,
+            filter: filterType,
+            totalCount: urlStrings.length,
+            urls: urlStrings,
+            summary: {
+              totalUrls: result.totalUrls,
+              positiveCount: result.summary?.positiveCount || 0,
+              negativeCount: result.summary?.negativeCount || 0,
+              failedCount: result.summary?.failedCount || 0,
+              detectionRate: result.summary?.detectionRate || 0
+            }
+          }
+        });
+      }
+
       return res.status(200).json({
         success: true,
         data: {
@@ -1202,7 +1225,7 @@ router.post('/vwo-validation', async (req, res) => {
 router.get('/vwo-validation/results/:datasetId', async (req, res) => {
   try {
     const { datasetId } = req.params;
-    const { batch, batches, all, summary, groupByExperiment, filter } = req.query;
+    const { batch, batches, all, summary, groupByExperiment, filter, urls } = req.query;
 
     console.log(`📊 Fetching VWO validation results for dataset: ${datasetId}`);
 
@@ -1381,6 +1404,29 @@ router.get('/vwo-validation/results/:datasetId', async (req, res) => {
           });
         }
       });
+
+      // If urls=true, return only URL strings for simpler output
+      if (urls === 'true') {
+        const urlStrings = filteredUrls.map(entry => entry.url);
+        return res.status(200).json({
+          success: true,
+          data: {
+            datasetId: result.datasetId,
+            datasetName: result.datasetName,
+            status: result.status,
+            filter: filterType,
+            totalCount: urlStrings.length,
+            urls: urlStrings,
+            summary: {
+              totalUrls: result.totalUrls,
+              positiveCount: result.summary?.positiveCount || 0,
+              negativeCount: result.summary?.negativeCount || 0,
+              failedCount: result.summary?.failedCount || 0,
+              detectionRate: result.summary?.detectionRate || 0
+            }
+          }
+        });
+      }
 
       return res.status(200).json({
         success: true,
