@@ -2788,10 +2788,10 @@ class AdobeTarget1_0Service {
                 console.log('[VWO] ⏳ Waiting for VWO to initialize...');
                 await new Promise(resolve => setTimeout(resolve, 3000));
 
-                // Retry logic: Check for window.VWO (max 2 attempts)
+                // Retry logic: Check for window.VWO and experimentConfig (max 4 attempts)
                 let detectionResult = null;
-                const maxRetries = 2;
-                const retryDelay = 1000;
+                const maxRetries = 4;
+                const retryDelay = 1500;
 
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     console.log(`[VWO] 🔍 Detection attempt ${attempt}/${maxRetries}...`);
@@ -2801,26 +2801,28 @@ class AdobeTarget1_0Service {
                             // Check for window.VWO object
                             const hasVWO = typeof window.VWO !== 'undefined';
 
-                            // Check if VWO experiment config exists
-                            const hasExperimentConfig = hasVWO &&
-                                window.VWO.pageGroup &&
-                                window.VWO.pageGroup.experimentConfig;
-
+                            // Check for VWO experiment config - explicitly check if it's an object with keys
+                            let hasExperimentConfig = false;
                             let experimentIds = [];
 
-                            if (hasExperimentConfig) {
-                                // Extract experiment IDs (keys of experimentConfig object)
-                                experimentIds = Object.keys(window.VWO.pageGroup.experimentConfig);
+                            if (hasVWO && window.VWO.pageGroup && window.VWO.pageGroup.experimentConfig) {
+                                const experimentConfig = window.VWO.pageGroup.experimentConfig;
+                                if (typeof experimentConfig === 'object' && experimentConfig !== null) {
+                                    experimentIds = Object.keys(experimentConfig);
+                                    hasExperimentConfig = experimentIds.length > 0;
+                                }
                             }
 
-                            const detected = hasVWO && experimentIds.length > 0;
+                            // VWO is detected if window.VWO exists
+                            const detected = hasVWO;
 
                             return {
                                 detected: detected,
                                 hasVWO: hasVWO,
+                                hasExperimentConfig: hasExperimentConfig,
                                 experimentIds: experimentIds,
                                 experimentCount: experimentIds.length,
-                                detectionMethod: detected ? 'window.VWO.pageGroup.experimentConfig' : 'none'
+                                detectionMethod: hasVWO ? (hasExperimentConfig ? 'window.VWO.pageGroup.experimentConfig' : 'window.VWO') : 'none'
                             };
                         } catch (error) {
                             return {
@@ -2834,21 +2836,31 @@ class AdobeTarget1_0Service {
                     console.log(`[VWO] 📊 Attempt ${attempt} results:`, {
                         detected: detectionResult.detected,
                         hasVWO: detectionResult.hasVWO,
+                        hasExperimentConfig: detectionResult.hasExperimentConfig,
                         experimentCount: detectionResult.experimentCount
                     });
 
-                    // If VWO is detected, break out of retry loop
-                    if (detectionResult.detected) {
-                        console.log(`[VWO] ✅ VWO detected on attempt ${attempt}!`);
+                    // If VWO is detected AND experiments are found, break out of retry loop
+                    if (detectionResult.detected && detectionResult.experimentCount > 0) {
+                        console.log(`[VWO] ✅ VWO detected with ${detectionResult.experimentCount} experiments on attempt ${attempt}!`);
                         break;
                     }
 
+                    // If VWO is detected but no experiments yet, keep trying for experimentConfig to load
+                    if (detectionResult.detected && detectionResult.experimentCount === 0 && attempt < maxRetries) {
+                        console.log(`[VWO] ⏳ VWO detected but no experiments yet, waiting ${retryDelay}ms for experimentConfig to load...`);
+                        await new Promise(resolve => setTimeout(resolve, retryDelay));
+                        continue;
+                    }
+
                     // If not detected and we have more retries, wait before next attempt
-                    if (attempt < maxRetries) {
+                    if (!detectionResult.detected && attempt < maxRetries) {
                         console.log(`[VWO] ⏳ Not detected yet, waiting ${retryDelay}ms before retry...`);
                         await new Promise(resolve => setTimeout(resolve, retryDelay));
-                    } else {
+                    } else if (!detectionResult.detected) {
                         console.log(`[VWO] ❌ VWO not detected after ${maxRetries} attempts`);
+                    } else {
+                        console.log(`[VWO] ✅ VWO detected on attempt ${attempt} (no experiments found)`);
                     }
                 }
 

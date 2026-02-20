@@ -113,10 +113,9 @@ class VWOScraperService {
 
         // Wait for VWO to initialize
         console.log('[VWO] ⏳ Waiting for VWO to initialize...');
-        // Use Promise-based delay (works with both Puppeteer and Playwright)
         await new Promise(resolve => setTimeout(resolve, 3000));
 
-        // Retry logic: Check for window.VWO (max 2 attempts)
+        // Retry logic: Check for window.VWO and experimentConfig (max 2 attempts)
         let detectionResult = null;
         const maxRetries = 2;
         const retryDelay = 1000;
@@ -129,10 +128,22 @@ class VWOScraperService {
               // Check for window.VWO object (main VWO object)
               const hasVWO = typeof window.VWO !== 'undefined';
 
-              // Check for VWO experiment config
-              const hasExperimentConfig = hasVWO &&
-                window.VWO.pageGroup &&
-                window.VWO.pageGroup.experimentConfig;
+              // Check for VWO experiment config using window.VWO.pageGroup.experimentConfig
+              let hasExperimentConfig = false;
+              let experimentIds = [];
+              let hasPageGroup = false;
+
+              if (hasVWO) {
+                hasPageGroup = typeof window.VWO.pageGroup !== 'undefined' && window.VWO.pageGroup !== null;
+
+                if (hasPageGroup && window.VWO.pageGroup.experimentConfig) {
+                  const experimentConfig = window.VWO.pageGroup.experimentConfig;
+                  if (typeof experimentConfig === 'object' && experimentConfig !== null) {
+                    experimentIds = Object.keys(experimentConfig);
+                    hasExperimentConfig = experimentIds.length > 0;
+                  }
+                }
+              }
 
               // Check for VWO scripts
               const scripts = Array.from(document.querySelectorAll('script'));
@@ -153,25 +164,19 @@ class VWOScraperService {
                 c.startsWith('vwo_')
               );
 
-              let experimentIds = [];
-
-              if (hasExperimentConfig) {
-                // Extract experiment IDs (keys of experimentConfig object)
-                experimentIds = Object.keys(window.VWO.pageGroup.experimentConfig);
-              }
-
-              // Determine if VWO is detected
-              const detected = hasVWO && experimentIds.length > 0;
+              // Determine if VWO is detected - VWO is present if window.VWO exists
+              const detected = hasVWO;
 
               return {
                 detected: detected,
                 hasVWO: hasVWO,
+                hasPageGroup: hasPageGroup,
                 hasExperimentConfig: hasExperimentConfig,
                 vwoScriptCount: vwoScripts.length,
                 vwoCookieCount: vwoCookies.length,
                 experimentIds: experimentIds,
                 experimentCount: experimentIds.length,
-                detectionMethod: hasExperimentConfig ? 'window.VWO.pageGroup.experimentConfig' : (hasVWO ? 'window.VWO' : (vwoScripts.length > 0 ? 'script' : (vwoCookies.length > 0 ? 'cookie' : 'none')))
+                detectionMethod: hasVWO ? (hasExperimentConfig ? 'window.VWO.pageGroup.experimentConfig' : 'window.VWO') : (vwoScripts.length > 0 ? 'script' : (vwoCookies.length > 0 ? 'cookie' : 'none'))
               };
             } catch (error) {
               return {
@@ -185,21 +190,32 @@ class VWOScraperService {
           console.log(`[VWO] 📊 Attempt ${attempt} results:`, {
             detected: detectionResult.detected,
             hasVWO: detectionResult.hasVWO,
+            hasPageGroup: detectionResult.hasPageGroup,
+            hasExperimentConfig: detectionResult.hasExperimentConfig,
             experimentCount: detectionResult.experimentCount
           });
 
-          // If VWO is detected, break out of retry loop
-          if (detectionResult.detected) {
-            console.log(`[VWO] ✅ VWO detected on attempt ${attempt}!`);
+          // If VWO is detected AND experiments are found, break out of retry loop
+          if (detectionResult.detected && detectionResult.experimentCount > 0) {
+            console.log(`[VWO] ✅ VWO detected with ${detectionResult.experimentCount} experiments on attempt ${attempt}!`);
             break;
           }
 
+          // If VWO is detected but no experiments yet, keep trying for experimentConfig to load
+          if (detectionResult.detected && detectionResult.experimentCount === 0 && attempt < maxRetries) {
+            console.log(`[VWO] ⏳ VWO detected but no experiments yet, waiting ${retryDelay}ms for experimentConfig to load...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            continue;
+          }
+
           // If not detected and we have more retries, wait before next attempt
-          if (attempt < maxRetries) {
+          if (!detectionResult.detected && attempt < maxRetries) {
             console.log(`[VWO] ⏳ Not detected yet, waiting ${retryDelay}ms before retry...`);
             await new Promise(resolve => setTimeout(resolve, retryDelay));
-          } else {
+          } else if (!detectionResult.detected) {
             console.log(`[VWO] ❌ VWO not detected after ${maxRetries} attempts`);
+          } else {
+            console.log(`[VWO] ✅ VWO detected on attempt ${attempt} (no experiments found)`);
           }
         }
 
@@ -211,6 +227,7 @@ class VWOScraperService {
           cookieType: cookieConsentType,
           detectionDetails: {
             hasVWO: detectionResult.hasVWO,
+            hasPageGroup: detectionResult.hasPageGroup,
             hasExperimentConfig: detectionResult.hasExperimentConfig,
             vwoScriptCount: detectionResult.vwoScriptCount,
             vwoCookieCount: detectionResult.vwoCookieCount
