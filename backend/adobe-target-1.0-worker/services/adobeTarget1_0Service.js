@@ -2118,7 +2118,8 @@ class AdobeTarget1_0Service {
                 }
 
                 // B. Dynamic Yield Detection (with overall timeout)
-                const DETECTION_TIMEOUT = parseInt(process.env.VALIDATION_DETECTION_TIMEOUT) || 90000;
+                // Increased to 180s to accommodate navigation + cookie + detection retries
+                const DETECTION_TIMEOUT = parseInt(process.env.VALIDATION_DETECTION_TIMEOUT) || 180000;
                 let detectionResult;
                 try {
                     detectionResult = await Promise.race([
@@ -2686,7 +2687,8 @@ class AdobeTarget1_0Service {
         const queue = new PQueue({ concurrency });
 
         // Overall detection timeout (navigation + cookie consent + VWO detection)
-        const DETECTION_TIMEOUT = parseInt(process.env.VALIDATION_DETECTION_TIMEOUT) || parseInt(process.env.VWO_DETECTION_TIMEOUT) || 90000;
+        // Increased to 180s to accommodate: 60s nav + 10s cookie + 3s wait + 88s detection (4×22s)
+        const DETECTION_TIMEOUT = parseInt(process.env.VALIDATION_DETECTION_TIMEOUT) || parseInt(process.env.VWO_DETECTION_TIMEOUT) || 180000;
         const results = [];
 
         const tasks = urls.map((urlEntry, idx) => {
@@ -2799,41 +2801,50 @@ class AdobeTarget1_0Service {
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     console.log(`[VWO] 🔍 Detection attempt ${attempt}/${maxRetries}...`);
 
-                    detectionResult = await page.evaluate(() => {
-                        try {
-                            // Check for window.VWO object
-                            const hasVWO = typeof window.VWO !== 'undefined';
+                    // Wrap evaluate in timeout to prevent hanging (like Dynamic Yield does)
+                    try {
+                        detectionResult = await Promise.race([
+                            page.evaluate(() => {
+                                try {
+                                    // Check for window.VWO object
+                                    const hasVWO = typeof window.VWO !== 'undefined';
 
-                            // Check for VWO experiment config - explicitly check if it's an object with keys
-                            let hasExperimentConfig = false;
-                            let experimentIds = [];
+                                    // Check for VWO experiment config - explicitly check if it's an object with keys
+                                    let hasExperimentConfig = false;
+                                    let experimentIds = [];
 
-                            if (hasVWO && window.VWO.pageGroup && window.VWO.pageGroup.experimentConfig) {
-                                const experimentConfig = window.VWO.pageGroup.experimentConfig;
-                                if (typeof experimentConfig === 'object' && experimentConfig !== null) {
-                                    experimentIds = Object.keys(experimentConfig);
-                                    hasExperimentConfig = experimentIds.length > 0;
+                                    if (hasVWO && window.VWO.pageGroup && window.VWO.pageGroup.experimentConfig) {
+                                        const experimentConfig = window.VWO.pageGroup.experimentConfig;
+                                        if (typeof experimentConfig === 'object' && experimentConfig !== null) {
+                                            experimentIds = Object.keys(experimentConfig);
+                                            hasExperimentConfig = experimentIds.length > 0;
+                                        }
+                                    }
+
+                                    // VWO is detected if window.VWO exists
+                                    const detected = hasVWO;
+
+                                    return {
+                                        detected: detected,
+                                        hasVWO: hasVWO,
+                                        hasExperimentConfig: hasExperimentConfig,
+                                        experimentIds: experimentIds,
+                                        experimentCount: experimentIds.length,
+                                        detectionMethod: hasVWO ? (hasExperimentConfig ? 'window.VWO.pageGroup.experimentConfig' : 'window.VWO') : 'none'
+                                    };
+                                } catch (error) {
+                                    return {
+                                        detected: false,
+                                        error: error.message
+                                    };
                                 }
-                            }
-
-                            // VWO is detected if window.VWO exists
-                            const detected = hasVWO;
-
-                            return {
-                                detected: detected,
-                                hasVWO: hasVWO,
-                                hasExperimentConfig: hasExperimentConfig,
-                                experimentIds: experimentIds,
-                                experimentCount: experimentIds.length,
-                                detectionMethod: hasVWO ? (hasExperimentConfig ? 'window.VWO.pageGroup.experimentConfig' : 'window.VWO') : 'none'
-                            };
-                        } catch (error) {
-                            return {
-                                detected: false,
-                                error: error.message
-                            };
-                        }
-                    });
+                            }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('evaluate_timeout')), 20000))
+                        ]);
+                    } catch (evalErr) {
+                        console.warn(`[VWO] ⚠️ Detection evaluate timed out (20s), marking as not detected for attempt ${attempt}`);
+                        detectionResult = { detected: false, error: 'evaluate_timeout' };
+                    }
 
                     // Log the detection result for this attempt
                     console.log(`[VWO] 📊 Attempt ${attempt} results:`, {
