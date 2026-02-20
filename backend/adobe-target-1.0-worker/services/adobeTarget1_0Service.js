@@ -2118,7 +2118,7 @@ class AdobeTarget1_0Service {
                 }
 
                 // B. Dynamic Yield Detection (with overall timeout)
-                const DETECTION_TIMEOUT = 60000; // 60 seconds max per URL
+                const DETECTION_TIMEOUT = parseInt(process.env.VALIDATION_DETECTION_TIMEOUT) || 90000;
                 let detectionResult;
                 try {
                     detectionResult = await Promise.race([
@@ -2208,7 +2208,8 @@ class AdobeTarget1_0Service {
             const context = await browser.newContext();
             const page = await context.newPage();
 
-            const navigationTimeout = 30000;
+            // Use configurable navigation timeout (default 60s to handle slow sites)
+            const navigationTimeout = parseInt(process.env.VALIDATION_NAVIGATION_TIMEOUT) || 60000;
             page.setDefaultNavigationTimeout(navigationTimeout);
             page.setDefaultTimeout(navigationTimeout);
 
@@ -2226,10 +2227,10 @@ class AdobeTarget1_0Service {
                 console.log('   ⏳ Waiting for Dynamic Yield to initialize...');
                 await page.waitForTimeout(3000);
 
-                // Retry logic: Check for window.DYO (max 2 attempts)
+                // Retry logic: Check for window.DYO
                 let detectionResult = null;
-                const maxRetries = 2;
-                const retryDelay = 1000;
+                const maxRetries = parseInt(process.env.VALIDATION_MAX_RETRIES) || 4;
+                const retryDelay = parseInt(process.env.VALIDATION_RETRY_DELAY) || 2000;
 
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     console.log(`   🔍 Detection attempt ${attempt}/${maxRetries}...`);
@@ -2684,7 +2685,8 @@ class AdobeTarget1_0Service {
         const PQueue = PQueueLib.default || PQueueLib;
         const queue = new PQueue({ concurrency });
 
-        const DETECTION_TIMEOUT = 40000;
+        // Overall detection timeout (navigation + cookie consent + VWO detection)
+        const DETECTION_TIMEOUT = parseInt(process.env.VALIDATION_DETECTION_TIMEOUT) || parseInt(process.env.VWO_DETECTION_TIMEOUT) || 90000;
         const results = [];
 
         const tasks = urls.map((urlEntry, idx) => {
@@ -2769,7 +2771,8 @@ class AdobeTarget1_0Service {
             const context = await browser.newContext();
             const page = await context.newPage();
 
-            const navigationTimeout = 30000;
+            // Use configurable navigation timeout (default 60s to handle slow sites)
+            const navigationTimeout = parseInt(process.env.VALIDATION_NAVIGATION_TIMEOUT) || parseInt(process.env.VWO_NAVIGATION_TIMEOUT) || 60000;
             page.setDefaultNavigationTimeout(navigationTimeout);
             page.setDefaultTimeout(navigationTimeout);
 
@@ -2788,10 +2791,10 @@ class AdobeTarget1_0Service {
                 console.log('[VWO] ⏳ Waiting for VWO to initialize...');
                 await new Promise(resolve => setTimeout(resolve, 3000));
 
-                // Retry logic: Check for window.VWO and experimentConfig (max 4 attempts)
+                // Retry logic: Check for window.VWO and experimentConfig
                 let detectionResult = null;
-                const maxRetries = 4;
-                const retryDelay = 1500;
+                const maxRetries = parseInt(process.env.VALIDATION_MAX_RETRIES) || parseInt(process.env.VWO_MAX_RETRIES) || 4;
+                const retryDelay = parseInt(process.env.VALIDATION_RETRY_DELAY) || parseInt(process.env.VWO_RETRY_DELAY) || 2000;
 
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     console.log(`[VWO] 🔍 Detection attempt ${attempt}/${maxRetries}...`);
