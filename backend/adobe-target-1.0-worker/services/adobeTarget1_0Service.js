@@ -2118,7 +2118,8 @@ class AdobeTarget1_0Service {
                 }
 
                 // B. Dynamic Yield Detection (with overall timeout)
-                const DETECTION_TIMEOUT = 60000; // 60 seconds max per URL
+                // Increased to 180s to accommodate navigation + cookie + detection retries
+                const DETECTION_TIMEOUT = parseInt(process.env.VALIDATION_DETECTION_TIMEOUT) || 180000;
                 let detectionResult;
                 try {
                     detectionResult = await Promise.race([
@@ -2208,7 +2209,8 @@ class AdobeTarget1_0Service {
             const context = await browser.newContext();
             const page = await context.newPage();
 
-            const navigationTimeout = 30000;
+            // Use configurable navigation timeout (default 60s to handle slow sites)
+            const navigationTimeout = parseInt(process.env.VALIDATION_NAVIGATION_TIMEOUT) || 60000;
             page.setDefaultNavigationTimeout(navigationTimeout);
             page.setDefaultTimeout(navigationTimeout);
 
@@ -2226,10 +2228,10 @@ class AdobeTarget1_0Service {
                 console.log('   ⏳ Waiting for Dynamic Yield to initialize...');
                 await page.waitForTimeout(3000);
 
-                // Retry logic: Check for window.DYO (max 2 attempts)
+                // Retry logic: Check for window.DYO
                 let detectionResult = null;
-                const maxRetries = 2;
-                const retryDelay = 1000;
+                const maxRetries = parseInt(process.env.VALIDATION_MAX_RETRIES) || 4;
+                const retryDelay = parseInt(process.env.VALIDATION_RETRY_DELAY) || 2000;
 
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     console.log(`   🔍 Detection attempt ${attempt}/${maxRetries}...`);
@@ -2684,7 +2686,9 @@ class AdobeTarget1_0Service {
         const PQueue = PQueueLib.default || PQueueLib;
         const queue = new PQueue({ concurrency });
 
-        const DETECTION_TIMEOUT = 40000;
+        // Overall detection timeout (navigation + cookie consent + VWO detection)
+        // Increased to 180s to accommodate: 60s nav + 10s cookie + 3s wait + 88s detection (4×22s)
+        const DETECTION_TIMEOUT = parseInt(process.env.VALIDATION_DETECTION_TIMEOUT) || parseInt(process.env.VWO_DETECTION_TIMEOUT) || 180000;
         const results = [];
 
         const tasks = urls.map((urlEntry, idx) => {
@@ -2769,7 +2773,8 @@ class AdobeTarget1_0Service {
             const context = await browser.newContext();
             const page = await context.newPage();
 
-            const navigationTimeout = 30000;
+            // Use configurable navigation timeout (default 60s to handle slow sites)
+            const navigationTimeout = parseInt(process.env.VALIDATION_NAVIGATION_TIMEOUT) || parseInt(process.env.VWO_NAVIGATION_TIMEOUT) || 60000;
             page.setDefaultNavigationTimeout(navigationTimeout);
             page.setDefaultTimeout(navigationTimeout);
 
@@ -2788,49 +2793,58 @@ class AdobeTarget1_0Service {
                 console.log('[VWO] ⏳ Waiting for VWO to initialize...');
                 await new Promise(resolve => setTimeout(resolve, 3000));
 
-                // Retry logic: Check for window.VWO and experimentConfig (max 4 attempts)
+                // Retry logic: Check for window.VWO and experimentConfig
                 let detectionResult = null;
-                const maxRetries = 4;
-                const retryDelay = 1500;
+                const maxRetries = parseInt(process.env.VALIDATION_MAX_RETRIES) || parseInt(process.env.VWO_MAX_RETRIES) || 4;
+                const retryDelay = parseInt(process.env.VALIDATION_RETRY_DELAY) || parseInt(process.env.VWO_RETRY_DELAY) || 2000;
 
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     console.log(`[VWO] 🔍 Detection attempt ${attempt}/${maxRetries}...`);
 
-                    detectionResult = await page.evaluate(() => {
-                        try {
-                            // Check for window.VWO object
-                            const hasVWO = typeof window.VWO !== 'undefined';
+                    // Wrap evaluate in timeout to prevent hanging (like Dynamic Yield does)
+                    try {
+                        detectionResult = await Promise.race([
+                            page.evaluate(() => {
+                                try {
+                                    // Check for window.VWO object
+                                    const hasVWO = typeof window.VWO !== 'undefined';
 
-                            // Check for VWO experiment config - explicitly check if it's an object with keys
-                            let hasExperimentConfig = false;
-                            let experimentIds = [];
+                                    // Check for VWO experiment config - explicitly check if it's an object with keys
+                                    let hasExperimentConfig = false;
+                                    let experimentIds = [];
 
-                            if (hasVWO && window.VWO.pageGroup && window.VWO.pageGroup.experimentConfig) {
-                                const experimentConfig = window.VWO.pageGroup.experimentConfig;
-                                if (typeof experimentConfig === 'object' && experimentConfig !== null) {
-                                    experimentIds = Object.keys(experimentConfig);
-                                    hasExperimentConfig = experimentIds.length > 0;
+                                    if (hasVWO && window.VWO.pageGroup && window.VWO.pageGroup.experimentConfig) {
+                                        const experimentConfig = window.VWO.pageGroup.experimentConfig;
+                                        if (typeof experimentConfig === 'object' && experimentConfig !== null) {
+                                            experimentIds = Object.keys(experimentConfig);
+                                            hasExperimentConfig = experimentIds.length > 0;
+                                        }
+                                    }
+
+                                    // VWO is detected if window.VWO exists
+                                    const detected = hasVWO;
+
+                                    return {
+                                        detected: detected,
+                                        hasVWO: hasVWO,
+                                        hasExperimentConfig: hasExperimentConfig,
+                                        experimentIds: experimentIds,
+                                        experimentCount: experimentIds.length,
+                                        detectionMethod: hasVWO ? (hasExperimentConfig ? 'window.VWO.pageGroup.experimentConfig' : 'window.VWO') : 'none'
+                                    };
+                                } catch (error) {
+                                    return {
+                                        detected: false,
+                                        error: error.message
+                                    };
                                 }
-                            }
-
-                            // VWO is detected if window.VWO exists
-                            const detected = hasVWO;
-
-                            return {
-                                detected: detected,
-                                hasVWO: hasVWO,
-                                hasExperimentConfig: hasExperimentConfig,
-                                experimentIds: experimentIds,
-                                experimentCount: experimentIds.length,
-                                detectionMethod: hasVWO ? (hasExperimentConfig ? 'window.VWO.pageGroup.experimentConfig' : 'window.VWO') : 'none'
-                            };
-                        } catch (error) {
-                            return {
-                                detected: false,
-                                error: error.message
-                            };
-                        }
-                    });
+                            }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('evaluate_timeout')), 20000))
+                        ]);
+                    } catch (evalErr) {
+                        console.warn(`[VWO] ⚠️ Detection evaluate timed out (20s), marking as not detected for attempt ${attempt}`);
+                        detectionResult = { detected: false, error: 'evaluate_timeout' };
+                    }
 
                     // Log the detection result for this attempt
                     console.log(`[VWO] 📊 Attempt ${attempt} results:`, {

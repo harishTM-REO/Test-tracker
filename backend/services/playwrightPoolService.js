@@ -398,7 +398,12 @@ class PlaywrightPoolService {
         this.busyBrowsers.add(newBrowser);
         resolve(newBrowser);
       } else {
-        this.availableBrowsers.push(newBrowser);
+        // ✅ FIX: Check for duplicates before adding to prevent pool corruption
+        if (!this.availableBrowsers.includes(newBrowser)) {
+          this.availableBrowsers.push(newBrowser);
+        } else {
+          console.warn(`⚠️ Attempted to add duplicate browser to pool, skipping`);
+        }
       }
 
       // ✅ SAFETY CHECK: Verify pool size is correct
@@ -544,7 +549,10 @@ class PlaywrightPoolService {
         try {
           const browser = await this.launchBrowser(this.browsers.length + 1);
           this.browsers.push(browser);
-          this.availableBrowsers.push(browser);
+          // ✅ FIX: Check for duplicates before adding
+          if (!this.availableBrowsers.includes(browser)) {
+            this.availableBrowsers.push(browser);
+          }
           this.pageCountPerBrowser.set(browser, 0);
           this.stats.totalBrowsersCreated++;
         } catch (e) {
@@ -773,7 +781,10 @@ class PlaywrightPoolService {
         console.log(`   Launching browser ${i + 1}/${this.poolSize}...`);
         const browser = await this.launchBrowser(i + 1);
         this.browsers.push(browser);
-        this.availableBrowsers.push(browser);
+        // ✅ FIX: Check for duplicates before adding
+        if (!this.availableBrowsers.includes(browser)) {
+          this.availableBrowsers.push(browser);
+        }
         this.pageCountPerBrowser.set(browser, 0);
         this.stats.totalBrowsersCreated++;
         console.log(`   ✅ Browser ${i + 1} launched successfully`);
