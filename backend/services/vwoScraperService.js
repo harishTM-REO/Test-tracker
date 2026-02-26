@@ -126,7 +126,7 @@ class VWOScraperService {
           detectionResult = await page.evaluate(() => {
             try {
               // Check for window.VWO object (main VWO object)
-              const hasVWO = typeof window.VWO !== 'undefined';
+              const hasVWO = typeof window.VWO !== 'undefined' && typeof window._vwo_acc_id !== 'undefined';
 
               // Check for VWO experiment config using window.VWO.pageGroup.experimentConfig
               let hasExperimentConfig = false;

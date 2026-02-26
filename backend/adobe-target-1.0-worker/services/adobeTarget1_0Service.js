@@ -2807,7 +2807,7 @@ class AdobeTarget1_0Service {
                             page.evaluate(() => {
                                 try {
                                     // Check for window.VWO object
-                                    const hasVWO = typeof window.VWO !== 'undefined';
+                                    const hasVWO = typeof window.VWO !== 'undefined' && typeof window._vwo_acc_id !== 'undefined';
 
                                     // Check for VWO experiment config - explicitly check if it's an object with keys
                                     let hasExperimentConfig = false;
