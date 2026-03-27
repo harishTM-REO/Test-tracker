@@ -586,38 +586,105 @@ const datasetController = {
 
       // 2. Validate dataset has AT 1.0 results
       const AdobeTarget1_0Result = require('../models/AdobeTarget1_0Result');
-      const existingResult = await AdobeTarget1_0Result.findOne({ datasetId: id });
+      const AdobeTarget1_0Document = require('../models/AdobeTarget1_0Document');
+      const mongoose = require('mongoose');
+      
+      // Use dataset._id which is a proper ObjectId to avoid casting issues
+      const datasetObjectId = dataset._id;
 
-      if (!existingResult) {
-        return res.status(404).json({
-          success: false,
-          message: 'No existing Adobe Target 1.0 results found for this dataset. Please run initial scraping first.'
+      // 3. Extract top 25 URLs from all possible sources
+      const urlsToRescrape = [];
+      const originalUrlsFound = new Set();
+
+      // Helper to add results from a workflow array
+      const addWorkflowResults = (workflowArray, sourceLabel) => {
+        if (!workflowArray || !Array.isArray(workflowArray)) return 0;
+        
+        let count = 0;
+        for (const urlWorkflow of workflowArray) {
+          if (!urlWorkflow.originalUrl || originalUrlsFound.has(urlWorkflow.originalUrl)) continue;
+          
+          const companyData = {
+            originalUrl: urlWorkflow.originalUrl,
+            top25Urls: []
+          };
+
+          // Get the top 25 URLs that were scraped
+          if (urlWorkflow.topUrlsScrapingResults && urlWorkflow.topUrlsScrapingResults.length > 0) {
+            companyData.top25Urls = urlWorkflow.topUrlsScrapingResults.map(result => ({
+              url: result.url,
+              category: result.category,
+              priority: result.priority,
+              isSeedUrl: result.isSeedUrl || false
+            }));
+          }
+
+          if (companyData.top25Urls.length > 0) {
+            urlsToRescrape.push(companyData);
+            originalUrlsFound.add(urlWorkflow.originalUrl);
+            count++;
+          }
+        }
+        return count;
+      };
+
+      // Source 1: AdobeTarget1_0Document (All batches)
+      const batchDocuments = await AdobeTarget1_0Document.find({ datasetId: datasetObjectId });
+      console.log(`📦 Found ${batchDocuments.length} batch documents (AdobeTarget1_0Document)`);
+      
+      batchDocuments.forEach((doc, idx) => {
+        const count = addWorkflowResults(doc.urlWorkflowResults);
+        if (count > 0) console.log(`   - Batch Doc #${idx + 1} (Batch ${doc.batchNumber}): Added ${count} companies`);
+      });
+
+      // Source 2: AdobeTarget1_0Result (All batches, top-level results)
+      const mainResults = await AdobeTarget1_0Result.find({ datasetId: datasetObjectId });
+      console.log(`📦 Found ${mainResults.length} main result documents (AdobeTarget1_0Result)`);
+      
+      mainResults.forEach((resDoc, idx) => {
+        // Check top-level results
+        const topLevelCount = addWorkflowResults(resDoc.urlWorkflowResults);
+        if (topLevelCount > 0) console.log(`   - Main Result Doc #${idx + 1}: Added ${topLevelCount} companies from top-level`);
+        
+        // Check results in runs array (if top-level was empty or for historical runs)
+        if (resDoc.runs && resDoc.runs.length > 0) {
+          // Check the latest run first
+          const latestRun = resDoc.runs[resDoc.runs.length - 1];
+          const runCount = addWorkflowResults(latestRun.urlWorkflowResults);
+          if (runCount > 0) console.log(`   - Main Result Doc #${idx + 1} (Run #${latestRun.runNumber}): Added ${runCount} companies`);
+          
+          // If still needed, check other runs (though unlikely to find new original URLs)
+          if (originalUrlsFound.size < dataset.companyCount) {
+            for (let i = resDoc.runs.length - 2; i >= 0; i--) {
+              const prevRun = resDoc.runs[i];
+              addWorkflowResults(prevRun.urlWorkflowResults);
+            }
+          }
+        }
+      });
+
+      // Fallback: If still nothing found, try using the string ID directly just in case some records aren't using ObjectIds
+      if (urlsToRescrape.length === 0) {
+        console.log('⚠️ No results found using ObjectId, attempting fallback search with string ID...');
+        const stringBatchDocs = await AdobeTarget1_0Document.find({ datasetId: id });
+        stringBatchDocs.forEach(doc => addWorkflowResults(doc.urlWorkflowResults));
+        
+        const stringMainResults = await AdobeTarget1_0Result.find({ datasetId: id });
+        stringMainResults.forEach(resDoc => {
+          addWorkflowResults(resDoc.urlWorkflowResults);
+          if (resDoc.runs) resDoc.runs.forEach(run => addWorkflowResults(run.urlWorkflowResults));
         });
       }
 
-      // 3. Extract top 25 URLs from existing results
-      const urlsToRescrape = [];
-      
-      for (const urlWorkflow of existingResult.urlWorkflowResults) {
-        const companyData = {
-          originalUrl: urlWorkflow.originalUrl,
-          top25Urls: []
-        };
+      const totalUrls = urlsToRescrape.reduce((sum, c) => sum + c.top25Urls.length, 0);
+      console.log(`📊 TOTAL SUMMARY: Found ${urlsToRescrape.length} companies with ${totalUrls} URLs to re-scrape`);
 
-        // Get the top 25 URLs that were scraped
-        if (urlWorkflow.topUrlsScrapingResults && urlWorkflow.topUrlsScrapingResults.length > 0) {
-          companyData.top25Urls = urlWorkflow.topUrlsScrapingResults.map(result => ({
-            url: result.url,
-            category: result.category,
-            priority: result.priority,
-            isSeedUrl: result.isSeedUrl || false
-          }));
-        }
-
-        urlsToRescrape.push(companyData);
+      if (urlsToRescrape.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'No scraped URLs found to re-scrape. The dataset may have failed its initial scraping or is still in progress.'
+        });
       }
-
-      console.log(`📊 Found ${urlsToRescrape.length} companies with ${urlsToRescrape.reduce((sum, c) => sum + c.top25Urls.length, 0)} URLs to re-scrape`);
 
       // 4. Update dataset status
       dataset.scrapingStatus = 'pending';
@@ -627,6 +694,10 @@ const datasetController = {
 
       // 5. Call AT 1.0 Worker re-scrape endpoint
       const AdobeTarget1_0JobService = require('../services/adobeTarget1_0JobService');
+      
+      // Ensure dataset name is not empty to avoid worker validation failure
+      const datasetName = dataset.name || dataset.originalFileName || `Dataset-${id}`;
+      
       const result = await AdobeTarget1_0JobService.startRescraping(id, urlsToRescrape, userId);
 
       if (!result.success) {
@@ -644,11 +715,11 @@ const datasetController = {
         message: 'Re-scraping initiated successfully',
         data: {
           datasetId: id,
-          datasetName: dataset.name,
+          datasetName: datasetName,
           jobId: result.jobId,
           companiesCount: urlsToRescrape.length,
-          totalUrlsToRescrape: urlsToRescrape.reduce((sum, c) => sum + c.top25Urls.length, 0),
-          runNumber: existingResult.currentRunNumber + 1
+          totalUrlsToRescrape: totalUrls,
+          runNumber: (mainResults[0]?.currentRunNumber || 0) + 1
         }
       });
 

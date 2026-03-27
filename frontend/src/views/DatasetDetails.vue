@@ -649,10 +649,10 @@ export default {
         const response = await fetch(`${this.apiBaseUrl}/at10/api/results/dataset/${this.datasetId}`)
         const data = await response.json()
         
-        if (data.success && data.data) {
-          this.adobeResults = data.data
-          this.latestRun = data.data.runs && data.data.runs.length > 0 
-            ? data.data.runs[data.data.runs.length - 1]
+        if (data.success && data.data && data.data.length > 0) {
+          this.adobeResults = data.data[0]
+          this.latestRun = this.adobeResults.runs && this.adobeResults.runs.length > 0 
+            ? this.adobeResults.runs[this.adobeResults.runs.length - 1]
             : null
         }
       } catch (error) {
