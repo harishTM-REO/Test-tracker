@@ -66,6 +66,10 @@
       <div v-if="dataset.toolType === 'Adobe Target 1.0' && (adobeResults || dataset.scrapingStatus === 'completed' || dataset.scrapingStatus === 'failed' || rescrapingInProgress)" class="rescrape-section">
         <div class="section-header">
           <h2>🔄 Re-scrape Experiments</h2>
+          <div v-if="rescrapingInProgress || dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'" class="active-rescraping-badge">
+            <span class="pulse-icon"></span>
+            Re-scraping in progress
+          </div>
         </div>
         
         <div class="rescrape-info">
@@ -485,6 +489,13 @@ export default {
           // Fetch Adobe Target 1.0 results if applicable
           if (data.data.toolType === 'Adobe Target 1.0') {
             await this.fetchAdobeResults()
+            
+            // Check if re-scrape was already in progress when page loaded
+            if (data.data.scrapingStatus === 'pending' || data.data.scrapingStatus === 'in_progress') {
+              console.log('🔄 Active re-scrape detected on page load, starting polling...')
+              this.rescrapingInProgress = true
+              this.pollForRescapeUpdates()
+            }
           }
         } else {
           this.error = data.message || 'Failed to fetch dataset'
@@ -944,6 +955,40 @@ export default {
 .rescrape-section h2 {
   margin: 0 0 15px 0;
   color: white;
+}
+
+.active-rescraping-badge {
+  background: #667eea;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.pulse-icon {
+  width: 10px;
+  height: 10px;
+  background-color: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 rgba(255, 255, 255, 0.4);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 255, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
 }
 
 .rescrape-info {
