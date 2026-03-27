@@ -103,11 +103,7 @@ router.post('/scrape', async (req, res) => {
  *       ]
  *     },
  *     ...
- *   ],
- *   "userId": "user123",
- *   "options": {
- *     "concurrency": 4
- *   }
+ *   ]
  * }
  */
 router.post('/rescrape-experiments', async (req, res) => {
