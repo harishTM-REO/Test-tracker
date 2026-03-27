@@ -722,6 +722,14 @@ const datasetController = {
           runNumber: (mainResults[0]?.currentRunNumber || 0) + 1
         }
       });
+
+    } catch (error) {
+      console.error('Error in rescrapeExperiments:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to initiate re-scraping',
+        error: error.message
+      });
     }
   },
 
