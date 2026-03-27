@@ -63,7 +63,7 @@
       </div>
 
       <!-- Re-scrape Section (Adobe Target 1.0 only) -->
-      <div v-if="dataset.toolType === 'Adobe Target 1.0' && (adobeResults || rescrapingInProgress)" class="rescrape-section">
+      <div v-if="dataset.toolType === 'Adobe Target 1.0' && (adobeResults || dataset.scrapingStatus === 'completed' || dataset.scrapingStatus === 'failed' || rescrapingInProgress)" class="rescrape-section">
         <div class="section-header">
           <h2>🔄 Re-scrape Experiments</h2>
         </div>
