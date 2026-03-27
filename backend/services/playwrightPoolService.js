@@ -18,8 +18,19 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 chromium.use(StealthPlugin());
 
 class PlaywrightPoolService {
-  constructor(poolSize = 2) {
-    this.poolSize = poolSize;
+  constructor(poolSize = 1) {
+    // ✅ SAFETY CAP: Limit pool size to prevent resource exhaustion (ulimit -u / pthread_create errors)
+    // Even if PLAYWRIGHT_POOL_SIZE is set high, we cap it at 4 by default.
+    const MAX_POOL_SIZE = parseInt(process.env.PLAYWRIGHT_MAX_POOL_SIZE) || 4;
+    
+    if (poolSize > MAX_POOL_SIZE) {
+      console.warn(`⚠️  Requested pool size ${poolSize} exceeds safety cap of ${MAX_POOL_SIZE}. Capping at ${MAX_POOL_SIZE}.`);
+      console.warn(`   Set PLAYWRIGHT_MAX_POOL_SIZE in env to override this safety limit.`);
+      this.poolSize = MAX_POOL_SIZE;
+    } else {
+      this.poolSize = poolSize;
+    }
+
     this.browsers = [];
     this.availableBrowsers = [];
     this.busyBrowsers = new Set();
@@ -824,5 +835,7 @@ class PlaywrightPoolService {
 }
 
 // Singleton export
-const poolSize = parseInt(process.env.PLAYWRIGHT_POOL_SIZE) || 2;
+// ✅ REDUCED: Default to 1 instead of 2 for resource-constrained environments like Railway
+// Use PLAYWRIGHT_POOL_SIZE env var to override
+const poolSize = parseInt(process.env.PLAYWRIGHT_POOL_SIZE) || 1;
 module.exports = new PlaywrightPoolService(poolSize);

@@ -52,7 +52,7 @@ router.post('/scrape', async (req, res) => {
       datasetName,
       urls,
       options: {
-        concurrency: options.concurrency || 4,
+        concurrency: options.concurrency || 2,
         batchNumber: options.batchNumber || 1,
         totalBatches: options.totalBatches || 1
       }
