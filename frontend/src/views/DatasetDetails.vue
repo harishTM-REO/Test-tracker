@@ -63,7 +63,7 @@
       </div>
 
       <!-- Re-scrape Section (Adobe Target 1.0 only) -->
-      <div v-if="dataset.toolType === 'Adobe Target 1.0' && dataset.scrapingStatus === 'completed'" class="rescrape-section">
+      <div v-if="dataset.toolType === 'Adobe Target 1.0' && (dataset.scrapingStatus === 'completed' || rescrapingInProgress)" class="rescrape-section">
         <div class="section-header">
           <h2>🔄 Re-scrape Experiments</h2>
         </div>
@@ -114,6 +114,16 @@
             class="history-btn"
           >
             📜 View Run History ({{ adobeResults.runs.length }} runs)
+          </button>
+
+          <!-- Emergency Reset Button -->
+          <button 
+            v-if="rescrapingInProgress || dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'"
+            @click="resetScrapingStatus" 
+            class="reset-status-btn"
+            title="Use this if re-scraping gets stuck for a long time"
+          >
+            ⚠️ Reset Status
           </button>
         </div>
 
@@ -691,6 +701,44 @@ export default {
       }
     },
 
+    async resetScrapingStatus() {
+      if (!confirm('Are you sure you want to reset the scraping status? Only use this if the process is stuck.')) {
+        return
+      }
+
+      try {
+        const response = await fetch(
+          `${this.apiBaseUrl}/api/datasets/${this.datasetId}/reset-scraping-status`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        const data = await response.json()
+        
+        if (data.success) {
+          // Force reset local state
+          if (this.dataset) {
+            this.dataset.scrapingStatus = 'completed'
+          }
+          this.rescrapingInProgress = false
+          this.rescrapeError = null
+          
+          // Re-fetch dataset to be sure
+          await this.fetchDataset()
+          alert('✅ Status reset successfully. The dataset is now available for re-scraping.')
+        } else {
+          alert(`❌ Failed to reset status: ${data.message}`)
+        }
+      } catch (error) {
+        console.error('Error resetting status:', error)
+        alert('❌ Error occurred while resetting status')
+      }
+    },
+
     async pollForRescapeUpdates() {
       const pollInterval = setInterval(async () => {
         try {
@@ -982,6 +1030,25 @@ export default {
 
 .rescrape-section .history-btn:hover {
   background: rgba(255,255,255,0.3);
+}
+
+.reset-status-btn {
+  background: #ff4757;
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  margin-left: auto;
+}
+
+.reset-status-btn:hover {
+  background: #ff6b81;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
 }
 
 .progress-indicator {

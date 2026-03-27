@@ -133,4 +133,12 @@ router.get('/:id/change-trends', datasetController.getChangeTrends);
  */
 router.get('/:id/debug-versions', datasetController.debugVersions);
 
+/**
+ * @route   POST /api/datasets/:id/reset-scraping-status
+ * @desc    Reset scraping status to completed (for stuck jobs)
+ * @access  Public
+ * @param   id - Dataset ID
+ */
+router.post('/:id/reset-scraping-status', datasetController.resetScrapingStatus);
+
 module.exports = router;

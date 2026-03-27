@@ -722,12 +722,48 @@ const datasetController = {
           runNumber: (mainResults[0]?.currentRunNumber || 0) + 1
         }
       });
+    }
+  },
+
+  // POST /api/datasets/:id/reset-scraping-status
+  resetScrapingStatus: async (req, res) => {
+    try {
+      const { id } = req.params;
+      console.log(`\n🔄 Manual reset requested for dataset status: ${id}`);
+
+      const dataset = await Dataset.findById(id);
+      if (!dataset) {
+        return res.status(404).json({
+          success: false,
+          message: 'Dataset not found'
+        });
+      }
+
+      // Reset to completed state if it was already scraped once
+      // or to not_started if it was never finished
+      const previousStatus = dataset.scrapingStatus;
+      dataset.scrapingStatus = 'completed'; 
+      dataset.scrapingError = null;
+      dataset.scrapingLastUpdate = new Date();
+      
+      await dataset.save();
+
+      console.log(`✅ Status reset from ${previousStatus} to completed`);
+
+      res.status(200).json({
+        success: true,
+        message: `Status successfully reset from ${previousStatus} to completed`,
+        data: {
+          id: dataset._id,
+          status: dataset.scrapingStatus
+        }
+      });
 
     } catch (error) {
-      console.error('Error in rescrapeExperiments:', error);
+      console.error('Error in resetScrapingStatus:', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to initiate re-scraping',
+        message: 'Failed to reset status',
         error: error.message
       });
     }
