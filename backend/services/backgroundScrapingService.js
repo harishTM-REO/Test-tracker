@@ -566,14 +566,20 @@ class BackgroundScrapingService {
         try {
           if (options.datasetId) {
             const freshDataset = await Dataset.findById(options.datasetId);
-            if (freshDataset) {
-              freshDataset.scrapingLastUpdate = new Date();
-              if (!freshDataset.scrapingStats) freshDataset.scrapingStats = {};
-              freshDataset.scrapingStats.processedUrls = results.length;
-              await freshDataset.save();
+            if (!freshDataset || freshDataset.isDeleted) {
+              console.warn(`Dataset ${options.datasetId} was deleted. Aborting scraping.`);
+              throw new Error('DATASET_DELETED');
             }
+            
+            freshDataset.scrapingLastUpdate = new Date();
+            if (!freshDataset.scrapingStats) freshDataset.scrapingStats = {};
+            freshDataset.scrapingStats.processedUrls = results.length;
+            await freshDataset.save();
           }
         } catch (heartbeatError) {
+          if (heartbeatError.message === 'DATASET_DELETED') {
+            throw heartbeatError;
+          }
           console.warn('Failed to update heartbeat:', heartbeatError.message);
           // Don't fail the scraping job if heartbeat update fails
         }
@@ -593,6 +599,10 @@ class BackgroundScrapingService {
         }
         
       } catch (error) {
+        if (error.message === 'DATASET_DELETED') {
+          console.log(`Scraping loop aborted due to dataset deletion.`);
+          throw error;
+        }
         console.error(`Error processing batch ${batchNumber}:`, error);
         // Continue with next batch even if current one fails
       }

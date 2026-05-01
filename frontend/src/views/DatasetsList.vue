@@ -119,6 +119,9 @@
             <button @click.stop="viewDataset(dataset._id)" class="action-btn details-btn">
               View Domains
             </button>
+            <button @click.stop="deleteDataset(dataset._id)" class="action-btn delete-btn">
+              Delete
+            </button>
           </div>
         </div>
       </div>
@@ -182,6 +185,29 @@ export default {
     
     viewDataset(datasetId) {
       this.$router.push(`/dataset/${datasetId}`)
+    },
+    
+    async deleteDataset(datasetId) {
+      if (!confirm('Are you sure you want to delete this dataset? This will also stop any running scraping jobs associated with it.')) {
+        return;
+      }
+      
+      try {
+        const response = await fetch(`${this.apiBaseUrl}/api/datasets/${datasetId}`, {
+          method: 'DELETE',
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+          // Remove from local list
+          this.datasets = this.datasets.filter(d => d._id !== datasetId);
+        } else {
+          alert(`Failed to delete dataset: ${data.message}`);
+        }
+      } catch (err) {
+        console.error('Error deleting dataset:', err);
+        alert('Network error while deleting dataset.');
+      }
     },
     
     formatDate(dateString) {
@@ -691,6 +717,15 @@ export default {
 
 .details-btn:hover {
   background: #2980b9;
+}
+
+.delete-btn {
+  background: #e74c3c;
+  color: white;
+}
+
+.delete-btn:hover {
+  background: #c0392b;
 }
 
 @media (max-width: 768px) {
