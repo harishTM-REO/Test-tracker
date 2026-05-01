@@ -351,7 +351,8 @@ const datasetSchema = new mongoose.Schema({
     totalExperiments: { type: Number, default: 0 },
     duration: { type: String, default: null },
     currentPass: { type: String, default: null }, // 'Pass 1/3', 'Pass 2/3', 'Pass 3/3'
-    processedUrls: { type: Number, default: 0 } // URLs processed so far
+    processedUrls: { type: Number, default: 0 }, // URLs processed so far
+    processedDomains: { type: Number, default: 0 } // Domains processed so far
   },
   scrapingLastUpdate: {
     type: Date,
