@@ -378,7 +378,6 @@ class AdobeTarget1_0Service {
                     dataset.scrapingStats = {
                         totalUrls: urls.length,
                         processedUrls: result.overallStats.totalTop25UrlsProcessed,
-                        processedDomains: Math.min(batchNumber * batchSize, urls.length),
                         successfulScans: result.overallStats.totalTop25UrlsSuccessful,
                         failedScans: result.overallStats.totalTop25UrlsFailed,
                         adobeTargetDetected: result.overallStats.adobeTargetDetectedCount,
@@ -419,7 +418,6 @@ class AdobeTarget1_0Service {
                 await dataset.completeScraping({
                     totalUrls: urls.length,
                     processedUrls: result.overallStats.totalTop25UrlsProcessed,
-                    processedDomains: urls.length,
                     successfulScans: result.overallStats.totalTop25UrlsSuccessful,
                     failedScans: result.overallStats.totalTop25UrlsFailed,
                     adobeTargetDetected: result.overallStats.adobeTargetDetectedCount,

@@ -72,7 +72,7 @@
               ✅ {{ dataset.sanitization.cleanedCount }} URLs ready
             </span>
             <span v-else-if="dataset.status === 'SCRAPING'" class="info">
-              🔄 {{ dataset.scrapingStats?.processedDomains || dataset.scrapingStats?.processedUrls || 0 }} / {{ dataset.sanitization?.cleanedCount || dataset.totalRows || 0 }} Domains scraped
+              🔄 {{ dataset.sanitization.cleanedCount }} URLs
             </span>
             <span v-else-if="dataset.status === 'COMPLETED'" class="info">
               ✅ {{ dataset.sanitization.cleanedCount }} processed
@@ -84,26 +84,42 @@
 
           <!-- Actions -->
           <td class="actions">
-            <button v-if="dataset.status === 'SANITIZING'" @click="showDetails(dataset)" class="btn btn-small btn-info">
+            <button
+              v-if="dataset.status === 'SANITIZING'"
+              @click="showDetails(dataset)"
+              class="btn btn-small btn-info"
+            >
               Details
             </button>
 
-            <button v-if="dataset.status === 'READY_FOR_SCRAPING'" @click="startScraping(dataset.id)"
-              class="btn btn-small btn-primary">
+            <button
+              v-if="dataset.status === 'READY_FOR_SCRAPING'"
+              @click="startScraping(dataset.id)"
+              class="btn btn-small btn-primary"
+            >
               Start Scraping
             </button>
 
-            <button v-if="dataset.status === 'COMPLETED'" @click="downloadResults(dataset.id)"
-              class="btn btn-small btn-success">
+            <button
+              v-if="dataset.status === 'COMPLETED'"
+              @click="downloadResults(dataset.id)"
+              class="btn btn-small btn-success"
+            >
               Download
             </button>
 
-            <button v-if="dataset.status === 'SANITIZING' || dataset.status === 'SCRAPING'"
-              @click="cancelDataset(dataset.id)" class="btn btn-small btn-warning">
+            <button
+              v-if="dataset.status === 'SANITIZING' || dataset.status === 'SCRAPING'"
+              @click="cancelDataset(dataset.id)"
+              class="btn btn-small btn-warning"
+            >
               Cancel
             </button>
 
-            <button @click="deleteDataset(dataset.id)" class="btn btn-small btn-danger">
+            <button
+              @click="deleteDataset(dataset.id)"
+              class="btn btn-small btn-danger"
+            >
               Delete
             </button>
           </td>
@@ -122,8 +138,7 @@
         <div class="modal-body">
           <div class="progress-section">
             <div class="progress-bar-large">
-              <div class="progress-fill" :style="{ width: selectedDataset.sanitization.progress.percentage + '%' }">
-              </div>
+              <div class="progress-fill" :style="{ width: selectedDataset.sanitization.progress.percentage + '%' }"></div>
             </div>
             <p>
               {{ selectedDataset.sanitization.progress.current }} /
@@ -141,8 +156,7 @@
             <div class="phase" :class="'phase-' + getPhaseStatus('deduplicate')">
               <span class="icon">{{ getPhaseIcon('deduplicate') }}</span>
               <span class="name">Remove Duplicates</span>
-              <span class="details">({{ selectedDataset.sanitization.phases?.deduplicate?.removed || 0 }}
-                removed)</span>
+              <span class="details">({{ selectedDataset.sanitization.phases?.deduplicate?.removed || 0 }} removed)</span>
             </div>
 
             <div class="phase" :class="'phase-' + getPhaseStatus('dns_lookup')">
@@ -378,7 +392,7 @@ export default {
   width: 100%;
   border-collapse: collapse;
   background: white;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -388,8 +402,7 @@ thead {
   border-bottom: 2px solid #dee2e6;
 }
 
-th,
-td {
+th, td {
   padding: 12px 15px;
   text-align: left;
   border-bottom: 1px solid #dee2e6;
@@ -429,7 +442,7 @@ td {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0,0,0,0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -441,7 +454,7 @@ td {
   border-radius: 8px;
   max-width: 500px;
   width: 90%;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
 }
 
 .modal-header {

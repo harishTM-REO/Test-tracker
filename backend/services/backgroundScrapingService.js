@@ -574,7 +574,6 @@ class BackgroundScrapingService {
             freshDataset.scrapingLastUpdate = new Date();
             if (!freshDataset.scrapingStats) freshDataset.scrapingStats = {};
             freshDataset.scrapingStats.processedUrls = results.length;
-            freshDataset.scrapingStats.processedDomains = results.length;
             await freshDataset.save();
           }
         } catch (heartbeatError) {
