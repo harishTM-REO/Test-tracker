@@ -188,12 +188,15 @@ const datasetController = {
       const totalDuration = Date.now() - totalStartTime;
 
       // DIAGNOSTIC: Log timing breakdown
+      const totalUrlsScraped = datasets.reduce((sum, dataset) => sum + (dataset.scrapingStats?.processedUrls || dataset.scrapingStats?.successfulScans || 0), 0);
+      
       console.log('\n📊 PERFORMANCE DIAGNOSTICS:');
       console.log(`  Total request time: ${totalDuration}ms`);
       console.log(`  Database find() query: ${findDuration}ms`);
       console.log(`  Database count() query: ${countDuration}ms`);
       console.log(`  Other processing: ${totalDuration - findDuration - countDuration}ms`);
       console.log(`  Datasets returned: ${datasets.length}`);
+      console.log(`  Total URLs scraped (in returned datasets): ${totalUrlsScraped}`);
       console.log(`  Total documents: ${total}\n`);
 
       res.status(200).json({
