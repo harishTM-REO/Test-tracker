@@ -17,7 +17,7 @@ const DynamicYieldValidationService = require(path.join(__dirname, './dynamicYie
 const VWOValidationService = require(path.join(__dirname, './vwoValidationService'));
 // ✅ Use browser service (switches between pool/cluster based on USE_PUPPETEER_CLUSTER)
 const browserPool = require(path.join(__dirname, '../../services/browserService'));
-const { 
+const {
     sanitizeWorkflowResult
 } = require(path.join(__dirname, '../../utils/adobeTargetResultSanitizer'));
 const jobQueue = require(path.join(__dirname, '../../services/jobQueue'));
@@ -25,7 +25,7 @@ const chromium = require('@sparticuz/chromium');
 const { buildPuppeteerLaunchOptions } = require(path.join(__dirname, '../../utils/helper'));
 const { createPage, closePage } = require(path.join(__dirname, '../../utils/playwrightHelper'));
 const { isUrlReachable } = require(path.join(__dirname, '../../utils/urlValidator'));
-const { 
+const {
     performMemoryCleanup,
     shouldRestartBrowser,
     ensureDBConnection,
@@ -39,7 +39,7 @@ const PQueue = require('p-queue');
 let puppeteer;
 try {
     // Assign to the outer 'puppeteer' variable
-    puppeteer = require('puppeteer-extra'); 
+    puppeteer = require('puppeteer-extra');
     const StealthPlugin = require('puppeteer-extra-plugin-stealth');
     const stealth = StealthPlugin();
 
@@ -60,23 +60,23 @@ try {
         'sourceurl',
         'user-agent-override',
         'navigator.webdriver' // ✅ FIX: Also disable navigator.webdriver to prevent main frame errors
-      ].forEach(evasion => stealth.enabledEvasions.delete(evasion));
+    ].forEach(evasion => stealth.enabledEvasions.delete(evasion));
 
     puppeteer.use(stealth);
-    
+
     // ✅ FIX: Add process-level error handler to catch "main frame too early" errors
     // These errors occur when the stealth plugin tries to access the main frame before it exists
     // (e.g., after SSL errors or when pages are in an invalid state)
     const originalEmit = process.emit;
-    process.emit = function(event, error) {
-      if (event === 'uncaughtException' || event === 'unhandledRejection') {
-        if (error && error.message && error.message.includes('Requesting main frame too early')) {
-          // Suppress these errors - they're non-fatal and occur during stealth plugin initialization
-          console.warn('⚠️ Suppressed stealth plugin error (non-fatal): Requesting main frame too early');
-          return true; // Prevent default error handling
+    process.emit = function (event, error) {
+        if (event === 'uncaughtException' || event === 'unhandledRejection') {
+            if (error && error.message && error.message.includes('Requesting main frame too early')) {
+                // Suppress these errors - they're non-fatal and occur during stealth plugin initialization
+                console.warn('⚠️ Suppressed stealth plugin error (non-fatal): Requesting main frame too early');
+                return true; // Prevent default error handling
+            }
         }
-      }
-      return originalEmit.apply(this, arguments);
+        return originalEmit.apply(this, arguments);
     };
 } catch (e) {
     console.warn('Puppeteer Extra/Stealth failed, falling back to core:', e.message);
@@ -104,27 +104,27 @@ class AdobeTarget1_0Service {
                 timeout: parseInt(process.env.LAUNCH_TIMEOUT) || 30000,
                 args: [
                     // Only pass args that are specific to this service
-                    '--no-sandbox', 
+                    '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage', // Helps if /dev/shm is small
                     '--disable-gpu',
-                    
+
                     // SAFE BROWSER/STEALTH FLAGS
                     '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     '--mute-audio',
                     '--no-first-run',
                     '--window-size=1366,768',
                     '--disable-blink-features=AutomationControlled',
-                    
+
                     // Tweak to manage resources without inducing deadlocks
                     '--disable-sync',
                     '--disable-default-apps',
-                    '--disable-software-rasterizer', 
+                    '--disable-software-rasterizer',
                     '--disable-accelerated-2d-canvas',
                     '--disable-features=VizServiceDisplay',
                 ]
             });
-    
+
             // 3. AWS Lambda Specific Logic
             // Only inject Sparticuz args if we are strictly on Lambda
             if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
@@ -132,10 +132,10 @@ class AdobeTarget1_0Service {
                 browserOptions.args = [...(chromium.args || []), ...browserOptions.args];
                 browserOptions.headless = chromium.headless;
             }
-    
+
             console.log(`Launching browser with executable: ${browserOptions.executablePath}`);
             return await puppeteer.launch(browserOptions);
-    
+
         } catch (error) {
             console.error('Failed to launch browser in AdobeTarget1_0Service:', error);
             throw error;
@@ -317,7 +317,7 @@ class AdobeTarget1_0Service {
                         });
 
                     } catch (error) {
-                        console.error(`  ❌ Error processing URL ${globalIndex + 1}: ${error.message}`);
+                        console.error(`  ❌ Error processing URL ${globalIndex + 1}:`, error);
 
                         // Create failure workflow result entry
                         const failureResult = {
@@ -633,7 +633,7 @@ class AdobeTarget1_0Service {
                         processedCompanies++;
 
                     } catch (error) {
-                        console.error(`   ❌ Error re-scraping company ${originalUrl}: ${error.message}`);
+                        console.error(`   ❌ Error re-scraping company ${originalUrl}:`, error);
 
                         // Save failed result
                         await this.saveUrlResult({
@@ -816,7 +816,7 @@ class AdobeTarget1_0Service {
                         try {
                             const absoluteUrl = new URL(href, origin).href;
                             links.add(absoluteUrl);
-                        } catch(e) {
+                        } catch (e) {
                             // ignore invalid urls
                         }
                     });
@@ -885,7 +885,7 @@ class AdobeTarget1_0Service {
                     try {
                         const absoluteUrl = new URL(href, origin).href;
                         links.add(absoluteUrl);
-                    } catch(e) {
+                    } catch (e) {
                         // ignore invalid urls
                     }
                 });
@@ -978,11 +978,11 @@ class AdobeTarget1_0Service {
                     console.log(`    🛑 Timeout fired - forcefully closing browser resources...`);
                     try {
                         if (currentPage) {
-                            await currentPage.close().catch(() => {});
+                            await currentPage.close().catch(() => { });
                             console.log(`       ✅ Page closed`);
                         }
                         if (currentContext) {
-                            await currentContext.close().catch(() => {});
+                            await currentContext.close().catch(() => { });
                             console.log(`       ✅ Context closed`);
                         }
                         if (currentBrowser) {
@@ -1008,16 +1008,16 @@ class AdobeTarget1_0Service {
             return result;
 
         } catch (error) {
-            console.error(`    ❌ Prioritization failed for ${url}:`, error.message);
+            console.error(`    ❌ Prioritization failed for ${url}:`, error);
 
             // ✅ CLEANUP: Additional cleanup of any remaining resources
             try {
                 if (currentPage && !currentPage.isClosed()) {
-                    await currentPage.close().catch(() => {});
+                    await currentPage.close().catch(() => { });
                     console.log(`    🧹 Cleaned up page`);
                 }
                 if (currentContext) {
-                    await currentContext.close().catch(() => {});
+                    await currentContext.close().catch(() => { });
                     console.log(`    🧹 Cleaned up context`);
                 }
                 if (currentBrowser) {
@@ -1121,7 +1121,7 @@ class AdobeTarget1_0Service {
             }
 
         } catch (error) {
-            console.error(`    ❌ Categorization failed:`, error.message);
+            console.error(`    ❌ Categorization failed:`, error);
             return {
                 originalUrl: prioritizationResult.originalUrl,
                 categorizationSuccess: false,
@@ -1214,15 +1214,18 @@ class AdobeTarget1_0Service {
                                 scrapedAt: new Date()
                             };
                         })
-                        .catch(error => ({
-                            url: urlItem.url,
-                            category: urlItem.category,
-                            priority: urlItem.priority,
-                            success: false,
-                            adobeTargetDetected: false,
-                            error: error.message,
-                            scrapedAt: new Date()
-                        }))
+                        .catch(error => {
+                            console.error(`      ❌ Error scraping ${urlItem.url}:`, error);
+                            return {
+                                url: urlItem.url,
+                                category: urlItem.category,
+                                priority: urlItem.priority,
+                                success: false,
+                                adobeTargetDetected: false,
+                                error: error.message,
+                                scrapedAt: new Date()
+                            };
+                        })
                 );
 
                 const batchResults = await Promise.all(batchPromises);
@@ -1322,7 +1325,7 @@ class AdobeTarget1_0Service {
             console.log(`       Total Activity IDs (all): ${summary.allActivityCount}`);
 
         } catch (error) {
-            console.error(`    ❌ Error during scraping:`, error.message);
+            console.error(`    ❌ Error during scraping:`, error);
         }
 
         return { results, summary };
@@ -1513,13 +1516,13 @@ class AdobeTarget1_0Service {
             // ========== CONFIGURATION FROM ENV ==========
             // ✅ MEMORY OPTIMIZATION: Use smaller batch size for validation to reduce memory pressure
             // This creates more frequent cleanup cycles (saw tooth wave pattern)
-            const BATCH_SIZE = parseInt(process.env.ADOBE_VALIDATION_BATCH_SIZE) || 
-                               parseInt(process.env.BROWSER_RESTART_EVERY) || 20; // Reduced from 25 to 20
+            const BATCH_SIZE = parseInt(process.env.ADOBE_VALIDATION_BATCH_SIZE) ||
+                parseInt(process.env.BROWSER_RESTART_EVERY) || 20; // Reduced from 25 to 20
             // ✅ FIX: Default concurrency to pool size if PQUEUE_CONCURRENCY is not set
             // This ensures all browsers in the pool are utilized
             const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
             const CONCURRENCY = parseInt(process.env.PQUEUE_CONCURRENCY) || poolSize;
-            
+
             const totalBatches = Math.max(1, Math.ceil(urls.length / BATCH_SIZE));
 
             console.log('\n🚀 Starting validation with BATCHED processing');
@@ -1606,7 +1609,7 @@ class AdobeTarget1_0Service {
             for (let i = 0; i < urls.length; i += BATCH_SIZE) {
                 const chunk = urls.slice(i, i + BATCH_SIZE);
                 const chunkNumber = Math.floor(i / BATCH_SIZE) + 1;
-                
+
                 console.log(`\n📦 Processing Batch ${chunkNumber}/${totalBatches} (${chunk.length} URLs)`);
 
                 const chunkPositives = [];
@@ -1645,7 +1648,7 @@ class AdobeTarget1_0Service {
                         throw chunkError;
                     }
                 }
-                
+
                 if (!chunkResults) {
                     console.error(`❌ Batch ${chunkNumber} returned no results`);
                     continue;
@@ -1655,7 +1658,7 @@ class AdobeTarget1_0Service {
                 chunkResults.forEach(result => {
                     const targetUrl = result?.url;
                     const companyName = result?.companyName || null;
-                    
+
                     if (!targetUrl || targetUrl === 'INVALID_URL') {
                         const errorMsg = 'Invalid or missing URL in dataset';
                         failedCount += 1;
@@ -1678,7 +1681,7 @@ class AdobeTarget1_0Service {
                     const activityIds = adobeTargetData.activityIds || [];
                     const explicitDetected = adobeTargetData.detected === true;
                     const hasCaptcha = adobeTargetData.captchaDetected === true;
-                    
+
                     const isDetected = !hasCaptcha && (explicitDetected === true || activityNames.length > 0 || activityIds.length > 0);
 
                     if (isDetected) {
@@ -1732,28 +1735,28 @@ class AdobeTarget1_0Service {
                 // This creates the "saw tooth wave" pattern: memory goes up during processing, down after cleanup
                 if (chunkNumber < totalBatches) {
                     const batchDelay = parseInt(process.env.BATCH_DELAY) || 3000; // Increased delay for better cleanup
-                    
+
                     // Log memory before cleanup
                     const memBefore = process.memoryUsage();
                     const heapUsedMB = Math.round(memBefore.heapUsed / 1024 / 1024);
                     const heapTotalMB = Math.round(memBefore.heapTotal / 1024 / 1024);
                     console.log(`\n💾 Memory before cleanup: ${heapUsedMB}MB / ${heapTotalMB}MB (${Math.round((heapUsedMB / heapTotalMB) * 100)}%)`);
-                    
-                    
+
+
                     await performMemoryCleanup(batchDelay);
-                    
+
                     // Log memory after cleanup
                     const memAfter = process.memoryUsage();
                     const heapUsedAfterMB = Math.round(memAfter.heapUsed / 1024 / 1024);
                     const freedMB = heapUsedMB - heapUsedAfterMB;
                     console.log(`💾 Memory after cleanup: ${heapUsedAfterMB}MB (freed ${freedMB}MB)`);
-                    
+
                     // Force garbage collection if available (run with --expose-gc)
                     if (global.gc) {
                         console.log(`🗑️  Forcing garbage collection...`);
                         global.gc();
                         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for GC to complete
-                        
+
                         const memAfterGC = process.memoryUsage();
                         const heapUsedAfterGCMB = Math.round(memAfterGC.heapUsed / 1024 / 1024);
                         const freedByGCMB = heapUsedAfterMB - heapUsedAfterGCMB;
@@ -1853,7 +1856,7 @@ class AdobeTarget1_0Service {
 
             // Configuration
             const BATCH_SIZE = parseInt(process.env.DYNAMIC_YIELD_BATCH_SIZE) ||
-                               parseInt(process.env.BROWSER_RESTART_EVERY) || 20;
+                parseInt(process.env.BROWSER_RESTART_EVERY) || 20;
             const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
             const CONCURRENCY = parseInt(process.env.PQUEUE_CONCURRENCY) || poolSize;
 
@@ -2135,7 +2138,7 @@ class AdobeTarget1_0Service {
                         result: {
                             success: false,
                             url: targetUrl,
-                            error: `Detection timeout after ${DETECTION_TIMEOUT/1000}s`
+                            error: `Detection timeout after ${DETECTION_TIMEOUT / 1000}s`
                         }
                     };
                 }
@@ -2240,80 +2243,80 @@ class AdobeTarget1_0Service {
                     try {
                         detectionResult = await Promise.race([
                             page.evaluate(() => {
-                    try {
-                        // Check for window.DYO object (main Dynamic Yield object)
-                        const hasDYO = typeof window.DYO !== 'undefined';
-                        const hasDY = typeof window.DY !== 'undefined';
-                        const hasDyQueue = typeof window._dyq !== 'undefined';
+                                try {
+                                    // Check for window.DYO object (main Dynamic Yield object)
+                                    const hasDYO = typeof window.DYO !== 'undefined';
+                                    const hasDY = typeof window.DY !== 'undefined';
+                                    const hasDyQueue = typeof window._dyq !== 'undefined';
 
-                        // Check for Dynamic Yield scripts
-                        const scripts = Array.from(document.querySelectorAll('script'));
-                        const dyScripts = scripts.filter(script => {
-                            const src = script.src || '';
-                            const content = script.innerHTML || '';
-                            return src.includes('dynamicyield') ||
-                                   src.includes('dy.') ||
-                                   content.includes('DYO') ||
-                                   content.includes('window.DY');
-                        });
+                                    // Check for Dynamic Yield scripts
+                                    const scripts = Array.from(document.querySelectorAll('script'));
+                                    const dyScripts = scripts.filter(script => {
+                                        const src = script.src || '';
+                                        const content = script.innerHTML || '';
+                                        return src.includes('dynamicyield') ||
+                                            src.includes('dy.') ||
+                                            content.includes('DYO') ||
+                                            content.includes('window.DY');
+                                    });
 
-                        // Check for Dynamic Yield cookies
-                        const cookies = document.cookie.split(';').map(c => c.trim());
-                        const dyCookies = cookies.filter(c =>
-                            c.startsWith('dy_') ||
-                            c.startsWith('_dyid') ||
-                            c.startsWith('_dyjsession') ||
-                            c.startsWith('_dycnst') ||
-                            c.startsWith('_dyus')
-                        );
+                                    // Check for Dynamic Yield cookies
+                                    const cookies = document.cookie.split(';').map(c => c.trim());
+                                    const dyCookies = cookies.filter(c =>
+                                        c.startsWith('dy_') ||
+                                        c.startsWith('_dyid') ||
+                                        c.startsWith('_dyjsession') ||
+                                        c.startsWith('_dycnst') ||
+                                        c.startsWith('_dyus')
+                                    );
 
-                        // Check for Dynamic Yield DOM elements
-                        const dyElements = document.querySelectorAll('[data-dy], [class*="dy-"], .DYNSECTION, [id*="dy-"]');
+                                    // Check for Dynamic Yield DOM elements
+                                    const dyElements = document.querySelectorAll('[data-dy], [class*="dy-"], .DYNSECTION, [id*="dy-"]');
 
-                        // Determine if Dynamic Yield is detected
-                        const detected = hasDYO || hasDY || hasDyQueue || dyScripts.length > 0 || dyCookies.length > 0;
+                                    // Determine if Dynamic Yield is detected
+                                    const detected = hasDYO || hasDY || hasDyQueue || dyScripts.length > 0 || dyCookies.length > 0;
 
-                        // Try to extract version and experiment info if DYO is available
-                        let version = null;
-                        let campaignIds = [];
-                        let campaignNames = [];
+                                    // Try to extract version and experiment info if DYO is available
+                                    let version = null;
+                                    let campaignIds = [];
+                                    let campaignNames = [];
 
-                        if (hasDYO && window.DYO) {
-                            // Try to get version
-                            if (window.DYO.version) {
-                                version = window.DYO.version;
-                            }
+                                    if (hasDYO && window.DYO) {
+                                        // Try to get version
+                                        if (window.DYO.version) {
+                                            version = window.DYO.version;
+                                        }
 
-                            // Extract experiments from window.DYO.otags
-                            if (window.DYO.otags && typeof window.DYO.otags === 'object') {
-                                // otags is an object where keys are experiment IDs
-                                const otagsEntries = Object.entries(window.DYO.otags);
+                                        // Extract experiments from window.DYO.otags
+                                        if (window.DYO.otags && typeof window.DYO.otags === 'object') {
+                                            // otags is an object where keys are experiment IDs
+                                            const otagsEntries = Object.entries(window.DYO.otags);
 
-                                campaignIds = otagsEntries.map(([id, data]) => id).filter(id => id);
-                                campaignNames = otagsEntries.map(([id, data]) => data.name).filter(name => name);
-                            }
-                        }
+                                            campaignIds = otagsEntries.map(([id, data]) => id).filter(id => id);
+                                            campaignNames = otagsEntries.map(([id, data]) => data.name).filter(name => name);
+                                        }
+                                    }
 
-                        return {
-                            detected: detected,
-                            hasDYO: hasDYO,
-                            hasDY: hasDY,
-                            hasDyQueue: hasDyQueue,
-                            dyScriptCount: dyScripts.length,
-                            dyCookieCount: dyCookies.length,
-                            dyElementCount: dyElements.length,
-                            version: version,
-                            campaignIds: campaignIds,
-                            campaignNames: campaignNames,
-                            detectionMethod: hasDYO ? 'window.DYO' : (hasDY ? 'window.DY' : (dyScripts.length > 0 ? 'script' : (dyCookies.length > 0 ? 'cookie' : 'none')))
-                        };
-                    } catch (error) {
-                        return {
-                            detected: false,
-                            error: error.message
-                        };
-                    }
-                    }),
+                                    return {
+                                        detected: detected,
+                                        hasDYO: hasDYO,
+                                        hasDY: hasDY,
+                                        hasDyQueue: hasDyQueue,
+                                        dyScriptCount: dyScripts.length,
+                                        dyCookieCount: dyCookies.length,
+                                        dyElementCount: dyElements.length,
+                                        version: version,
+                                        campaignIds: campaignIds,
+                                        campaignNames: campaignNames,
+                                        detectionMethod: hasDYO ? 'window.DYO' : (hasDY ? 'window.DY' : (dyScripts.length > 0 ? 'script' : (dyCookies.length > 0 ? 'cookie' : 'none')))
+                                    };
+                                } catch (error) {
+                                    return {
+                                        detected: false,
+                                        error: error.message
+                                    };
+                                }
+                            }),
                             new Promise((_, reject) => setTimeout(() => reject(new Error('evaluate_timeout')), 20000))
                         ]);
                     } catch (evalErr) {
@@ -2948,106 +2951,106 @@ class AdobeTarget1_0Service {
    * Process a chunk of URLs using the BROWSER POOL.
    * ✅ FIX: True isolation. One crash does not kill the rest of the batch.
    */
-  async processValidationChunk(urls, options = {}) {
-    if (!urls || urls.length === 0) return [];
+    async processValidationChunk(urls, options = {}) {
+        if (!urls || urls.length === 0) return [];
 
-    // 1. Safe Concurrency (Pool handles the load)
-    // Defaults to pool size if not specified (ensures all browsers are utilized)
-    const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
-    const concurrency = options.concurrency || poolSize;
+        // 1. Safe Concurrency (Pool handles the load)
+        // Defaults to pool size if not specified (ensures all browsers are utilized)
+        const poolSize = parseInt(process.env.BROWSER_POOL_SIZE) || 2;
+        const concurrency = options.concurrency || poolSize;
 
-    console.log(`\n🔁 Processing ${urls.length} URLs (Browser Pool Mode)`);
-    console.log(`   Concurrency: ${concurrency}`);
-    console.log('═'.repeat(70));
+        console.log(`\n🔁 Processing ${urls.length} URLs (Browser Pool Mode)`);
+        console.log(`   Concurrency: ${concurrency}`);
+        console.log('═'.repeat(70));
 
 
-    const PQueueLib = require('p-queue');
-    const PQueue = PQueueLib.default || PQueueLib; 
-    
-    const queue = new PQueue({ concurrency: concurrency });
+        const PQueueLib = require('p-queue');
+        const PQueue = PQueueLib.default || PQueueLib;
 
-    // 2. Create tasks (NO manual browser launch here)
-    const tasks = urls.map((entry, idx) => queue.add(async () => {
-        const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
-        const targetUrl = normalizedEntry.url;
+        const queue = new PQueue({ concurrency: concurrency });
 
-        if (!targetUrl) {
-            return { index: idx, result: { success: false, url: 'INVALID_URL', error: 'Invalid URL' } };
-        }
+        // 2. Create tasks (NO manual browser launch here)
+        const tasks = urls.map((entry, idx) => queue.add(async () => {
+            const normalizedEntry = typeof entry === 'string' ? { url: entry } : entry || {};
+            const targetUrl = normalizedEntry.url;
 
-        console.log(`\n🔸 [${idx + 1}/${urls.length}] Validating ${targetUrl}`);
+            if (!targetUrl) {
+                return { index: idx, result: { success: false, url: 'INVALID_URL', error: 'Invalid URL' } };
+            }
 
-        try {
-            // A. Reachability Check
+            console.log(`\n🔸 [${idx + 1}/${urls.length}] Validating ${targetUrl}`);
+
             try {
-                await isUrlReachable(targetUrl);
-            } catch (e) {
-                console.log(`   ❌ URL unreachable: ${targetUrl}`);
-                return { index: idx, result: { success: false, url: targetUrl, error: 'URL unreachable' } };
-            }
-
-            // B. Use Scraper Service (Handles Browser Pool Internally)
-            // This isolates every URL. If one hangs, only that one fails.
-            const detectionResult = await AdobeScraperService.detectAdobeTargetPresence(targetUrl);
-
-            // Check for errors
-            if (detectionResult.detectionSource?.error) {
-                return { 
-                    index: idx, 
-                    result: { 
-                        success: false, 
-                        url: targetUrl, 
-                        error: detectionResult.detectionSource.error 
-                    } 
-                };
-            }
-
-            // C. Success
-            console.log('   ✅ Validation complete');
-            return {
-                index: idx,
-                result: {
-                    success: true,
-                    url: targetUrl,
-                    companyName: normalizedEntry.companyName,
-                    adobeTargetData: {
-                        detected: detectionResult.detected,
-                        version: detectionResult.version,
-                        hasMboxCookie: detectionResult.hasMboxCookie,
-                        hasAdobeScript: detectionResult.hasAdobeScript,
-                        captchaDetected: detectionResult.captchaDetected,
-                        captchaStatus: detectionResult.captchaStatus,
-                        detectionSource: detectionResult.detectionSource,
-                        activityIds: [], 
-                        activityNames: [],
-                        experiments: [],
-                        experimentCount: 0,
-                        activeCount: 0
-                    }
+                // A. Reachability Check
+                try {
+                    await isUrlReachable(targetUrl);
+                } catch (e) {
+                    console.log(`   ❌ URL unreachable: ${targetUrl}`);
+                    return { index: idx, result: { success: false, url: targetUrl, error: 'URL unreachable' } };
                 }
-            };
 
-        } catch (error) {
-            console.error(`   ❌ Task failed for ${targetUrl}: ${error.message}`);
-            return { index: idx, result: { success: false, url: targetUrl, error: error.message } };
-        }
-    }));
+                // B. Use Scraper Service (Handles Browser Pool Internally)
+                // This isolates every URL. If one hangs, only that one fails.
+                const detectionResult = await AdobeScraperService.detectAdobeTargetPresence(targetUrl);
 
-    // 3. Wait for results
-    const settled = await Promise.allSettled(tasks);
-    
-    const results = settled.map((res, idx) => {
-        if (res.status === 'fulfilled') return res.value;
-        return { index: idx, result: { success: false, url: urls[idx]?.url || 'UNKNOWN', error: 'Task failed' } };
-    });
+                // Check for errors
+                if (detectionResult.detectionSource?.error) {
+                    return {
+                        index: idx,
+                        result: {
+                            success: false,
+                            url: targetUrl,
+                            error: detectionResult.detectionSource.error
+                        }
+                    };
+                }
 
-    results.sort((a, b) => a.index - b.index);
-    
-    console.log('\n' + '═'.repeat(70));
-    console.log(`✅ Chunk complete: ${results.length} URLs processed`);
-    
-    return results.map(r => r.result);
-  }
+                // C. Success
+                console.log('   ✅ Validation complete');
+                return {
+                    index: idx,
+                    result: {
+                        success: true,
+                        url: targetUrl,
+                        companyName: normalizedEntry.companyName,
+                        adobeTargetData: {
+                            detected: detectionResult.detected,
+                            version: detectionResult.version,
+                            hasMboxCookie: detectionResult.hasMboxCookie,
+                            hasAdobeScript: detectionResult.hasAdobeScript,
+                            captchaDetected: detectionResult.captchaDetected,
+                            captchaStatus: detectionResult.captchaStatus,
+                            detectionSource: detectionResult.detectionSource,
+                            activityIds: [],
+                            activityNames: [],
+                            experiments: [],
+                            experimentCount: 0,
+                            activeCount: 0
+                        }
+                    }
+                };
+
+            } catch (error) {
+                console.error(`   ❌ Task failed for ${targetUrl}: ${error.message}`);
+                return { index: idx, result: { success: false, url: targetUrl, error: error.message } };
+            }
+        }));
+
+        // 3. Wait for results
+        const settled = await Promise.allSettled(tasks);
+
+        const results = settled.map((res, idx) => {
+            if (res.status === 'fulfilled') return res.value;
+            return { index: idx, result: { success: false, url: urls[idx]?.url || 'UNKNOWN', error: 'Task failed' } };
+        });
+
+        results.sort((a, b) => a.index - b.index);
+
+        console.log('\n' + '═'.repeat(70));
+        console.log(`✅ Chunk complete: ${results.length} URLs processed`);
+
+        return results.map(r => r.result);
+    }
     // Helper: Build record
     buildValidationRecord({ url, companyName, status, adobeTargetData = {}, error = null }) {
         const activityIds = adobeTargetData.activityIds || [];
