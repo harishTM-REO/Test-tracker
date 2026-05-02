@@ -317,7 +317,7 @@ class AdobeTarget1_0Service {
                         });
 
                     } catch (error) {
-                        console.error(`  ❌ Error processing URL ${globalIndex + 1}:`, error);
+                        console.error(`  ❌ Error processing URL ${globalIndex + 1}: ${error.message}`);
 
                         // Create failure workflow result entry
                         const failureResult = {
@@ -633,7 +633,7 @@ class AdobeTarget1_0Service {
                         processedCompanies++;
 
                     } catch (error) {
-                        console.error(`   ❌ Error re-scraping company ${originalUrl}:`, error);
+                        console.error(`   ❌ Error re-scraping company ${originalUrl}: ${error.message}`);
 
                         // Save failed result
                         await this.saveUrlResult({
@@ -1008,7 +1008,7 @@ class AdobeTarget1_0Service {
             return result;
 
         } catch (error) {
-            console.error(`    ❌ Prioritization failed for ${url}:`, error);
+            console.error(`    ❌ Prioritization failed for ${url}:`, error.message);
 
             // ✅ CLEANUP: Additional cleanup of any remaining resources
             try {
@@ -1121,7 +1121,7 @@ class AdobeTarget1_0Service {
             }
 
         } catch (error) {
-            console.error(`    ❌ Categorization failed:`, error);
+            console.error(`    ❌ Categorization failed:`, error.message);
             return {
                 originalUrl: prioritizationResult.originalUrl,
                 categorizationSuccess: false,
@@ -1214,18 +1214,15 @@ class AdobeTarget1_0Service {
                                 scrapedAt: new Date()
                             };
                         })
-                        .catch(error => {
-                            console.error(`      ❌ Error scraping ${urlItem.url}:`, error);
-                            return {
-                                url: urlItem.url,
-                                category: urlItem.category,
-                                priority: urlItem.priority,
-                                success: false,
-                                adobeTargetDetected: false,
-                                error: error.message,
-                                scrapedAt: new Date()
-                            };
-                        })
+                        .catch(error => ({
+                            url: urlItem.url,
+                            category: urlItem.category,
+                            priority: urlItem.priority,
+                            success: false,
+                            adobeTargetDetected: false,
+                            error: error.message,
+                            scrapedAt: new Date()
+                        }))
                 );
 
                 const batchResults = await Promise.all(batchPromises);
@@ -1325,7 +1322,7 @@ class AdobeTarget1_0Service {
             console.log(`       Total Activity IDs (all): ${summary.allActivityCount}`);
 
         } catch (error) {
-            console.error(`    ❌ Error during scraping:`, error);
+            console.error(`    ❌ Error during scraping:`, error.message);
         }
 
         return { results, summary };
