@@ -45,7 +45,7 @@
 
       <!-- Dataset Info -->
       <div class="dataset-info">
-        <h2>Dataset Information</h2>
+        <h2>Dataset Information v2</h2>
         <div class="info-grid">
           <div class="info-item">
             <span class="label">File Name:</span>
@@ -63,15 +63,19 @@
       </div>
 
       <!-- Re-scrape Section (Adobe Target 1.0 only) -->
-      <div v-if="dataset.toolType === 'Adobe Target 1.0' && (adobeResults || dataset.scrapingStatus === 'completed' || dataset.scrapingStatus === 'failed' || rescrapingInProgress)" class="rescrape-section">
+      <div
+        v-if="dataset.toolType === 'Adobe Target 1.0' && (adobeResults || dataset.scrapingStatus === 'completed' || dataset.scrapingStatus === 'failed' || rescrapingInProgress)"
+        class="rescrape-section">
         <div class="section-header">
           <h2>🔄 Re-scrape Experiments</h2>
-          <div v-if="rescrapingInProgress || dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'" class="active-rescraping-badge">
+          <div
+            v-if="rescrapingInProgress || dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'"
+            class="active-rescraping-badge">
             <span class="pulse-icon"></span>
             Re-scraping in progress
           </div>
         </div>
-        
+
         <div class="rescrape-info">
           <p class="info-text">
             Re-scrape experiments from the same top 25 URLs to detect changes over time.
@@ -101,32 +105,24 @@
         </div>
 
         <div class="rescrape-actions">
-          <button 
-            @click="rescrapeExperiments" 
-            class="rescrape-btn"
-            :disabled="rescrapingInProgress || dataset.scrapingStatus === 'in_progress' || dataset.scrapingStatus === 'pending'"
-          >
+          <button @click="rescrapeExperiments" class="rescrape-btn"
+            :disabled="rescrapingInProgress || dataset.scrapingStatus === 'in_progress' || dataset.scrapingStatus === 'pending'">
             <span v-if="rescrapingInProgress">⏳ Re-scraping in progress...</span>
             <span v-else-if="dataset.scrapingStatus === 'in_progress'">🔄 Scraping in progress...</span>
             <span v-else-if="dataset.scrapingStatus === 'pending'">⏳ Pending...</span>
             <span v-else>🔄 Re-scrape Experiments</span>
           </button>
-          
-          <button 
-            v-if="adobeResults && adobeResults.runs && adobeResults.runs.length > 1"
-            @click="viewRunHistory" 
-            class="history-btn"
-          >
+
+          <button v-if="adobeResults && adobeResults.runs && adobeResults.runs.length > 1" @click="viewRunHistory"
+            class="history-btn">
             📜 View Run History ({{ adobeResults.runs.length }} runs)
           </button>
 
           <!-- Emergency Reset Button -->
-          <button 
+          <button
             v-if="rescrapingInProgress || dataset.scrapingStatus === 'pending' || dataset.scrapingStatus === 'in_progress'"
-            @click="resetScrapingStatus" 
-            class="reset-status-btn"
-            title="Use this if re-scraping gets stuck for a long time"
-          >
+            @click="resetScrapingStatus" class="reset-status-btn"
+            title="Use this if re-scraping gets stuck for a long time">
             ⚠️ Reset Status
           </button>
         </div>
@@ -150,15 +146,11 @@
             <h3>📜 Scraping Run History</h3>
             <button @click="showRunHistory = false" class="close-btn">✕</button>
           </div>
-          
+
           <div class="modal-body">
             <div v-if="adobeResults && adobeResults.runs" class="runs-timeline">
-              <div 
-                v-for="(run, index) in sortedRuns" 
-                :key="run.runNumber"
-                class="run-item"
-                :class="{ 'latest': index === 0 }"
-              >
+              <div v-for="(run, index) in sortedRuns" :key="run.runNumber" class="run-item"
+                :class="{ 'latest': index === 0 }">
                 <div class="run-header">
                   <div class="run-title">
                     <span class="run-number">Run #{{ run.runNumber }}</span>
@@ -168,7 +160,7 @@
                   </div>
                   <span class="run-date">{{ formatDate(run.completedAt) }}</span>
                 </div>
-                
+
                 <div class="run-stats">
                   <div class="run-stat">
                     <span class="label">Experiments:</span>
@@ -184,7 +176,9 @@
                   </div>
                 </div>
 
-                <div v-if="run.changes && (run.changes.newExperiments.length > 0 || run.changes.removedExperiments.length > 0)" class="run-changes">
+                <div
+                  v-if="run.changes && (run.changes.newExperiments.length > 0 || run.changes.removedExperiments.length > 0)"
+                  class="run-changes">
                   <span class="changes-label">Changes:</span>
                   <span v-if="run.changes.newExperiments.length > 0" class="change-badge new">
                     +{{ run.changes.newExperiments.length }} new
@@ -198,11 +192,8 @@
                   <button @click="viewRunDetails(run.runNumber)" class="action-btn">
                     👁️ View Details
                   </button>
-                  <button 
-                    v-if="index > 0" 
-                    @click="compareRuns(run.runNumber, sortedRuns[index - 1].runNumber)" 
-                    class="action-btn"
-                  >
+                  <button v-if="index > 0" @click="compareRuns(run.runNumber, sortedRuns[index - 1].runNumber)"
+                    class="action-btn">
                     📊 Compare with Previous
                   </button>
                 </div>
@@ -217,18 +208,13 @@
         <div class="section-header">
           <h2>Change Detection</h2>
           <div class="change-detection-actions">
-            <button 
-              @click="viewChangeHistory" 
-              class="history-btn"
-              :disabled="!dataset.changeDetectionStats || dataset.changeDetectionStats.totalVersions === 0"
-            >
-              📊 View History ({{ dataset.changeDetectionStats ? dataset.changeDetectionStats.totalVersions : 0 }} versions)
+            <button @click="viewChangeHistory" class="history-btn"
+              :disabled="!dataset.changeDetectionStats || dataset.changeDetectionStats.totalVersions === 0">
+              📊 View History ({{ dataset.changeDetectionStats ? dataset.changeDetectionStats.totalVersions : 0 }}
+              versions)
             </button>
-            <button 
-              @click="triggerChangeDetection" 
-              class="trigger-btn"
-              :disabled="changeDetectionLoading || changeDetectionStatus === 'in_progress' || changeDetectionStatus === 'pending'"
-            >
+            <button @click="triggerChangeDetection" class="trigger-btn"
+              :disabled="changeDetectionLoading || changeDetectionStatus === 'in_progress' || changeDetectionStatus === 'pending'">
               <span v-if="changeDetectionLoading">⏳ Starting...</span>
               <span v-else-if="changeDetectionStatus === 'in_progress'">🔄 Running...</span>
               <span v-else-if="changeDetectionStatus === 'pending'">⏳ Pending...</span>
@@ -245,7 +231,8 @@
                 {{ formatChangeDetectionStatus(changeDetectionStatus) }}
               </span>
             </div>
-            <div v-if="dataset.changeDetectionStats && dataset.changeDetectionStats.lastVersionNumber" class="status-item">
+            <div v-if="dataset.changeDetectionStats && dataset.changeDetectionStats.lastVersionNumber"
+              class="status-item">
               <span class="status-label">Latest Version:</span>
               <span class="status-value">v{{ dataset.changeDetectionStats.lastVersionNumber }}</span>
             </div>
@@ -253,7 +240,8 @@
               <span class="status-label">Last Run:</span>
               <span class="status-value">{{ formatDate(dataset.lastChangeDetectionRun) }}</span>
             </div>
-            <div v-if="dataset.changeDetectionStats && dataset.changeDetectionStats.totalChangesDetected" class="status-item">
+            <div v-if="dataset.changeDetectionStats && dataset.changeDetectionStats.totalChangesDetected"
+              class="status-item">
               <span class="status-label">Total Changes:</span>
               <span class="status-value">{{ dataset.changeDetectionStats.totalChangesDetected }}</span>
             </div>
@@ -297,22 +285,13 @@
 
       <!-- Navigation Tabs -->
       <div class="navigation-tabs">
-        <button
-          @click="activeTab = 'companies'"
-          :class="['tab-btn', { active: activeTab === 'companies' }]"
-        >
+        <button @click="activeTab = 'companies'" :class="['tab-btn', { active: activeTab === 'companies' }]">
           🏢 Companies & Domains
         </button>
-        <button
-          @click="activeTab = 'pages'"
-          :class="['tab-btn', { active: activeTab === 'pages' }]"
-        >
+        <button @click="activeTab = 'pages'" :class="['tab-btn', { active: activeTab === 'pages' }]">
           🕷️ Crawled Pages (Phase 1)
         </button>
-        <button
-          @click="activeTab = 'experiments'"
-          :class="['tab-btn', { active: activeTab === 'experiments' }]"
-        >
+        <button @click="activeTab = 'experiments'" :class="['tab-btn', { active: activeTab === 'experiments' }]">
           🎯 Experiments (Phase 2)
         </button>
       </div>
@@ -327,7 +306,7 @@
         <div v-if="!dataset.companies || dataset.companies.length === 0" class="no-companies">
           <p>No companies with domains found in this dataset.</p>
           <p class="help-text">
-            Make sure your dataset has columns with names like "company", "name", "url", "website", or "link" 
+            Make sure your dataset has columns with names like "company", "name", "url", "website", or "link"
             to automatically extract company information.
           </p>
         </div>
@@ -337,7 +316,8 @@
             <div class="company-header">
               <h4>{{ company.companyName }}</h4>
               <div v-if="company.optimizely" class="optimizely-badge-container">
-                <span :class="['optimizely-badge', company.optimizely.hasOptimizely ? 'has-optimizely' : 'no-optimizely']">
+                <span
+                  :class="['optimizely-badge', company.optimizely.hasOptimizely ? 'has-optimizely' : 'no-optimizely']">
                   {{ company.optimizely.hasOptimizely ? '✓ Optimizely' : '✗ No Optimizely' }}
                 </span>
               </div>
@@ -349,7 +329,7 @@
               <div class="domain-info">
                 <span class="domain">{{ extractDomain(company.companyURL) }}</span>
               </div>
-              
+
               <!-- Optimizely Details -->
               <div v-if="company.optimizely && company.optimizely.hasOptimizely" class="optimizely-details">
                 <div class="optimizely-stats">
@@ -366,14 +346,17 @@
                     <span class="stat-value">{{ company.optimizely.cookieType }}</span>
                   </div>
                 </div>
-                
+
                 <!-- Experiments List -->
-                <div v-if="company.optimizely.experiments && company.optimizely.experiments.length > 0" class="experiments-list">
+                <div v-if="company.optimizely.experiments && company.optimizely.experiments.length > 0"
+                  class="experiments-list">
                   <h5>Experiments:</h5>
                   <div class="experiments-container">
-                    <div v-for="experiment in company.optimizely.experiments.slice(0, 3)" :key="experiment.id" class="experiment-item">
+                    <div v-for="experiment in company.optimizely.experiments.slice(0, 3)" :key="experiment.id"
+                      class="experiment-item">
                       <span class="experiment-name">{{ experiment.name || 'Unnamed' }}</span>
-                      <span :class="['experiment-status', experiment.status?.toLowerCase()]">{{ experiment.status || 'Unknown' }}</span>
+                      <span :class="['experiment-status', experiment.status?.toLowerCase()]">{{ experiment.status ||
+                        'Unknown' }}</span>
                     </div>
                     <div v-if="company.optimizely.experiments.length > 3" class="more-experiments">
                       +{{ company.optimizely.experiments.length - 3 }} more experiments
@@ -388,18 +371,12 @@
 
       <!-- Crawled Pages Tab -->
       <div v-show="activeTab === 'pages'" class="crawled-pages-section">
-        <CrawledPages
-          :datasetId="datasetId"
-          @message="handleMessage"
-        />
+        <CrawledPages :datasetId="datasetId" @message="handleMessage" />
       </div>
 
       <!-- Experiments Tab (Phase 2) -->
       <div v-show="activeTab === 'experiments'" class="experiments-section">
-        <ExperimentsList
-          :datasetId="datasetId"
-          @message="handleMessage"
-        />
+        <ExperimentsList :datasetId="datasetId" @message="handleMessage" />
       </div>
     </div>
   </div>
@@ -425,14 +402,15 @@ export default {
       changeDetectionError: null,
       latestVersionSummary: null,
       statusPollingInterval: null,
-      apiBaseUrl:import.meta.env.VITE_APP_TITLE_BACKEND_URL,
+      apiBaseUrl: import.meta.env.VITE_APP_TITLE_BACKEND_URL,
       activeTab: 'companies', // Default tab
       // Re-scrape related
       rescrapingInProgress: false,
       rescrapeError: null,
       adobeResults: null,
       latestRun: null,
-      showRunHistory: false
+      showRunHistory: false,
+      rescrapePollingInterval: null
     }
   },
 
@@ -442,7 +420,7 @@ export default {
       return [...this.adobeResults.runs].reverse(); // Latest first
     }
   },
-  
+
   created() {
     this.datasetId = this.$route.params.id
     if (this.datasetId) {
@@ -456,30 +434,33 @@ export default {
     if (this.statusPollingInterval) {
       clearInterval(this.statusPollingInterval)
     }
+    if (this.rescrapePollingInterval) {
+      clearInterval(this.rescrapePollingInterval)
+    }
   },
-  
+
   watch: {
     '$route.params.id'(newId) {
       this.datasetId = newId
       this.fetchDataset()
     }
   },
-  
+
   methods: {
     async fetchDataset() {
       this.loading = true
       this.error = null
-      
+
       try {
         const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}`)
         const data = await response.json()
-        
+
         if (data.success) {
           this.dataset = data.data
           // Initialize change detection status
           this.changeDetectionStatus = data.data.changeDetectionStatus || 'not_started'
           this.changeDetectionError = data.data.changeDetectionError
-          
+
           // Fetch change detection status and latest version summary
           if (data.data.scrapingStatus === 'completed') {
             await this.fetchChangeDetectionStatus()
@@ -489,7 +470,7 @@ export default {
           // Fetch Adobe Target 1.0 results if applicable
           if (data.data.toolType === 'Adobe Target 1.0') {
             await this.fetchAdobeResults()
-            
+
             // Check if re-scrape was already in progress when page loaded
             if (data.data.scrapingStatus === 'pending' || data.data.scrapingStatus === 'in_progress') {
               console.log('🔄 Active re-scrape detected on page load, starting polling...')
@@ -511,11 +492,11 @@ export default {
       try {
         const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}/change-detection-status`)
         const data = await response.json()
-        
+
         if (data.success) {
           this.changeDetectionStatus = data.data.status
           this.changeDetectionError = data.data.error
-          
+
           // Start polling if change detection is running
           if (data.data.status === 'in_progress' || data.data.status === 'pending') {
             this.startStatusPolling()
@@ -530,7 +511,7 @@ export default {
       try {
         const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}/change-history?limit=1`)
         const data = await response.json()
-        
+
         if (data.success && data.data.versions && data.data.versions.length > 0) {
           const latestVersion = data.data.versions[0]
           this.latestVersionSummary = {
@@ -553,7 +534,7 @@ export default {
     async triggerChangeDetection() {
       this.changeDetectionLoading = true
       this.changeDetectionError = null
-      
+
       try {
         const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}/run-change-detection`, {
           method: 'POST',
@@ -561,9 +542,9 @@ export default {
             'Content-Type': 'application/json'
           }
         })
-        
+
         const data = await response.json()
-        
+
         if (data.success) {
           this.changeDetectionStatus = 'pending'
           this.startStatusPolling()
@@ -594,15 +575,15 @@ export default {
       if (this.statusPollingInterval) {
         clearInterval(this.statusPollingInterval)
       }
-      
+
       this.statusPollingInterval = setInterval(async () => {
         await this.fetchChangeDetectionStatus()
-        
+
         // Stop polling when completed or failed
         if (this.changeDetectionStatus === 'completed' || this.changeDetectionStatus === 'failed') {
           clearInterval(this.statusPollingInterval)
           this.statusPollingInterval = null
-          
+
           if (this.changeDetectionStatus === 'completed') {
             // Refresh dataset and fetch latest version summary
             await this.fetchDataset()
@@ -629,17 +610,17 @@ export default {
       }
       return statusMap[status] || status
     },
-    
+
     goBack() {
       this.$router.push('/datasets')
     },
-    
+
     formatDate(dateString) {
       if (!dateString) return 'Unknown'
       const date = new Date(dateString)
       return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     },
-    
+
     formatFileSize(bytes) {
       if (!bytes) return 'N/A'
       if (bytes === 0) return '0 Bytes'
@@ -648,7 +629,7 @@ export default {
       const i = Math.floor(Math.log(bytes) / Math.log(k))
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
     },
-    
+
     extractDomain(url) {
       try {
         const domain = new URL(url).hostname
@@ -669,10 +650,10 @@ export default {
       try {
         const response = await fetch(`${this.apiBaseUrl}/at10/api/results/dataset/${this.datasetId}`)
         const data = await response.json()
-        
+
         if (data.success && data.data && data.data.length > 0) {
           this.adobeResults = data.data[0]
-          this.latestRun = this.adobeResults.runs && this.adobeResults.runs.length > 0 
+          this.latestRun = this.adobeResults.runs && this.adobeResults.runs.length > 0
             ? this.adobeResults.runs[this.adobeResults.runs.length - 1]
             : null
         }
@@ -685,7 +666,7 @@ export default {
       try {
         this.rescrapingInProgress = true
         this.rescrapeError = null
-        
+
         const response = await fetch(
           `${this.apiBaseUrl}/api/datasets/${this.datasetId}/rescrape-experiments`,
           {
@@ -694,9 +675,9 @@ export default {
             body: JSON.stringify({ userId: 'user123' }) // Replace with actual user ID if available
           }
         )
-        
+
         const data = await response.json()
-        
+
         if (data.success) {
           alert(`✅ Re-scraping initiated! Job ID: ${data.data.jobId}\n\nThis will take several minutes. The page will update when complete.`)
           // Poll for status updates
@@ -727,9 +708,9 @@ export default {
             }
           }
         )
-        
+
         const data = await response.json()
-        
+
         if (data.success) {
           // Force reset local state
           if (this.dataset) {
@@ -737,7 +718,7 @@ export default {
           }
           this.rescrapingInProgress = false
           this.rescrapeError = null
-          
+
           // Re-fetch dataset to be sure
           await this.fetchDataset()
           alert('✅ Status reset successfully. The dataset is now available for re-scraping.')
@@ -751,26 +732,29 @@ export default {
     },
 
     async pollForRescapeUpdates() {
-      const pollInterval = setInterval(async () => {
+      if (this.rescrapePollingInterval) {
+        clearInterval(this.rescrapePollingInterval);
+      }
+      this.rescrapePollingInterval = setInterval(async () => {
         try {
           // Fetch dataset status
           const response = await fetch(`${this.apiBaseUrl}/api/datasets/${this.datasetId}`)
           const data = await response.json()
-          
+
           if (data.success) {
             this.dataset = data.data
-            
+
             // Check if completed
             if (data.data.scrapingStatus === 'completed') {
-              clearInterval(pollInterval)
+              clearInterval(this.rescrapePollingInterval)
               this.rescrapingInProgress = false
-              
+
               // Reload Adobe results
               await this.fetchAdobeResults()
-              
+
               alert('✅ Re-scraping completed successfully!')
             } else if (data.data.scrapingStatus === 'failed') {
-              clearInterval(pollInterval)
+              clearInterval(this.rescrapePollingInterval)
               this.rescrapingInProgress = false
               this.rescrapeError = data.data.scrapingError || 'Re-scraping failed'
               alert('❌ Re-scraping failed')
@@ -780,13 +764,15 @@ export default {
           console.error('Error polling for updates:', error)
         }
       }, 5000) // Poll every 5 seconds
-      
+
       // Stop polling after 30 minutes
       setTimeout(() => {
-        clearInterval(pollInterval)
-        if (this.rescrapingInProgress) {
-          this.rescrapingInProgress = false
-          alert('⏰ Polling timeout. Please refresh the page to check the status.')
+        if (this.rescrapePollingInterval) {
+          clearInterval(this.rescrapePollingInterval)
+          if (this.rescrapingInProgress) {
+            this.rescrapingInProgress = false
+            alert('⏰ Polling timeout. Please refresh the page to check the status.')
+          }
         }
       }, 30 * 60 * 1000)
     },
@@ -817,7 +803,8 @@ export default {
   padding: 20px;
 }
 
-.loading, .error {
+.loading,
+.error {
   text-align: center;
   padding: 40px;
   color: #666;
@@ -889,7 +876,7 @@ export default {
   padding: 25px;
   border-radius: 12px;
   text-align: center;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .stat-card .stat-number {
@@ -911,7 +898,7 @@ export default {
   border-radius: 12px;
   padding: 25px;
   margin-bottom: 30px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .dataset-info h2 {
@@ -949,7 +936,7 @@ export default {
   border-radius: 12px;
   padding: 25px;
   margin-bottom: 30px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .rescrape-section h2 {
@@ -967,7 +954,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .pulse-icon {
@@ -983,16 +970,18 @@ export default {
   0% {
     box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7);
   }
+
   70% {
     box-shadow: 0 0 0 10px rgba(255, 255, 255, 0);
   }
+
   100% {
     box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
   }
 }
 
 .rescrape-info {
-  background: rgba(255,255,255,0.15);
+  background: rgba(255, 255, 255, 0.15);
   padding: 15px;
   border-radius: 8px;
   margin-bottom: 20px;
@@ -1005,7 +994,7 @@ export default {
 }
 
 .rescrape-stats {
-  background: rgba(255,255,255,0.1);
+  background: rgba(255, 255, 255, 0.1);
   padding: 15px;
   border-radius: 8px;
   margin-bottom: 20px;
@@ -1053,7 +1042,7 @@ export default {
 
 .rescrape-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 }
 
 .rescrape-btn:disabled {
@@ -1062,9 +1051,9 @@ export default {
 }
 
 .rescrape-section .history-btn {
-  background: rgba(255,255,255,0.2);
+  background: rgba(255, 255, 255, 0.2);
   color: white;
-  border: 1px solid rgba(255,255,255,0.3);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   padding: 10px 16px;
   border-radius: 6px;
   cursor: pointer;
@@ -1074,7 +1063,7 @@ export default {
 }
 
 .rescrape-section .history-btn:hover {
-  background: rgba(255,255,255,0.3);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .reset-status-btn {
@@ -1093,7 +1082,7 @@ export default {
 .reset-status-btn:hover {
   background: #ff6b81;
   transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 }
 
 .progress-indicator {
@@ -1103,7 +1092,7 @@ export default {
 .progress-bar {
   width: 100%;
   height: 6px;
-  background: rgba(255,255,255,0.2);
+  background: rgba(255, 255, 255, 0.2);
   border-radius: 3px;
   overflow: hidden;
   margin-bottom: 10px;
@@ -1116,9 +1105,17 @@ export default {
 }
 
 @keyframes progress {
-  0% { width: 0%; }
-  50% { width: 70%; }
-  100% { width: 0%; }
+  0% {
+    width: 0%;
+  }
+
+  50% {
+    width: 70%;
+  }
+
+  100% {
+    width: 0%;
+  }
 }
 
 .progress-text {
@@ -1134,7 +1131,7 @@ export default {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0,0,0,0.7);
+  background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1209,7 +1206,7 @@ export default {
 
 .run-item:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 .run-header {
@@ -1306,7 +1303,7 @@ export default {
   align-items: center;
   margin-bottom: 15px;
   padding: 10px;
-  background: rgba(255,255,255,0.5);
+  background: rgba(255, 255, 255, 0.5);
   border-radius: 6px;
 }
 
@@ -1361,7 +1358,7 @@ export default {
   border-radius: 12px;
   padding: 25px;
   margin-bottom: 30px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .change-detection-actions {
@@ -1561,7 +1558,7 @@ export default {
   border: 1px solid #eee;
   border-radius: 12px;
   padding: 25px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .section-header {
@@ -1612,7 +1609,7 @@ export default {
 }
 
 .company-card:hover {
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   transform: translateY(-2px);
 }
 
@@ -1788,15 +1785,15 @@ export default {
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .companies-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .info-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .section-header {
     flex-direction: column;
     align-items: flex-start;
@@ -1876,7 +1873,7 @@ export default {
   border: 1px solid #eee;
   border-radius: 12px;
   padding: 25px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .experiments-section {
@@ -1884,6 +1881,6 @@ export default {
   border: 1px solid #eee;
   border-radius: 12px;
   padding: 25px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 </style>
