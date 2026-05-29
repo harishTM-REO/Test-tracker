@@ -194,6 +194,14 @@ const registerSanitizationWorker = (jobQueue) => {
       console.log(`   Original: ${urls.length} URLs`);
       console.log(`   Cleaned: ${cleanedUrls.length} URLs`);
       console.log(`   Removed: ${removedUrls.length} URLs`);
+      console.log(`🔍 [DIAGNOSTIC - ISSUE 2] Sanitization Removal Breakdown:`);
+      console.log(`   - Duplicates Removed: ${dupList.length}`);
+      console.log(`   - Invalid Formats Removed: ${invalidUrls.length}`);
+      console.log(`   - DNS Resolution Failures: ${dnsFailures.length}`);
+      console.log(`   - HTTP Reachability Failures: ${httpFailures.length}`);
+      if (cleanedUrls.length === 0) {
+        console.warn(`⚠️ [DIAGNOSTIC WARNING] ZERO URLs remained after sanitization! Scraping will finish instantly with no results.`);
+      }
 
       const sanitizationReport = {
         originalCount: urls.length,

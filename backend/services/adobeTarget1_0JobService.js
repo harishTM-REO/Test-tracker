@@ -102,7 +102,12 @@ class AdobeTarget1_0JobService {
       };
 
     } catch (error) {
-      console.error(`❌ Failed to start AT 1.0 scraping:`, error.message);
+      console.error(`❌ [DIAGNOSTIC - ISSUE 3] Failed to connect to AT 1.0 worker at: ${workerServiceUrl}`);
+      console.error(`   Error details:`, error.message);
+
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        console.error(`   ⚠️  DIAGNOSIS: Worker service is offline or hostname is unresolved. Verify process.env.WORKER_AT10_URL configuration.`);
+      }
 
       // Log detailed error for debugging
       if (error.response) {

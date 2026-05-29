@@ -176,7 +176,7 @@ const datasetController = {
         .sort(sort)
         .limit(limit * 1)
         .skip((page - 1) * limit)
-        .select('_id name description originalFileName version fileType createdAt totalRows scrapingStatus scrapingStats toolType adobeTargetValidation optimizelyValidation abTastyValidation dynamicYieldValidation vwoValidation')
+        .select('_id name description originalFileName version fileType createdAt scrapingCompletedAt totalRows scrapingStatus scrapingStats toolType adobeTargetValidation optimizelyValidation abTastyValidation dynamicYieldValidation vwoValidation')
         .lean();
       const findDuration = Date.now() - findStartTime;
 
@@ -933,7 +933,7 @@ const datasetController = {
       // CRITICAL: Reduce payload for better performance on free MongoDB tier
       const datasets = await Dataset.find(query)
         .limit(limit)
-        .select('_id name version fileType createdAt totalRows')
+        .select('_id name version fileType createdAt scrapingCompletedAt totalRows')
         .sort({ score: { $meta: 'textScore' } })
         .lean();
 
