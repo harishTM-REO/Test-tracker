@@ -378,6 +378,7 @@ class AdobeTarget1_0Service {
                     dataset.scrapingStats = {
                         totalUrls: urls.length,
                         processedUrls: result.overallStats.totalTop25UrlsProcessed,
+                        processedCompanies: result.overallStats.successfulPrioritizations + result.overallStats.failedPrioritizations,
                         successfulScans: result.overallStats.totalTop25UrlsSuccessful,
                         failedScans: result.overallStats.totalTop25UrlsFailed,
                         adobeTargetDetected: result.overallStats.adobeTargetDetectedCount,
@@ -418,6 +419,7 @@ class AdobeTarget1_0Service {
                 await dataset.completeScraping({
                     totalUrls: urls.length,
                     processedUrls: result.overallStats.totalTop25UrlsProcessed,
+                    processedCompanies: result.overallStats.successfulPrioritizations + result.overallStats.failedPrioritizations,
                     successfulScans: result.overallStats.totalTop25UrlsSuccessful,
                     failedScans: result.overallStats.totalTop25UrlsFailed,
                     adobeTargetDetected: result.overallStats.adobeTargetDetectedCount,
@@ -705,6 +707,7 @@ class AdobeTarget1_0Service {
                 dataset.scrapingStats = {
                     totalUrls: urlsToRescrape.length,
                     processedUrls: rescrapeStats.totalTop25UrlsProcessed,
+                    processedCompanies: processedCompanies,
                     successfulScans: rescrapeStats.totalTop25UrlsSuccessful,
                     failedScans: rescrapeStats.totalTop25UrlsFailed,
                     adobeTargetDetected: rescrapeStats.adobeTargetDetectedCount,

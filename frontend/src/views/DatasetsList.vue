@@ -79,7 +79,7 @@
             
             <div v-if="dataset.scrapingStatus === 'in_progress' || dataset.scrapingStatus === 'pending'" class="stat-row">
               <span class="stat-label">Companies Scraped:</span>
-              <span class="stat-value">{{ dataset.scrapingStats?.processedUrls || 0 }} / {{ dataset.companies ? dataset.companies.length : (dataset.companyCount || dataset.totalRows || 0) }}</span>
+              <span class="stat-value">{{ dataset.scrapingStats?.processedCompanies !== undefined ? dataset.scrapingStats.processedCompanies : (dataset.scrapingStats?.processedUrls || 0) }} / {{ dataset.companies ? dataset.companies.length : (dataset.companyCount || dataset.totalRows || 0) }}</span>
             </div>
             
             <div v-if="dataset.scrapingStatus === 'completed' && dataset.scrapingStats && !isValidationDataset(dataset)" class="stat-row">
