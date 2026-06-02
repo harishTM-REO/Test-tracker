@@ -34,7 +34,7 @@ const upload = multer({
       'text/csv', // .csv
       'application/csv'
     ];
-    
+
     if (allowedMimeTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
@@ -47,7 +47,7 @@ const upload = multer({
 function extractCompaniesFromSheets(sheets) {
   console.log('Extracting companies from sheets...');
   const companies = [];
-  
+
   try {
     if (!sheets || !Array.isArray(sheets)) {
       console.log('No sheets provided or invalid format');
@@ -56,13 +56,13 @@ function extractCompaniesFromSheets(sheets) {
 
     sheets.forEach((sheet, sheetIndex) => {
       console.log(`Processing sheet ${sheetIndex}: ${sheet.name}`);
-      
+
       if (sheet.columns && sheet.rows && sheet.columns.length >= 2) {
         // Find company name and URL columns
-        const nameColumnIndex = sheet.columns.findIndex(col => 
+        const nameColumnIndex = sheet.columns.findIndex(col =>
           col && (col.toLowerCase().includes('company') || col.toLowerCase().includes('name'))
         );
-        const urlColumnIndex = sheet.columns.findIndex(col => 
+        const urlColumnIndex = sheet.columns.findIndex(col =>
           col && (col.toLowerCase().includes('url') || col.toLowerCase().includes('website') || col.toLowerCase().includes('link'))
         );
 
@@ -74,17 +74,17 @@ function extractCompaniesFromSheets(sheets) {
             try {
               const companyName = row[nameColumnIndex];
               const companyURL = row[urlColumnIndex];
-              
-              if (companyName && companyURL && 
-                  typeof companyName === 'string' && 
-                  typeof companyURL === 'string' &&
-                  companyName.trim() && 
-                  companyURL.trim()) {
-                
+
+              if (companyName && companyURL &&
+                typeof companyName === 'string' &&
+                typeof companyURL === 'string' &&
+                companyName.trim() &&
+                companyURL.trim()) {
+
                 // Basic URL validation
                 const cleanURL = companyURL.trim();
                 const validURL = cleanURL.startsWith('http') ? cleanURL : `https://${cleanURL}`;
-                
+
                 companies.push({
                   companyName: companyName.trim(),
                   companyURL: validURL
@@ -99,7 +99,7 @@ function extractCompaniesFromSheets(sheets) {
     });
 
     // Remove duplicates based on company name
-    const uniqueCompanies = companies.filter((company, index, self) => 
+    const uniqueCompanies = companies.filter((company, index, self) =>
       index === self.findIndex(c => c.companyName.toLowerCase() === company.companyName.toLowerCase())
     );
 
@@ -129,7 +129,7 @@ function extractDomain(url) {
 
 // Controller object
 const datasetController = {
-  
+
   // GET /api/datasets
   getAllDatasets: async (req, res) => {
     const totalStartTime = Date.now();
@@ -189,15 +189,15 @@ const datasetController = {
 
       // DIAGNOSTIC: Log timing breakdown
       const totalUrlsScraped = datasets.reduce((sum, dataset) => sum + (dataset.scrapingStats?.processedUrls || dataset.scrapingStats?.successfulScans || 0), 0);
-      
-      console.log('\n📊 PERFORMANCE DIAGNOSTICS:');
-      console.log(`  Total request time: ${totalDuration}ms`);
-      console.log(`  Database find() query: ${findDuration}ms`);
-      console.log(`  Database count() query: ${countDuration}ms`);
-      console.log(`  Other processing: ${totalDuration - findDuration - countDuration}ms`);
-      console.log(`  Datasets returned: ${datasets.length}`);
-      console.log(`  Total URLs scraped (in returned datasets): ${totalUrlsScraped}`);
-      console.log(`  Total documents: ${total}\n`);
+
+      // console.log('\n📊 PERFORMANCE DIAGNOSTICS:');
+      // console.log(`  Total request time: ${totalDuration}ms`);
+      // console.log(`  Database find() query: ${findDuration}ms`);
+      // console.log(`  Database count() query: ${countDuration}ms`);
+      // console.log(`  Other processing: ${totalDuration - findDuration - countDuration}ms`);
+      // console.log(`  Datasets returned: ${datasets.length}`);
+      // console.log(`  Total URLs scraped (in returned datasets): ${totalUrlsScraped}`);
+      // console.log(`  Total documents: ${total}\n`);
 
       res.status(200).json({
         success: true,
@@ -244,8 +244,8 @@ const datasetController = {
         _id: id,
         isDeleted: false
       })
-      .select(selectFields)
-      .lean();
+        .select(selectFields)
+        .lean();
 
       if (!dataset) {
         return res.status(404).json({
@@ -555,7 +555,7 @@ const datasetController = {
 
       } catch (error) {
         console.error('Error in createDataset:', error);
-        
+
         // Clean up uploaded file on error
         if (req.file && fs.existsSync(req.file.path)) {
           fs.unlinkSync(req.file.path);
@@ -591,7 +591,7 @@ const datasetController = {
       const AdobeTarget1_0Result = require('../models/AdobeTarget1_0Result');
       const AdobeTarget1_0Document = require('../models/AdobeTarget1_0Document');
       const mongoose = require('mongoose');
-      
+
       // Use dataset._id which is a proper ObjectId to avoid casting issues
       const datasetObjectId = dataset._id;
 
@@ -602,11 +602,11 @@ const datasetController = {
       // Helper to add results from a workflow array
       const addWorkflowResults = (workflowArray, sourceLabel) => {
         if (!workflowArray || !Array.isArray(workflowArray)) return 0;
-        
+
         let count = 0;
         for (const urlWorkflow of workflowArray) {
           if (!urlWorkflow.originalUrl || originalUrlsFound.has(urlWorkflow.originalUrl)) continue;
-          
+
           const companyData = {
             originalUrl: urlWorkflow.originalUrl,
             top25Urls: []
@@ -634,7 +634,7 @@ const datasetController = {
       // Source 1: AdobeTarget1_0Document (All batches)
       const batchDocuments = await AdobeTarget1_0Document.find({ datasetId: datasetObjectId });
       console.log(`📦 Found ${batchDocuments.length} batch documents (AdobeTarget1_0Document)`);
-      
+
       batchDocuments.forEach((doc, idx) => {
         const count = addWorkflowResults(doc.urlWorkflowResults);
         if (count > 0) console.log(`   - Batch Doc #${idx + 1} (Batch ${doc.batchNumber}): Added ${count} companies`);
@@ -643,19 +643,19 @@ const datasetController = {
       // Source 2: AdobeTarget1_0Result (All batches, top-level results)
       const mainResults = await AdobeTarget1_0Result.find({ datasetId: datasetObjectId });
       console.log(`📦 Found ${mainResults.length} main result documents (AdobeTarget1_0Result)`);
-      
+
       mainResults.forEach((resDoc, idx) => {
         // Check top-level results
         const topLevelCount = addWorkflowResults(resDoc.urlWorkflowResults);
         if (topLevelCount > 0) console.log(`   - Main Result Doc #${idx + 1}: Added ${topLevelCount} companies from top-level`);
-        
+
         // Check results in runs array (if top-level was empty or for historical runs)
         if (resDoc.runs && resDoc.runs.length > 0) {
           // Check the latest run first
           const latestRun = resDoc.runs[resDoc.runs.length - 1];
           const runCount = addWorkflowResults(latestRun.urlWorkflowResults);
           if (runCount > 0) console.log(`   - Main Result Doc #${idx + 1} (Run #${latestRun.runNumber}): Added ${runCount} companies`);
-          
+
           // If still needed, check other runs (though unlikely to find new original URLs)
           if (originalUrlsFound.size < dataset.companyCount) {
             for (let i = resDoc.runs.length - 2; i >= 0; i--) {
@@ -671,7 +671,7 @@ const datasetController = {
         console.log('⚠️ No results found using ObjectId, attempting fallback search with string ID...');
         const stringBatchDocs = await AdobeTarget1_0Document.find({ datasetId: id });
         stringBatchDocs.forEach(doc => addWorkflowResults(doc.urlWorkflowResults));
-        
+
         const stringMainResults = await AdobeTarget1_0Result.find({ datasetId: id });
         stringMainResults.forEach(resDoc => {
           addWorkflowResults(resDoc.urlWorkflowResults);
@@ -697,10 +697,10 @@ const datasetController = {
 
       // 5. Call AT 1.0 Worker re-scrape endpoint
       const AdobeTarget1_0JobService = require('../services/adobeTarget1_0JobService');
-      
+
       // Ensure dataset name is not empty to avoid worker validation failure
       const datasetName = dataset.name || dataset.originalFileName || `Dataset-${id}`;
-      
+
       const result = await AdobeTarget1_0JobService.startRescraping(id, urlsToRescrape, userId);
 
       if (!result.success) {
@@ -753,10 +753,10 @@ const datasetController = {
       // Reset to completed state if it was already scraped once
       // or to not_started if it was never finished
       const previousStatus = dataset.scrapingStatus;
-      dataset.scrapingStatus = 'completed'; 
+      dataset.scrapingStatus = 'completed';
       dataset.scrapingError = null;
       dataset.scrapingLastUpdate = new Date();
-      
+
       await dataset.save();
 
       console.log(`✅ Status reset from ${previousStatus} to completed`);
@@ -800,10 +800,10 @@ const datasetController = {
         if (fs.existsSync(dataset.filePath)) {
           fs.unlinkSync(dataset.filePath);
         }
-        
+
         // Hard delete from database
         await Dataset.findByIdAndDelete(id);
-        
+
         res.status(200).json({
           success: true,
           message: 'Dataset permanently deleted'
@@ -811,7 +811,7 @@ const datasetController = {
       } else {
         // Soft delete
         await dataset.softDelete();
-        
+
         res.status(200).json({
           success: true,
           message: 'Dataset moved to trash'
@@ -834,9 +834,9 @@ const datasetController = {
     try {
       const { id } = req.params;
 
-      const dataset = await Dataset.findOne({ 
-        _id: id, 
-        isDeleted: false 
+      const dataset = await Dataset.findOne({
+        _id: id,
+        isDeleted: false
       }).select('filePath originalFileName name').lean();
 
       if (!dataset) {
@@ -860,7 +860,7 @@ const datasetController = {
       // Set headers and send file
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.setHeader('Content-Type', 'application/octet-stream');
-      
+
       const fileStream = fs.createReadStream(filePath);
       fileStream.pipe(res);
 
@@ -961,7 +961,7 @@ const datasetController = {
       const { id } = req.params;
 
       const status = await BackgroundScrapingService.getScrapingStatus(id);
-      
+
       if (!status) {
         return res.status(404).json({
           success: false,
@@ -1010,7 +1010,7 @@ const datasetController = {
 
       // Run versioned change detection (this now handles version creation internally)
       const result = await ExperimentChangeDetectionService.runVersionedChangeDetectionForDataset(id);
-      
+
       if (result.status === 'completed') {
         res.status(200).json({
           success: true,
@@ -1052,7 +1052,7 @@ const datasetController = {
       const BackgroundChangeDetectionService = require('../services/backgroundChangeDetectionService');
 
       const status = await BackgroundChangeDetectionService.getChangeDetectionStatus(id);
-      
+
       if (!status) {
         return res.status(404).json({
           success: false,
