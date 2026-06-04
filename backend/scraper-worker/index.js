@@ -44,12 +44,15 @@ const abTastyRoutes = require('./routes/abTastyWorkerRoutes');
 const dynamicYieldRoutes = require('./routes/dynamicYieldWorkerRoutes');
 const vwoRoutes = require('./routes/vwoWorkerRoutes');
 const kameleoonRoutes = require('./routes/kameleoonWorkerRoutes');
+const convertRoutes = require('./routes/convertWorkerRoutes');
 
 app.use('/worker/api/optimizely', optimizelyRoutes);
 app.use('/worker/api/abtasty', abTastyRoutes);
 app.use('/worker/api/dynamicyield', dynamicYieldRoutes);
 app.use('/worker/api/vwo', vwoRoutes);
 app.use('/worker/api/kameleoon', kameleoonRoutes);
+app.use('/worker/api/convert', convertRoutes);
+app.use('/api/convert', convertRoutes); // Added for backward compatibility with main backend URL
 
 // Worker health check
 app.get('/worker/health', (req, res) => {
@@ -71,6 +74,8 @@ app.listen(port, async () => {
   console.log(`  GET /worker/api/dynamicyield/scrape?url=<URL>`);
   console.log(`  GET /worker/api/vwo/scrape?url=<URL>`);
   console.log(`  GET /worker/api/kameleoon/scrape?url=<URL>`);
+  console.log(`  GET /worker/api/convert/scrape?url=<URL>`);
+  console.log(`  GET /api/convert/scrape?url=<URL>`);
   console.log(`  GET /worker/health`);
 
   // Initialize database connection
