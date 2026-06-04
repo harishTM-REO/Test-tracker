@@ -104,6 +104,8 @@ class ConvertScraperService {
       args: [
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
         '--no-zygote',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
