@@ -11,7 +11,7 @@
 node_modules/
 package-lock.json
 yarn.lock
-
+graphify-out
 # Environment variables
 .env
 .env.local
