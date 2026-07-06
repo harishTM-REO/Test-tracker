@@ -1209,11 +1209,10 @@ class AdobeTarget1_0Service {
                                 success: true,
                                 adobeTargetDetected: adobeTargetData.detected || false,
                                 experimentCount: adobeTargetData.experimentCount || 0,
-                                experiments: adobeTargetData.experiments || [],
                                 version: adobeTargetData.version,
-                                activityNames: adobeTargetData.activityNames || [],
-                                activityIds: adobeTargetData.activityIds || [],
-                                mboxData: adobeTargetData.mboxData,
+                                activityNames: Array.isArray(adobeTargetData.activityNames) ? adobeTargetData.activityNames.slice(0, 20) : [],
+                                activityIds: Array.isArray(adobeTargetData.activityIds) ? adobeTargetData.activityIds.slice(0, 20) : [],
+                                mboxData: null,
                                 scrapedAt: new Date()
                             };
                         })
@@ -1267,24 +1266,6 @@ class AdobeTarget1_0Service {
                                     }
                                 });
                             }
-
-                            // Collect experiment IDs from experiments array
-                            if (result.experiments && Array.isArray(result.experiments)) {
-                                result.experiments.forEach(exp => {
-                                    if (exp.experimentId) {
-                                        uniqueExperimentIdsSet.add(exp.experimentId);
-                                    }
-                                    // Also track activity ID from experiment
-                                    if (exp.activityId) {
-                                        uniqueActivityIdsSet.add(exp.activityId);
-                                        allActivityIdsList.push(exp.activityId);
-                                    }
-                                    // Track experiment name
-                                    if (exp.activityName) {
-                                        uniqueExperimentNamesSet.add(exp.activityName);
-                                    }
-                                });
-                            }
                         }
                     } else {
                         summary.failedScrapedUrls += 1;
@@ -1331,28 +1312,124 @@ class AdobeTarget1_0Service {
         return { results, summary };
     }
 
+    sanitizeSummaryForPersistence(summary = {}) {
+        return {
+            ...summary,
+            uniqueExperimentIds: Array.isArray(summary.uniqueExperimentIds) ? summary.uniqueExperimentIds.slice(0, 20) : [],
+            uniqueExperimentNames: Array.isArray(summary.uniqueExperimentNames) ? summary.uniqueExperimentNames.slice(0, 20) : [],
+            allActivityIds: Array.isArray(summary.allActivityIds) ? summary.allActivityIds.slice(0, 20) : [],
+            uniqueActivityIds: Array.isArray(summary.uniqueActivityIds) ? summary.uniqueActivityIds.slice(0, 20) : []
+        };
+    }
+
+    sanitizeTopUrlResultForPersistence(result = {}) {
+        return {
+            url: result.url,
+            category: result.category,
+            priority: result.priority,
+            isSeedUrl: result.isSeedUrl || false,
+            success: result.success,
+            adobeTargetDetected: result.adobeTargetDetected || false,
+            experimentCount: result.experimentCount || 0,
+            version: result.version,
+            activityNames: Array.isArray(result.activityNames) ? result.activityNames.slice(0, 20) : [],
+            activityIds: Array.isArray(result.activityIds) ? result.activityIds.slice(0, 20) : [],
+            error: result.error,
+            scrapedAt: result.scrapedAt || new Date()
+        };
+    }
+
+    sanitizeWorkflowResultForPersistence(result = {}) {
+        const sanitized = {
+            originalUrl: result.originalUrl,
+            status: result.status || 'pending',
+            error: result.error,
+            completedAt: result.completedAt,
+            summary: this.sanitizeSummaryForPersistence(result.summary || {})
+        };
+
+        if (result.prioritizationResult) {
+            sanitized.prioritizationResult = {
+                originalUrl: result.prioritizationResult.originalUrl,
+                totalUrlsCollected: result.prioritizationResult.totalUrlsCollected || 0,
+                totalPrioritized: result.prioritizationResult.totalPrioritized || 0,
+                prioritizationSuccess: result.prioritizationResult.prioritizationSuccess || false,
+                prioritizationError: result.prioritizationResult.prioritizationError,
+                prioritizedAt: result.prioritizationResult.prioritizedAt,
+                metadata: result.prioritizationResult.metadata || null,
+                prioritizedUrls: Array.isArray(result.prioritizationResult.prioritizedUrls)
+                    ? result.prioritizationResult.prioritizedUrls.slice(0, 25).map(url => String(url))
+                    : []
+            };
+        }
+
+        if (result.categorizationResult) {
+            sanitized.categorizationResult = {
+                originalUrl: result.categorizationResult.originalUrl,
+                categorizationSuccess: result.categorizationResult.categorizationSuccess || false,
+                totalCategories: result.categorizationResult.totalCategories || 0,
+                detectedDomainType: result.categorizationResult.detectedDomainType,
+                categorizationError: result.categorizationResult.categorizationError,
+                categorizedAt: result.categorizationResult.categorizedAt,
+                metadata: result.categorizationResult.metadata || null,
+                prioritizedTop25: Array.isArray(result.categorizationResult.prioritizedTop25)
+                    ? result.categorizationResult.prioritizedTop25.slice(0, 10).map(item => ({
+                        url: item.url,
+                        category: item.category,
+                        priority: item.priority,
+                        confidence: item.confidence
+                    }))
+                    : []
+            };
+        }
+
+        if (Array.isArray(result.topUrlsScrapingResults)) {
+            sanitized.topUrlsScrapingResults = result.topUrlsScrapingResults.map(item => this.sanitizeTopUrlResultForPersistence(item));
+        }
+
+        return sanitized;
+    }
+
     /**
      * Helper method to save a batch document for Adobe Target 1.0 scraping
      * Stores detailed workflow results for a batch of URLs
      */
     async saveScrapingBatchDocument({ datasetId, datasetName, batchNumber, totalBatches, totalUrls, urlWorkflowResults, batchStats }) {
         try {
-            const successfulCount = urlWorkflowResults.filter(r => r.status === 'completed').length;
-            const failedCount = urlWorkflowResults.filter(r => r.status === 'failed').length;
+            const successfulCount = (urlWorkflowResults || []).filter(r => r.status === 'completed').length;
+            const failedCount = (urlWorkflowResults || []).filter(r => r.status === 'failed').length;
+
+            let compactedResults = (urlWorkflowResults || []).map(result => this.sanitizeWorkflowResultForPersistence(result));
+            const payload = {
+                datasetId,
+                datasetName,
+                batchNumber,
+                totalBatches,
+                totalUrls,
+                successfulCount,
+                failedCount,
+                batchStats,
+                urlWorkflowResults: compactedResults,
+                processedAt: new Date()
+            };
+
+            const payloadSizeBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+            if (payloadSizeBytes > 12 * 1024 * 1024) {
+                console.warn(`⚠️ Batch ${batchNumber} payload is ${Math.round(payloadSizeBytes / 1024 / 1024)}MB; storing a compact summary-only version`);
+                compactedResults = compactedResults.map(result => ({
+                    originalUrl: result.originalUrl,
+                    status: result.status,
+                    error: result.error,
+                    completedAt: result.completedAt,
+                    summary: result.summary
+                }));
+            }
 
             await AdobeTarget1_0Document.findOneAndUpdate(
                 { datasetId, batchNumber },
                 {
-                    datasetId,
-                    datasetName,
-                    batchNumber,
-                    totalBatches,
-                    totalUrls,
-                    successfulCount,
-                    failedCount,
-                    batchStats,
-                    urlWorkflowResults,
-                    processedAt: new Date()
+                    ...payload,
+                    urlWorkflowResults: compactedResults
                 },
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             );
@@ -1384,12 +1461,17 @@ class AdobeTarget1_0Service {
             // Check if URL already exists to track reprocessing
             const existingResult = await AdobeTarget1_0UrlResult.findOne({ url });
 
+            const sanitizedSummary = this.sanitizeSummaryForPersistence(summary || {});
+            const sanitizedTop25UrlsResults = Array.isArray(top25UrlsResults)
+                ? top25UrlsResults.map(result => this.sanitizeTopUrlResultForPersistence(result))
+                : [];
+
             let updateData = {
                 url,
                 datasetId,
                 datasetName,
                 status,
-                summary,
+                summary: sanitizedSummary,
                 error,
                 quickStats,
                 lastProcessedAt: new Date(),
@@ -1397,22 +1479,8 @@ class AdobeTarget1_0Service {
             };
 
             // Add top 25 URLs results if provided
-            if (top25UrlsResults && top25UrlsResults.length > 0) {
-                updateData.top25UrlsResults = top25UrlsResults.map(result => ({
-                    url: result.url,
-                    category: result.category,
-                    priority: result.priority,
-                    isSeedUrl: result.isSeedUrl || false,
-                    success: result.success,
-                    adobeTargetDetected: result.adobeTargetDetected || false,
-                    experimentCount: result.experimentCount || 0,
-                    experiments: result.experiments || [],
-                    activityIds: result.activityIds || [],
-                    activityNames: result.activityNames || [],
-                    version: result.version,
-                    error: result.error,
-                    scrapedAt: result.scrapedAt || new Date()
-                }));
+            if (sanitizedTop25UrlsResults.length > 0) {
+                updateData.top25UrlsResults = sanitizedTop25UrlsResults;
             }
 
             if (existingResult) {
@@ -1423,15 +1491,15 @@ class AdobeTarget1_0Service {
                 updateData.previousResult = {
                     experimentCount: existingResult.quickStats.experimentCount,
                     uniqueActivityCount: existingResult.summary.uniqueActivityCount,
-                    uniqueActivityIds: existingResult.summary.uniqueActivityIds || [],
-                    uniqueExperimentNames: existingResult.summary.uniqueExperimentNames || [],
-                    allActivityIds: existingResult.summary.allActivityIds || [],
+                    uniqueActivityIds: (existingResult.summary.uniqueActivityIds || []).slice(0, 20),
+                    uniqueExperimentNames: (existingResult.summary.uniqueExperimentNames || []).slice(0, 20),
+                    allActivityIds: (existingResult.summary.allActivityIds || []).slice(0, 20),
                     lastChecked: existingResult.lastProcessedAt
                 };
 
                 // Store previous top 25 URLs results for comparison
                 if (existingResult.top25UrlsResults && existingResult.top25UrlsResults.length > 0) {
-                    updateData.previousTop25UrlsResults = existingResult.top25UrlsResults;
+                    updateData.previousTop25UrlsResults = existingResult.top25UrlsResults.slice(0, 10).map(result => this.sanitizeTopUrlResultForPersistence(result));
                 }
 
                 // Increment process count
