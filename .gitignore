@@ -2,6 +2,7 @@
 .claude/
 .idea/
 .vscode/
+graphify-out
 *.swp
 *.swo
 *~
@@ -34,7 +35,7 @@ dist/
 build/
 .next/
 out/
-
+graphify-out/
 # Temporary files
 *.tmp
 *.temp

@@ -125,7 +125,13 @@ class ConvertScraperService {
     }
 
     console.log(`[Convert] Launching browser with executable: ${browserOptions.executablePath}`);
-    return await puppeteer.launch(browserOptions);
+    try {
+      return await puppeteer.launch(browserOptions);
+    } catch (error) {
+      console.warn(`[Convert] Browser launch failed, retrying with --single-process. Reason: ${error.message.split('\n')[0]}`);
+      browserOptions.args = [...browserOptions.args, '--single-process'];
+      return await puppeteer.launch(browserOptions);
+    }
   }
 
   async createPage(browser) {

@@ -253,6 +253,7 @@ class OptimizelyScraperService {
 
                     // Retry-specific args
                     ...(attempt > 1 ? [
+                        '--single-process',
                         '--disable-features=TranslateUI',
                         '--disable-ipc-flooding-protection',
                         '--disable-features=Translate'

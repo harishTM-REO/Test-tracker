@@ -54,6 +54,79 @@ app.use('/worker/api/kameleoon', kameleoonRoutes);
 app.use('/worker/api/convert', convertRoutes);
 app.use('/api/convert', convertRoutes); // Added for backward compatibility with main backend URL
 
+// Diagnostic endpoint: reports container memory + attempts a raw Chromium spawn
+app.get('/worker/debug/browser', async (req, res) => {
+  const fs = require('fs');
+  const os = require('os');
+  const { execFile } = require('child_process');
+
+  const readIfExists = (p) => {
+    try { return fs.readFileSync(p, 'utf8').trim(); } catch (_) { return null; }
+  };
+
+  // Memory: cgroup v2, cgroup v1, and OS-level
+  const memory = {
+    cgroupV2Limit: readIfExists('/sys/fs/cgroup/memory.max'),
+    cgroupV2Current: readIfExists('/sys/fs/cgroup/memory.current'),
+    cgroupV1Limit: readIfExists('/sys/fs/cgroup/memory/memory.limit_in_bytes'),
+    cgroupV1Current: readIfExists('/sys/fs/cgroup/memory/memory.usage_in_bytes'),
+    osTotalMB: Math.round(os.totalmem() / 1024 / 1024),
+    osFreeMB: Math.round(os.freemem() / 1024 / 1024),
+    processRssMB: Math.round(process.memoryUsage().rss / 1024 / 1024)
+  };
+
+  // Count already-running chrome/chromium processes via /proc
+  let chromeProcesses = [];
+  try {
+    for (const pid of fs.readdirSync('/proc').filter(d => /^\d+$/.test(d))) {
+      const comm = readIfExists(`/proc/${pid}/comm`);
+      if (comm && /chrom/i.test(comm)) chromeProcesses.push(`${pid}:${comm}`);
+    }
+  } catch (_) { chromeProcesses = ['unavailable (not linux)']; }
+
+  // Locate the browser binary
+  const candidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome'
+  ].filter(Boolean);
+  const executable = candidates.find(p => { try { return fs.existsSync(p); } catch (_) { return false; } });
+
+  const runChromium = (args, timeoutMs) => new Promise((resolve) => {
+    execFile(executable, args, { timeout: timeoutMs }, (error, stdout, stderr) => {
+      resolve({
+        args: args.join(' '),
+        exitCode: error ? error.code : 0,
+        signal: error ? error.signal : null,
+        killedByTimeout: !!(error && error.killed && !error.signal),
+        stdoutFirstLine: (stdout || '').split('\n')[0],
+        stderrTail: (stderr || '').split('\n').filter(Boolean).slice(-10)
+      });
+    });
+  });
+
+  const result = {
+    node: process.version,
+    envExecutablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+    executableFound: executable || 'NONE OF: ' + candidates.join(', '),
+    memory,
+    chromeProcessesRunning: chromeProcesses.length,
+    chromeProcesses: chromeProcesses.slice(0, 20)
+  };
+
+  if (executable) {
+    result.versionCheck = await runChromium(['--version'], 10000);
+    result.launchTest = await runChromium([
+      '--headless=new', '--no-sandbox', '--disable-setuid-sandbox',
+      '--disable-gpu', '--disable-dev-shm-usage', '--single-process',
+      '--no-zygote', '--dump-dom', 'about:blank'
+    ], 30000);
+  }
+
+  res.json(result);
+});
+
 // Worker health check
 app.get('/worker/health', (req, res) => {
   res.json({
