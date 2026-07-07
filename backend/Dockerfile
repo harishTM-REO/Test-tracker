@@ -23,8 +23,6 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Set Environment Variables
-# Puppeteer configuration (fallback)
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 # Playwright configuration
@@ -42,6 +40,13 @@ RUN npm ci --omit=dev --ignore-scripts
 
 # 5. Install Playwright browsers (Chromium only to save space)
 RUN npx playwright install --with-deps chromium
+
+# 5b. Install a PINNED Chrome build for Puppeteer.
+# The apt "chromium" package is rolling: a rebuild pulled Chromium 150, which
+# SIGTRAPs at startup on Railway's runtime. Chrome 115.0.5790.170 matches
+# puppeteer-core 20.9.0 and is a fixed version that cannot change between builds.
+RUN npx @puppeteer/browsers install chrome@115.0.5790.170 --path /opt/chrome
+ENV PUPPETEER_EXECUTABLE_PATH=/opt/chrome/chrome/linux-115.0.5790.170/chrome-linux64/chrome
 
 # 6. Copy the rest of your code
 COPY . .
