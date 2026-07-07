@@ -35,6 +35,7 @@ try {
 
 const ConvertResult = require('../models/ConvertResult');
 const { isUrlReachable } = require('../utils/urlValidator');
+const { buildPuppeteerLaunchOptions } = require('../utils/helper');
 
 class ConvertScraperService {
 
@@ -97,30 +98,24 @@ class ConvertScraperService {
   }
 
   async launchBrowser(fallbackOptions = {}) {
-    const browserOptions = {
+    const browserOptions = await buildPuppeteerLaunchOptions({
       headless: 'new',
       ignoreHTTPSErrors: true,
       protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
       args: [
-        '--disable-accelerated-2d-canvas',
         '--no-first-run',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
         '--no-zygote',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
-        '--disable-blink-features=AutomationControlled',
         '--disable-web-security',
         '--allow-running-insecure-content',
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '--disable-features=VizServiceDisplay',
         '--force-device-scale-factor=1',
         '--disable-extensions',
         '--disable-plugins'
       ],
       ...fallbackOptions
-    };
+    });
 
     if (!!process.env.AWS_LAMBDA_FUNCTION_NAME) {
       browserOptions.args = [...(chromium.args || []), ...browserOptions.args];
@@ -129,6 +124,7 @@ class ConvertScraperService {
       }
     }
 
+    console.log(`[Convert] Launching browser with executable: ${browserOptions.executablePath}`);
     return await puppeteer.launch(browserOptions);
   }
 
