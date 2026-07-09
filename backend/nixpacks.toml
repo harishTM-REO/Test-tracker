@@ -39,5 +39,6 @@ apt_pkgs = [
     "fonts-liberation",
     "lsb-release",
     "xdg-utils",
-    "wget"
+    "wget",
+    "procps"                   # provides pkill, used by browser pool deadlock recovery
 ]

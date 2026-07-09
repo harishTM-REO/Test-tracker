@@ -27,6 +27,7 @@ const IndexValidationService = require("./services/indexValidationService");
 
 const optimizelyRoutes = require("./routes/optimizelyRoutes");
 const convertRoutes = require("./routes/convertRoutes");
+const wtoRoutes = require("./routes/wtoRoutes");
 const abTastyRoutes = require("./routes/abTastyRoutes");
 const adobeTargetRoutes = require("./routes/adobeRoutes");
 const adobeTarget1_0Routes = require("./routes/adobeTarget1_0Routes");
@@ -109,6 +110,9 @@ app.use("/api/optimizely", optimizelyRoutes);
 
 // Convert Experiences Routes
 app.use("/api/convert", convertRoutes);
+
+// Webtrends Optimize (WTO) Routes
+app.use("/api/wto", wtoRoutes);
 
 // AbTasty Routes[batch scrape, etc.]
 app.use("/api/abtasty", abTastyRoutes);

@@ -45,6 +45,7 @@ const dynamicYieldRoutes = require('./routes/dynamicYieldWorkerRoutes');
 const vwoRoutes = require('./routes/vwoWorkerRoutes');
 const kameleoonRoutes = require('./routes/kameleoonWorkerRoutes');
 const convertRoutes = require('./routes/convertWorkerRoutes');
+const wtoRoutes = require('./routes/wtoWorkerRoutes');
 
 app.use('/worker/api/optimizely', optimizelyRoutes);
 app.use('/worker/api/abtasty', abTastyRoutes);
@@ -53,6 +54,8 @@ app.use('/worker/api/vwo', vwoRoutes);
 app.use('/worker/api/kameleoon', kameleoonRoutes);
 app.use('/worker/api/convert', convertRoutes);
 app.use('/api/convert', convertRoutes); // Added for backward compatibility with main backend URL
+app.use('/worker/api/wto', wtoRoutes);
+app.use('/api/wto', wtoRoutes); // Added for backward compatibility with main backend URL
 
 // Diagnostic endpoint: reports container memory + attempts a raw Chromium spawn
 app.get('/worker/debug/browser', async (req, res) => {
@@ -149,6 +152,8 @@ app.listen(port, async () => {
   console.log(`  GET /worker/api/kameleoon/scrape?url=<URL>`);
   console.log(`  GET /worker/api/convert/scrape?url=<URL>`);
   console.log(`  GET /api/convert/scrape?url=<URL>`);
+  console.log(`  GET /worker/api/wto/scrape?url=<URL>`);
+  console.log(`  GET /api/wto/scrape?url=<URL>`);
   console.log(`  GET /worker/health`);
 
   // Initialize database connection

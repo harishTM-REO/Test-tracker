@@ -116,7 +116,7 @@ const extractDomain = (url) => {
 // 3. Robust Sync Check (Uses standard fs)
 const pathExistsSync = (targetPath) => {
     try {
-        return fsPromises.existsSync(targetPath);
+        return fs.existsSync(targetPath);
     } catch (_) {
         return false;
     }
