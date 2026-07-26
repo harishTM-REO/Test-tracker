@@ -1,41 +1,8 @@
 // services/convertScraperService.js - Mirrors OptimizelyScraperService structure
 
-const chromium = require('@sparticuz/chromium');
-let puppeteer;
-try {
-  puppeteer = require('puppeteer-extra');
-  const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-  const stealth = StealthPlugin();
-  [
-    'chrome.app',
-    'chrome.csi',
-    'chrome.loadTimes',
-    'chrome.runtime',
-    'iframe.contentWindow',
-    'media.codecs',
-    'navigator.hardwareConcurrency',
-    'navigator.languages',
-    'navigator.permissions',
-    'navigator.plugins',
-    'sourceurl',
-    'user-agent-override'
-  ].forEach(evasion => stealth.enabledEvasions.delete(evasion));
-  stealth.enabledEvasions.delete('iframe.contentWindow');
-  stealth.enabledEvasions.delete('media.codecs');
-
-  puppeteer.use(stealth);
-} catch (e) {
-  console.warn('Puppeteer Extra/Stealth failed, falling back to core:', e.message);
-  try {
-    puppeteer = require('puppeteer');
-  } catch (e2) {
-    puppeteer = require('puppeteer-core');
-  }
-}
-
 const ConvertResult = require('../models/ConvertResult');
 const { isUrlReachable } = require('../utils/urlValidator');
-const { buildPuppeteerLaunchOptions } = require('../utils/helper');
+const browserPool = require('./browserService'); // Shared pooled browsers (prevents spawning a fresh Chromium per request)
 
 class ConvertScraperService {
 
@@ -55,82 +22,42 @@ class ConvertScraperService {
 
   async scrapeConvertExperimentsInternal(url, res = null) {
     const startTime = Date.now();
-    let browser = null;
-    let page = null;
+
+    console.log(`Starting Convert scrape for: ${url}`);
+    let normalizedUrl = url;
+    if (!normalizedUrl.startsWith('http')) {
+      normalizedUrl = 'https://' + normalizedUrl;
+    }
+
+    let website = {
+      _id: 'mock-id',
+      name: new URL(normalizedUrl).hostname,
+      domain: new URL(normalizedUrl).hostname
+    };
 
     try {
-      console.log(`Starting Convert scrape for: ${url}`);
-      let normalizedUrl = url;
-      if (!normalizedUrl.startsWith('http')) {
-        normalizedUrl = 'https://' + normalizedUrl;
-      }
+      console.log(`🚀 Proceeding with browser scrape (via shared browser pool)...`);
 
-      console.log(`🚀 Proceeding with browser scrape...`);
+      const experimentData = await browserPool.withBrowser(async (browser) => {
+        const page = await this.createPage(browser);
+        try {
+          await this.navigateToPage(page, normalizedUrl);
+          await new Promise(resolve => setTimeout(resolve, 3000));
 
-      let website = {
-        _id: 'mock-id',
-        name: new URL(normalizedUrl).hostname,
-        domain: new URL(normalizedUrl).hostname
-      };
-
-      browser = await this.launchBrowser();
-      page = await this.createPage(browser);
-
-      await this.navigateToPage(page, normalizedUrl);
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      const cookieType = await this.handleCookieConsent(page);
-      const experimentData = await this.extractConvertData(page);
-
-      experimentData.cookieType = cookieType;
-
-      const duration = Date.now() - startTime;
+          const cookieType = await this.handleCookieConsent(page);
+          const data = await this.extractConvertData(page);
+          data.cookieType = cookieType;
+          return data;
+        } finally {
+          await page.close().catch(e => console.error('Error closing page:', e.message));
+        }
+      });
 
       return this.formatResponse(url, website, experimentData, null, startTime);
 
     } catch (error) {
       console.error('Error in scrapeConvertExperimentsInternal:', error);
       throw error;
-    } finally {
-      if (page) await page.close().catch(e => console.error('Error closing page:', e.message));
-      if (browser) await browser.close().catch(e => console.error('Error closing browser:', e.message));
-    }
-  }
-
-  async launchBrowser(fallbackOptions = {}) {
-    const browserOptions = await buildPuppeteerLaunchOptions({
-      headless: 'new',
-      ignoreHTTPSErrors: true,
-      protocolTimeout: parseInt(process.env.PROTOCOL_TIMEOUT) || 60000,
-      args: [
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-web-security',
-        '--allow-running-insecure-content',
-        '--force-device-scale-factor=1',
-        '--disable-extensions',
-        '--disable-plugins'
-      ],
-      ...fallbackOptions
-    });
-
-    if (!!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-      browserOptions.args = [...(chromium.args || []), ...browserOptions.args];
-      if (chromium.headless !== undefined) {
-        browserOptions.headless = chromium.headless;
-      }
-    }
-
-    console.log(`[Convert] Launching browser with executable: ${browserOptions.executablePath}`);
-    try {
-      return await puppeteer.launch(browserOptions);
-    } catch (error) {
-      console.warn(`[Convert] Browser launch failed, retrying with --single-process. Reason: ${error.message.split('\n')[0]}`);
-      browserOptions.args = [...browserOptions.args, '--single-process'];
-      return await puppeteer.launch(browserOptions);
     }
   }
 
