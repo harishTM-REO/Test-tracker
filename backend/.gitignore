@@ -1,6 +1,8 @@
 node_modules/
 package-lock.json
 .env
+checkpoints/
+WTO-detected-results.xlsx
 ```
 
 **Changes:**

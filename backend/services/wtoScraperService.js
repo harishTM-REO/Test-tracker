@@ -34,6 +34,7 @@ try {
 }
 
 const { buildPuppeteerLaunchOptions } = require('../utils/helper');
+const loadWTOAndGetExperimentData = require('../scripts/scrapingNew');
 
 class WtoScraperService {
 
@@ -176,74 +177,18 @@ class WtoScraperService {
 
   async extractWtoData(page) {
     try {
-      await new Promise(resolve => setTimeout(resolve, 2000)); // wait for dynamic scripts
+      const timeoutMs = parseInt(process.env.WTO_DEVTOOLS_TIMEOUT) || 10000;
+      const data = await page.evaluate(loadWTOAndGetExperimentData, timeoutMs);
 
-      return await page.evaluate(() => {
-        const typeLabel = { "1": "A/B Test", "5": "Targeting" };
+      if (!data.WTO) {
+        return { hasWto: false, experiments: [], projectId: null };
+      }
 
-        // WTO persists every experiment it has served as `_wt.project-<projectId>-<alias>` in localStorage
-        const allLocalKeys = Object.keys(localStorage).filter(k => k.startsWith('_wt.project-'));
-        const hasWtObject = typeof window.WT !== 'undefined' && window.WT !== null;
-
-        if (!hasWtObject && allLocalKeys.length === 0) {
-          return {
-            hasWto: false,
-            experiments: [],
-            projectId: null
-          };
-        }
-
-        try {
-          const runningOnPage = (hasWtObject && window.WT.paramsRunsList) || {};
-
-          let projectId = null;
-          const experiments = allLocalKeys.map(k => {
-            // key format: _wt.project-<projectId>-<alias>
-            const match = k.match(/^_wt\.project-(\d+)-(.+)$/);
-            const alias = match ? match[2] : k.replace('_wt.project-', '');
-            if (match && !projectId) projectId = match[1];
-
-            let data = {};
-            try {
-              data = JSON.parse(localStorage.getItem(k)) || {};
-            } catch (e) { /* unparsable entry, keep defaults */ }
-
-            const isActive = !!runningOnPage[alias];
-            return {
-              id: alias,
-              name: alias,
-              type: typeLabel[data.typeid] || (data.typeid ? `unknown (typeid ${data.typeid})` : 'unknown'),
-              typeid: data.typeid || null,
-              runningOnThisPage: isActive ? 'YES' : 'no',
-              isActive,
-              raw: data
-            };
-          });
-
-          // Experiments in paramsRunsList that never made it into localStorage
-          Object.keys(runningOnPage).forEach(alias => {
-            if (!experiments.some(e => e.id === alias)) {
-              experiments.push({
-                id: alias,
-                name: alias,
-                type: 'unknown',
-                typeid: null,
-                runningOnThisPage: 'YES',
-                isActive: true,
-                raw: runningOnPage[alias] || null
-              });
-            }
-          });
-
-          return {
-            hasWto: true,
-            experiments,
-            projectId
-          };
-        } catch (e) {
-          return { hasWto: true, error: e.message, experiments: [], projectId: null };
-        }
-      });
+      return {
+        hasWto: true,
+        experiments: data.experiments,
+        projectId: data.experiments[0]?.projectId || null
+      };
     } catch (error) {
       console.error('Error extracting WTO data:', error);
       return { hasWto: false, error: error.message, experiments: [] };
