@@ -80,7 +80,13 @@ async function loadWTOAndGetExperimentData(timeoutMs) {
     if (typeof window.WTOdevtools === 'undefined' || !window.WTOdevtools.data) {
       return result;
     }
-    result.WTO = true;
+    // `data` becomes truthy as soon as our force-injected devtools script
+    // finishes loading, regardless of whether this page has any real WTO
+    // presence — most of `config` is static SDK metadata (version, API
+    // routes, runstate map) that's identical on every site too. The one
+    // field that actually reflects whether *this* domain is the account's
+    // own WTO-enabled site is `config.isDirectAccount`.
+    result.WTO = !!(window.WTOdevtools.config && window.WTOdevtools.config.isDirectAccount);
     var projects = window.WTOdevtools.data.projects || {};
 
     // One entry per test (WTO's unit of a running experiment), not per

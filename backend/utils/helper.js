@@ -2,6 +2,9 @@ const fs = require('fs'); // Standard fs for Sync operations
 const fsPromises = require('fs').promises;
 const chromium = require('@sparticuz/chromium');
 const path = require('path');
+const { exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 let puppeteer;
 try {
     // Try to load the stealth version first
@@ -682,6 +685,28 @@ const closeBrowser = async(browser) => {
     try { if (browser) await browser.close(); } catch (error) { console.error('Error closing browser:', error); }
 }
 
+/**
+ * Logs live Chrome process count + available system memory, tagged with a
+ * label (e.g. "before scrape" / "after scrape"). Useful for spotting zombie
+ * Chrome processes piling up across requests in a long-running container.
+ * No-ops on Windows (dev) where `ps`/`/proc/meminfo` don't exist.
+ * @param {string} label
+ */
+const logResourceUsage = async (label) => {
+    if (process.platform === 'win32') return;
+    try {
+        const [psResult, memResult] = await Promise.all([
+            execAsync('ps aux | grep -i chrom | grep -v grep | wc -l'),
+            execAsync('cat /proc/meminfo | grep MemAvailable')
+        ]);
+        const chromeProcessCount = psResult.stdout.trim();
+        const memAvailable = memResult.stdout.trim();
+        console.log(`[ResourceUsage] ${label} — chrome processes: ${chromeProcessCount}, ${memAvailable}`);
+    } catch (error) {
+        console.warn(`[ResourceUsage] ${label} — failed to capture: ${error.message}`);
+    }
+};
+
 const normalizeUrl = (url) => {
     try {
         if (!url || typeof url !== 'string') return null;
@@ -830,6 +855,7 @@ module.exports = {
     handleCookieConsent,
     closePage,
     closeBrowser,
+    logResourceUsage,
     resolvePuppeteerExecutablePath,
     buildPuppeteerLaunchOptions,
     // New sanitization utilities

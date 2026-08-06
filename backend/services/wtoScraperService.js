@@ -33,7 +33,7 @@ try {
   }
 }
 
-const { buildPuppeteerLaunchOptions } = require('../utils/helper');
+const { buildPuppeteerLaunchOptions, logResourceUsage } = require('../utils/helper');
 const loadWTOAndGetExperimentData = require('../scripts/scrapingNew');
 
 class WtoScraperService {
@@ -59,6 +59,7 @@ class WtoScraperService {
 
     try {
       console.log(`Starting WTO scrape for: ${url}`);
+      await logResourceUsage(`before scrape (${url})`);
       let normalizedUrl = url;
       if (!normalizedUrl.startsWith('http')) {
         normalizedUrl = 'https://' + normalizedUrl;
@@ -91,6 +92,7 @@ class WtoScraperService {
     } finally {
       if (page) await page.close().catch(e => console.error('Error closing page:', e.message));
       if (browser) await browser.close().catch(e => console.error('Error closing browser:', e.message));
+      await logResourceUsage(`after scrape (${url})`);
     }
   }
 

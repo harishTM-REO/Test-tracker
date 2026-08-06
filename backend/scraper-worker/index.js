@@ -156,12 +156,18 @@ app.listen(port, async () => {
   console.log(`  GET /api/wto/scrape?url=<URL>`);
   console.log(`  GET /worker/health`);
 
-  // Initialize database connection
-  try {
-    await connectDB();
-    console.log('✅ MongoDB connected for worker');
-  } catch (error) {
-    console.error('❌ Failed to connect to MongoDB:', error.message);
+  // Initialize database connection (not required by every worker route,
+  // e.g. WTO scraping doesn't touch the DB — skip cleanly if unconfigured
+  // instead of letting connectDB()'s process.exit(1) take the worker down)
+  if (process.env.MONGODB_URI) {
+    try {
+      await connectDB();
+      console.log('✅ MongoDB connected for worker');
+    } catch (error) {
+      console.error('❌ Failed to connect to MongoDB:', error.message);
+    }
+  } else {
+    console.log('⚠️  MONGODB_URI not set — skipping DB connection for worker');
   }
 
   // Initialize browser pool for scraping

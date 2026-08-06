@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     libglu1-mesa \
     procps \
+    tini \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
@@ -45,4 +46,9 @@ ENV PUPPETEER_EXECUTABLE_PATH=/opt/chrome/chrome/linux-115.0.5790.170/chrome-lin
 
 COPY . .
 
+# tini as PID 1 reaps zombie/orphaned Chrome subprocesses (zygote, renderer,
+# GPU process) that get reparented when a browser crashes mid-scrape — without
+# this, they accumulate over a long run and eventually exhaust the container's
+# process table, surfacing as "posix_spawn: Resource temporarily unavailable".
+ENTRYPOINT ["tini", "--"]
 CMD ["npm", "start"]
