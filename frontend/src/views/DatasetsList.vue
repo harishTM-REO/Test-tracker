@@ -139,6 +139,9 @@ export default {
       error: null,
       refreshInterval: null,
       apiBaseUrl: import.meta.env.VITE_APP_TITLE_BACKEND_URL,
+      // Tracks the last known scrapingStatus per dataset id so we can detect
+      // an in_progress -> completed transition and fire a browser notification
+      scrapingStatusById: {},
     }
   },
   
@@ -152,6 +155,7 @@ export default {
   },
   
   created() {
+    this.requestNotificationPermission()
     this.fetchDatasets()
     this.startAutoRefresh()
   },
@@ -168,8 +172,9 @@ export default {
       try {
         const response = await fetch(`${this.apiBaseUrl}/api/datasets?limit=10`)
         const data = await response.json()
-        
+
         if (data.success) {
+          this.checkForCompletedScrapingJobs(data.data)
           this.datasets = data.data
           // Check if we need to start/stop auto-refresh based on current job status
           this.startAutoRefresh()
@@ -352,7 +357,7 @@ export default {
               this.stopAutoRefresh()
             }
           }, 1000) // Small delay to let fetchDatasets complete
-        }, 60000) // 10 seconds
+        }, 60000) // 60 seconds
       } else if (!hasActiveScrapingJobs && this.refreshInterval) {
         // Stop refreshing if no active jobs
         console.log('⏹️ No active jobs found, stopping auto-refresh')
@@ -364,6 +369,63 @@ export default {
       if (this.refreshInterval) {
         clearInterval(this.refreshInterval)
         this.refreshInterval = null
+      }
+    },
+
+    requestNotificationPermission() {
+      if (typeof Notification === 'undefined') {
+        return
+      }
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(err => {
+          console.warn('Notification permission request failed:', err)
+        })
+      }
+    },
+
+    // Compares each dataset's freshly-fetched scrapingStatus against the last
+    // known value and fires a browser notification for any in_progress -> completed
+    // transition (i.e. a dataset's scraping just finished).
+    checkForCompletedScrapingJobs(newDatasets) {
+      if (!Array.isArray(newDatasets)) {
+        return
+      }
+
+      newDatasets.forEach(dataset => {
+        const previousStatus = this.scrapingStatusById[dataset._id]
+
+        if (previousStatus === 'in_progress' && dataset.scrapingStatus === 'completed') {
+          this.notifyScrapingCompleted(dataset)
+        }
+
+        this.scrapingStatusById[dataset._id] = dataset.scrapingStatus
+      })
+    },
+
+    notifyScrapingCompleted(dataset) {
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+        return
+      }
+
+      try {
+        const stats = dataset.scrapingStats || {}
+        const totalUrls = stats.totalUrls || dataset.companies?.length || 0
+        const body = stats.successfulScans !== undefined
+          ? `"${dataset.name}" finished scraping — ${stats.successfulScans}/${totalUrls} sites scanned.`
+          : `"${dataset.name}" finished scraping.`
+
+        const notification = new Notification('Dataset scraping completed', {
+          body,
+          tag: `dataset-scraping-${dataset._id}`
+        })
+
+        notification.onclick = () => {
+          window.focus()
+          this.viewDataset(dataset._id)
+          notification.close()
+        }
+      } catch (err) {
+        console.warn('Failed to show scraping completion notification:', err)
       }
     }
   }
