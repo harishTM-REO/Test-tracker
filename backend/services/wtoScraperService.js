@@ -92,13 +92,17 @@ class WtoScraperService {
       browser = await this.launchBrowser();
       page = await this.createPage(browser);
 
-      await this.navigateToPage(page, normalizedUrl);
+      const navigationResponse = await this.navigateToPage(page, normalizedUrl);
       await new Promise(resolve => setTimeout(resolve, 3000));
 
+      const blockInfo = await this.detectBlockPage(page, navigationResponse);
       const cookieType = await this.handleCookieConsent(page);
       const experimentData = await this.extractWtoData(page, devtoolsTimeout);
 
       experimentData.cookieType = cookieType;
+      experimentData.blocked = blockInfo.blocked;
+      experimentData.blockedBy = blockInfo.blockedBy;
+      experimentData.httpStatus = blockInfo.httpStatus;
 
       return this.formatResponse(url, website, experimentData, null, startTime);
 
@@ -168,10 +172,50 @@ class WtoScraperService {
   }
 
   async navigateToPage(page, url) {
-    await page.goto(url, {
+    return page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: 30000
     });
+  }
+
+  /**
+   * Sites fronted by a WAF/bot-mitigation vendor (Akamai, Cloudflare, etc.)
+   * can serve a challenge/"access denied" page instead of the real site —
+   * to a browser this looks just like a normal 200/403 page load, so
+   * without this check a block gets silently reported as "no WTO found"
+   * indistinguishable from a genuine non-WTO site.
+   */
+  async detectBlockPage(page, navigationResponse) {
+    const httpStatus = navigationResponse ? navigationResponse.status() : null;
+
+    let title = '';
+    let bodySnippet = '';
+    try {
+      ({ title, bodySnippet } = await page.evaluate(() => ({
+        title: document.title || '',
+        bodySnippet: (document.body?.innerText || '').slice(0, 500)
+      })));
+    } catch (_) {
+      // page may be mid-navigation/unavailable — fall back to status-only detection
+    }
+
+    const haystack = `${title} ${bodySnippet}`.toLowerCase();
+    const vendorSignatures = [
+      { vendor: 'cloudflare', markers: ['just a moment', 'checking your browser', 'attention required', 'performance and security by cloudflare'] },
+      { vendor: 'akamai', markers: ['edgesuite.net', 'access denied\nyou don\'t have permission', 'reference #'] },
+      { vendor: 'datadome', markers: ['datadome'] },
+      { vendor: 'perimeterx', markers: ['perimeterx', 'px-captcha'] },
+      { vendor: 'imperva', markers: ['incapsula', 'request unsuccessful'] }
+    ];
+
+    const matched = vendorSignatures.find(sig => sig.markers.some(marker => haystack.includes(marker)));
+    const isBlockedStatus = httpStatus === 403 || httpStatus === 429 || httpStatus === 503;
+
+    return {
+      blocked: isBlockedStatus || !!matched,
+      blockedBy: matched ? matched.vendor : (isBlockedStatus ? 'unknown' : null),
+      httpStatus
+    };
   }
 
   async handleCookieConsent(page) {
@@ -226,7 +270,10 @@ class WtoScraperService {
         experimentCount: experimentData.experiments?.length || 0,
         activeCount: experimentData.experiments?.filter(e => e.isActive).length || 0,
         cookieType: experimentData.cookieType || 'unknown',
-        error: experimentData.error || null
+        error: experimentData.error || null,
+        blocked: experimentData.blocked || false,
+        blockedBy: experimentData.blockedBy || null,
+        httpStatus: experimentData.httpStatus ?? null
       },
       duration: `${duration}ms`,
       timestamp: new Date().toISOString()

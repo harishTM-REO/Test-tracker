@@ -117,7 +117,9 @@ async function scrapeOne(baseUrl, url) {
     activeCount: wto.activeCount || 0,
     cookieType: wto.cookieType || 'unknown',
     experiments: wto.experiments || [],
-    duration: data?.duration || null
+    duration: data?.duration || null,
+    blocked: wto.blocked === true,
+    blockedBy: wto.blockedBy || null
   };
 }
 
@@ -213,7 +215,8 @@ async function main() {
       const result = await scrapeOne(args.baseUrl, url);
       if (!result.domain) result.domain = urlToDomain.get(url) || url;
       checkpoint.recordSuccess(url, result);
-      console.log(`${result.detected ? '✅ WTO' : '⬜️ no WTO'} — ${url}`);
+      const label = result.detected ? '✅ WTO' : (result.blocked ? `🚫 blocked (${result.blockedBy})` : '⬜️ no WTO');
+      console.log(`${label} — ${url}`);
     } catch (error) {
       const isTimeout = error.code === 'ECONNABORTED' || /timeout/i.test(error.message || '');
       checkpoint.recordFailure(url, error, isTimeout);

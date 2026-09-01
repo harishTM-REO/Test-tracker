@@ -59,6 +59,8 @@ router.get('/scrape', async (req, res) => {
         experimentsFound: result.wto.experimentCount,
         activeExperiments: result.wto.activeCount,
         cookieType: result.wto.cookieType,
+        blocked: result.wto.blocked,
+        blockedBy: result.wto.blockedBy,
         processingTime: result.duration
       }
     });
