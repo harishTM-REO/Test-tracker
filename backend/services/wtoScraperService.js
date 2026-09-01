@@ -39,10 +39,26 @@ const loadWTOAndGetExperimentData = require('../scripts/scrapingNew');
 class WtoScraperService {
 
   async scrapeWtoExperiments(url, res = null) {
-    const overallTimeout = parseInt(process.env.OVERALL_SCRAPE_TIMEOUT) || 30000;
+    // How long extractWtoData() is allowed to keep polling window.WTOdevtools.data
+    // while data.projects is still growing (see scrapingNew.js's waitForStableData —
+    // it already resolves early once the count holds steady for ~2s, so this value
+    // is only spent on sites with enough projects/experiments that they never go
+    // 2s without a new one showing up, e.g. halfords.com needs close to the full
+    // window). Sites with few experiments finish well under this.
+    const devtoolsTimeout = parseInt(process.env.WTO_DEVTOOLS_TIMEOUT) || 20000;
+
+    // Fixed overhead outside the devtools poll: browser launch + navigation +
+    // the 3s settle wait + cookie-consent handling + margin. Keep the overall
+    // race timeout comfortably above devtoolsTimeout so it never preempts a
+    // poll that's still legitimately waiting on growing data.
+    const fixedOverheadMs = 15000;
+    const overallTimeout = Math.max(
+      parseInt(process.env.OVERALL_SCRAPE_TIMEOUT) || 0,
+      devtoolsTimeout + fixedOverheadMs
+    );
 
     return Promise.race([
-      this.scrapeWtoExperimentsInternal(url, res),
+      this.scrapeWtoExperimentsInternal(url, res, devtoolsTimeout),
       new Promise((_, reject) =>
         setTimeout(
           () => reject(new Error(`WTO scraping timeout after ${overallTimeout / 1000} seconds`)),
@@ -52,7 +68,7 @@ class WtoScraperService {
     ]);
   }
 
-  async scrapeWtoExperimentsInternal(url, res = null) {
+  async scrapeWtoExperimentsInternal(url, res = null, devtoolsTimeout) {
     const startTime = Date.now();
     let browser = null;
     let page = null;
@@ -80,7 +96,7 @@ class WtoScraperService {
       await new Promise(resolve => setTimeout(resolve, 3000));
 
       const cookieType = await this.handleCookieConsent(page);
-      const experimentData = await this.extractWtoData(page);
+      const experimentData = await this.extractWtoData(page, devtoolsTimeout);
 
       experimentData.cookieType = cookieType;
 
@@ -177,9 +193,9 @@ class WtoScraperService {
     }
   }
 
-  async extractWtoData(page) {
+  async extractWtoData(page, devtoolsTimeout) {
     try {
-      const timeoutMs = parseInt(process.env.WTO_DEVTOOLS_TIMEOUT) || 10000;
+      const timeoutMs = devtoolsTimeout || parseInt(process.env.WTO_DEVTOOLS_TIMEOUT) || 20000;
       const data = await page.evaluate(loadWTOAndGetExperimentData, timeoutMs);
 
       if (!data.WTO) {
