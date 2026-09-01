@@ -213,6 +213,88 @@ class WtoScraperService {
     }
   }
 
+  /**
+   * TEMPORARY diagnostic helper — not wired into the normal scrape flow.
+   * Captures what this environment's browser actually receives when
+   * navigating to `url`, to distinguish "site blocks/geo-gates this
+   * environment" from "our detection logic is wrong". Remove once the
+   * halfords.com Railway-vs-local discrepancy is root-caused.
+   */
+  async debugPageContent(url) {
+    let browser = null;
+    let page = null;
+    try {
+      let normalizedUrl = url.startsWith('http') ? url : `https://${url}`;
+      browser = await this.launchBrowser();
+      page = await this.createPage(browser);
+
+      const response = await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const [title, finalUrl, headers, buttons, bodySnippet, vendorHints] = await Promise.all([
+        page.title(),
+        Promise.resolve(page.url()),
+        Promise.resolve(response ? response.headers() : {}),
+        page.evaluate(() =>
+          Array.from(document.querySelectorAll('button, a[role="button"], div[role="button"]'))
+            .slice(0, 40)
+            .map(el => ({
+              text: (el.textContent || '').trim().slice(0, 60),
+              visible: !!el.offsetParent
+            }))
+            .filter(b => b.text)
+        ),
+        page.evaluate(() => (document.body ? document.body.innerText.slice(0, 800) : '')),
+        page.evaluate(() => {
+          const html = document.documentElement.outerHTML;
+          return ['onetrust', 'cookiebot', 'trustarc', 'didomi', 'cloudflare', 'akamai', 'perimeterx', 'datadome', 'incapsula']
+            .filter(marker => html.toLowerCase().includes(marker));
+        })
+      ]);
+
+      const wtoInjection = await page.evaluate(async () => {
+        const scriptId = 'wto-devtools-script';
+        await new Promise((resolve) => {
+          const s = document.createElement('script');
+          s.id = scriptId;
+          s.src = 'https://c.webtrends-optimize.com/acs/accounts/d25dc2a4-010d-4fd1-a1ad-41e81138c16d/manager/wto-devtools_prod_min.js';
+          s.onload = resolve;
+          s.onerror = resolve;
+          document.body.appendChild(s);
+        });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return {
+          scriptTagPresent: !!document.getElementById(scriptId),
+          wtoDevtoolsExists: typeof window.WTOdevtools !== 'undefined',
+          isDirectAccount: !!(window.WTOdevtools && window.WTOdevtools.config && window.WTOdevtools.config.isDirectAccount),
+          projectCount: window.WTOdevtools && window.WTOdevtools.data && window.WTOdevtools.data.projects
+            ? Object.keys(window.WTOdevtools.data.projects).length
+            : null
+        };
+      });
+
+      return {
+        requestedUrl: normalizedUrl,
+        finalUrl,
+        httpStatus: response ? response.status() : null,
+        title,
+        responseHeaders: {
+          server: headers['server'] || null,
+          via: headers['via'] || null,
+          'cf-ray': headers['cf-ray'] || null,
+          'x-akamai-transformed': headers['x-akamai-transformed'] || null
+        },
+        vendorHintsInHtml: vendorHints,
+        consentButtonsFound: buttons,
+        bodyTextSnippet: bodySnippet,
+        wtoInjection
+      };
+    } finally {
+      if (page) await page.close().catch(() => {});
+      if (browser) await browser.close().catch(() => {});
+    }
+  }
+
   formatResponse(url, website, experimentData, savedData, startTime) {
     const duration = Date.now() - startTime;
     return {

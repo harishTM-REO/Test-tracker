@@ -76,4 +76,25 @@ router.get('/scrape', async (req, res) => {
   }
 });
 
+/**
+ * TEMPORARY diagnostic route — remove once the Railway-vs-local halfords.com
+ * discrepancy is root-caused. Reports what this environment's browser
+ * actually receives (HTTP status, title, consent banner buttons, vendor
+ * hints, WTO injection result) instead of the usual detected/experiments shape.
+ * @route   GET /worker/api/wto/debug?url=<URL>
+ */
+router.get('/debug', async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url || !isValidUrl(url)) {
+      return res.status(400).json({ success: false, message: 'Valid url parameter is required' });
+    }
+    const result = await WtoScraperService.debugPageContent(url);
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    console.error('[WTO][debug] Error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;
